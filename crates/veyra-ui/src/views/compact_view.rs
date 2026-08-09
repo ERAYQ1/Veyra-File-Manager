@@ -1,0 +1,33 @@
+use gtk4::gio;
+use gtk4::prelude::*;
+
+use crate::views::{build_grid_view, build_selection, default_sorter, item_at};
+
+const ICON_SIZE: i32 = 20;
+
+/// Small icons with the name beside them, flowing in dense columns for
+/// quick visual scanning of large directories.
+pub(crate) fn build_compact_view(
+    model: &gio::ListStore,
+    filter: &gtk4::CustomFilter,
+    on_open: impl Fn(veyra_filesystem::FileItem) + 'static,
+) -> gtk4::Widget {
+    let selection = build_selection(model, filter, Some(default_sorter()));
+    let selection_for_activate = selection.clone();
+
+    let grid_view = build_grid_view(&selection, ICON_SIZE, true, move |position| {
+        if let Some(item) = item_at(&selection_for_activate, position) {
+            on_open(item);
+        }
+    });
+    // Narrow horizontal item boxes (icon + name) pack into many columns,
+    // giving the dense "flowing columns" layout Compact View is meant for.
+    grid_view.set_min_columns(3);
+
+    let scrolled = gtk4::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .child(&grid_view)
+        .build();
+
+    scrolled.upcast()
+}

@@ -1,17 +1,27 @@
 //! Veyra GTK4 + Libadwaita user interface layer.
 //!
-//! Faz 1 provides the application shell: a single Libadwaita window. Views,
-//! sidebar, headerbar and navigation are added starting Faz 3.
+//! Faz 3 provides a usable file manager shell: sidebar (Places/Devices),
+//! header bar (navigation, breadcrumbs, search, view switcher), status bar,
+//! and three item views (Icon, Compact, Details) backed by an
+//! `AdwNavigationSplitView`. All filesystem I/O runs off the GTK main
+//! thread (`fs_async`), per Rule #14.
 
 #![forbid(unsafe_code)]
 
+mod breadcrumbs;
+mod fs_async;
+mod headerbar;
+mod sidebar;
+mod state;
+mod statusbar;
+mod views;
+mod window;
+
 use gtk4::glib;
 use libadwaita::prelude::*;
-use libadwaita::{Application, ApplicationWindow};
+use libadwaita::Application;
 
-const WINDOW_TITLE: &str = "Veyra - Modern Linux File Manager";
-const WINDOW_DEFAULT_WIDTH: i32 = 1024;
-const WINDOW_DEFAULT_HEIGHT: i32 = 680;
+use veyra_filesystem::VeyraPath;
 
 /// Builds and runs the Veyra GTK application under the given D-Bus application ID.
 ///
@@ -22,17 +32,9 @@ pub fn run(app_id: &str) -> glib::ExitCode {
 
     app.connect_activate(|app| {
         tracing::info!("activating primary window");
-        build_window(app).present();
+        let start_dir = VeyraPath::from_local(glib::home_dir());
+        window::build_window(app, start_dir).present();
     });
 
     app.run()
-}
-
-fn build_window(app: &Application) -> ApplicationWindow {
-    ApplicationWindow::builder()
-        .application(app)
-        .title(WINDOW_TITLE)
-        .default_width(WINDOW_DEFAULT_WIDTH)
-        .default_height(WINDOW_DEFAULT_HEIGHT)
-        .build()
 }

@@ -41,6 +41,7 @@
 | `libc` | Systems | Raw `geteuid(2)` syscall binding to enforce the no-root-by-default startup guard (`veyra-app` only). Std has no portable UID accessor. | MIT / Apache 2.0 |
 | `mime_guess` | Utilities | Extension-to-MIME fallback when GIO's `standard::content-type` lookup is unavailable or generic (`veyra-filesystem`). | MIT |
 | `tempfile` | Dev-only | Real, auto-cleaned temp directories for `veyra-filesystem` integration tests (permission/edge-case coverage, Rule #34/#35). Never compiled into shipped binaries (`dev-dependencies` only). | MIT / Apache 2.0 |
+| `async-channel` | Concurrency | Worker-thread → GTK-main-thread result delivery for async `read_dir` calls (`veyra-ui`). `glib::MainContext::channel` was removed upstream; this is the GNOME/gtk-rs ecosystem's documented replacement, paired with `glib::spawn_future_local` (Rule #14: never block the UI thread). | Apache 2.0 / MIT |
 
 ---
 
