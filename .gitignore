@@ -1,0 +1,27 @@
+# Rust Cargo build outputs
+/target/
+
+# Cargo lock file (keep if binary application, ignore if library - workspace root keeps lockfile in repo for reproducible builds)
+# Cargo.lock
+
+# Database temporary / local files
+*.sqlite-wal
+*.sqlite-shm
+*.db-journal
+
+# IDE & Editor specific
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Flatpak build directories
+.flatpak-builder/
+_build/
+build/
+
+# Temporary data / logs
+*.log
+/scratch/
