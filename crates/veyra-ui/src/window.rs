@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gtk4::gio;
@@ -10,12 +11,15 @@ use veyra_filesystem::{FileItem, OperationKind, OperationRequest, VeyraPath};
 
 use crate::operations::OperationEvent;
 use crate::state::{AppState, SharedState};
+use crate::tab_page::{active_tab, TabPage, TabRegistry, ViewSelections};
 use crate::views::ViewMode;
 use crate::widgets::progress_toast::ProgressToastHandles;
 use crate::{breadcrumbs, dialogs, fs_async, headerbar, operations, sidebar, statusbar, widgets};
 
-/// Widgets that `navigate_to` needs to refresh after every navigation.
-/// Cloning is cheap: every field is a GTK widget handle (internally
+/// Widgets shared across every tab: header bar navigation controls,
+/// breadcrumbs, address entry, status bar, and the view-mode toggle group.
+/// `update_chrome` refreshes all of it to reflect whichever tab is currently
+/// active. Cloning is cheap: every field is a GTK widget handle (internally
 /// refcounted), not owned state.
 #[derive(Clone)]
 struct Chrome {
@@ -27,51 +31,30 @@ struct Chrome {
     address_entry: gtk4::Entry,
     status_left: gtk4::Label,
     status_right: gtk4::Label,
+    view_switcher_buttons: Vec<(ViewMode, gtk4::ToggleButton)>,
 }
 
-/// A single Copy/Cut clipboard slot (Faz 5 operates on the current
-/// selection, not a multi-item marquee — see `AGENTS.md` scope note in the
-/// Faz 5 changelog entry). `cut` decides whether `win.paste` runs a Move or
-/// a Copy.
+/// A single Copy/Cut clipboard slot, shared across all tabs (Faz 5 operates
+/// on the current selection, not a multi-item marquee — see `AGENTS.md`
+/// scope note in the Faz 5 changelog entry). `cut` decides whether
+/// `win.paste` runs a Move or a Copy.
 #[derive(Clone)]
 struct ClipboardEntry {
     path: VeyraPath,
     cut: bool,
 }
 
-/// The three views' independent `GtkSingleSelection` chains, so keyboard
-/// operations (Copy/Cut/Trash/Delete) can find "the selected item" in
-/// whichever view is currently visible.
-#[derive(Clone)]
-struct ViewSelections {
-    icon: gtk4::SingleSelection,
-    compact: gtk4::SingleSelection,
-    details: gtk4::SingleSelection,
-}
-
-impl ViewSelections {
-    fn selected(&self, view_stack: &gtk4::Stack) -> Option<FileItem> {
-        let selection = match view_stack.visible_child_name().as_deref() {
-            Some(name) if name == ViewMode::Compact.stack_name() => &self.compact,
-            Some(name) if name == ViewMode::Details.stack_name() => &self.details,
-            _ => &self.icon,
-        };
-        crate::views::selected_item(selection)
-    }
-}
-
 pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw::ApplicationWindow {
-    let state = AppState::new(start_dir.clone());
+    let tab_view = adw::TabView::new();
+    let tab_bar = adw::TabBar::new();
+    tab_bar.set_view(Some(&tab_view));
 
-    let search_query = Rc::new(RefCell::new(String::new()));
-    let filter = build_search_filter(&state, search_query.clone());
+    let registry: TabRegistry = Rc::new(RefCell::new(HashMap::new()));
+    let clipboard: Rc<RefCell<Option<ClipboardEntry>>> = Rc::new(RefCell::new(None));
 
-    let view_stack = gtk4::Stack::new();
-
-    let header = headerbar::build(&view_stack, search_query, filter.clone());
+    let header = headerbar::build(&tab_view, registry.clone());
     let status_bar = statusbar::build();
     let progress = widgets::progress_toast::build();
-    let clipboard: Rc<RefCell<Option<ClipboardEntry>>> = Rc::new(RefCell::new(None));
 
     let chrome = Chrome {
         back_button: header.back_button.clone(),
@@ -82,34 +65,88 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         address_entry: header.address_entry.clone(),
         status_left: status_bar.left_label.clone(),
         status_right: status_bar.right_label.clone(),
+        view_switcher_buttons: header.view_switcher_buttons.clone(),
     };
 
+    let has_clipboard: Rc<dyn Fn() -> bool> = {
+        let clipboard = clipboard.clone();
+        Rc::new(move || clipboard.borrow().is_some())
+    };
+
+    // Vetoes closing the last remaining tab (Ctrl+W and the tab's own "x"
+    // both route through this signal) so the window always keeps at least
+    // one tab open; closing any other tab proceeds immediately.
+    tab_view.connect_close_page(move |view, page| {
+        let confirm = view.n_pages() > 1;
+        view.close_page_finish(page, confirm);
+        glib::Propagation::Stop
+    });
+    {
+        let registry = registry.clone();
+        tab_view.connect_page_detached(move |_, page, _position| {
+            registry.borrow_mut().remove(page);
+        });
+    }
+    {
+        let chrome = chrome.clone();
+        let registry = registry.clone();
+        tab_view.connect_selected_page_notify(move |view| {
+            if let Some(tab) = active_tab(view, &registry) {
+                update_chrome(&tab, &chrome);
+            }
+        });
+    }
+
+    // Navigates whichever tab is currently active — safe for callers like
+    // the sidebar and breadcrumbs that only ever act on the visible tab.
     let navigate: Rc<dyn Fn(VeyraPath)> = {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
-        Rc::new(move |path: VeyraPath| navigate_to(&state, &chrome, path, true))
+        Rc::new(move |path: VeyraPath| {
+            if let Some(tab) = active_tab(&tab_view, &registry) {
+                navigate_to(&tab, &chrome, path, true);
+            }
+        })
     };
 
+    open_tab(
+        &tab_view,
+        &registry,
+        &chrome,
+        has_clipboard.clone(),
+        start_dir,
+    );
+
     {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
-        header
-            .back_button
-            .connect_clicked(move |_| go_back(&state, &chrome));
+        header.back_button.connect_clicked(move |_| {
+            if let Some(tab) = active_tab(&tab_view, &registry) {
+                go_back(&tab, &chrome);
+            }
+        });
     }
     {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
-        header
-            .forward_button
-            .connect_clicked(move |_| go_forward(&state, &chrome));
+        header.forward_button.connect_clicked(move |_| {
+            if let Some(tab) = active_tab(&tab_view, &registry) {
+                go_forward(&tab, &chrome);
+            }
+        });
     }
     {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let navigate = navigate.clone();
-        header
-            .up_button
-            .connect_clicked(move |_| go_up(&state, &navigate));
+        header.up_button.connect_clicked(move |_| {
+            if let Some(tab) = active_tab(&tab_view, &registry) {
+                go_up(&tab, &navigate);
+            }
+        });
     }
     {
         let navigate = navigate.clone();
@@ -118,48 +155,132 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         });
     }
     {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
-        header
-            .refresh_button
-            .connect_clicked(move |_| refresh(&state, &chrome));
+        header.refresh_button.connect_clicked(move |_| {
+            if let Some(tab) = active_tab(&tab_view, &registry) {
+                refresh(&tab.state, &chrome);
+            }
+        });
     }
     {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
         header.address_entry.connect_activate(move |entry| {
             let text = entry.text();
             let trimmed = text.trim();
             if !trimmed.is_empty() {
-                navigate_to(
-                    &state,
-                    &chrome,
-                    VeyraPath::from_local(std::path::PathBuf::from(trimmed)),
-                    true,
-                );
+                if let Some(tab) = active_tab(&tab_view, &registry) {
+                    navigate_to(
+                        &tab,
+                        &chrome,
+                        VeyraPath::from_local(std::path::PathBuf::from(trimmed)),
+                        true,
+                    );
+                }
             }
             chrome.title_stack.set_visible_child_name("breadcrumbs");
         });
     }
 
+    let new_tab_button = gtk4::Button::from_icon_name("list-add-symbolic");
+    new_tab_button.add_css_class("flat");
+    new_tab_button.set_tooltip_text(Some("New Tab (Ctrl+T)"));
+    new_tab_button.update_property(&[gtk4::accessible::Property::Label("New Tab")]);
+    new_tab_button.set_action_name(Some("win.new-tab"));
+    tab_bar.set_end_action_widget(Some(&new_tab_button));
+
+    let content_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    tab_view.set_vexpand(true);
+    content_box.append(&tab_bar);
+    content_box.append(&tab_view);
+
+    let content_page = adw::NavigationPage::new(&content_box, "Files");
+    let sidebar_widget = sidebar::build(navigate.clone());
+    let sidebar_page = adw::NavigationPage::new(&sidebar_widget, "Sidebar");
+
+    let split_view = adw::NavigationSplitView::builder()
+        .sidebar(&sidebar_page)
+        .content(&content_page)
+        .sidebar_width_fraction(0.22)
+        .build();
+
+    let toolbar_view = adw::ToolbarView::new();
+    toolbar_view.add_top_bar(&header.widget);
+    toolbar_view.add_bottom_bar(&progress.widget);
+    toolbar_view.add_bottom_bar(&status_bar.widget);
+    toolbar_view.set_content(Some(&split_view));
+
+    let window = adw::ApplicationWindow::builder()
+        .application(app)
+        .title("Veyra - Modern Linux File Manager")
+        .default_width(1200)
+        .default_height(720)
+        .content(&toolbar_view)
+        .build();
+
+    add_dev_icon_search_path(&window);
+    if let Some(app_id) = app.application_id() {
+        window.set_icon_name(Some(&app_id));
+    }
+    setup_navigation_shortcuts(
+        app,
+        &window,
+        &tab_view,
+        &registry,
+        &chrome,
+        &navigate,
+        &header.address_entry,
+    );
+    setup_tab_actions(
+        app,
+        &window,
+        &tab_view,
+        &registry,
+        &chrome,
+        has_clipboard.clone(),
+    );
+    setup_operation_actions(
+        app, &window, &tab_view, &registry, &chrome, &progress, &clipboard,
+    );
+    setup_context_menu_actions(app, &window, &tab_view, &registry, &chrome, &has_clipboard);
+
+    window
+}
+
+/// Builds a new tab rooted at `start_dir`, registers it, and switches to it.
+/// Every tab owns an independent `AppState` (location, history, item model),
+/// its own Icon/Compact/Details view stack, per-view selections, and its own
+/// search query/filter — the isolation Faz 7 requires. `chrome` (header
+/// bar, breadcrumbs, status bar) stays shared and is refreshed to reflect
+/// the new tab once it becomes selected.
+fn open_tab(
+    tab_view: &adw::TabView,
+    registry: &TabRegistry,
+    chrome: &Chrome,
+    has_clipboard: Rc<dyn Fn() -> bool>,
+    start_dir: VeyraPath,
+) -> TabPage {
+    let state = AppState::new(start_dir.clone());
+    let search_query = Rc::new(RefCell::new(String::new()));
+    let filter = build_search_filter(search_query.clone());
+    let view_stack = gtk4::Stack::new();
+
+    // `on_open` is wired into the views before this tab's own `TabPage`
+    // exists (the views need it at construction time); the slot is filled
+    // in once the tab is fully built, and `on_open` is only ever invoked
+    // later in response to a user double-click.
+    let self_slot: Rc<RefCell<Option<TabPage>>> = Rc::new(RefCell::new(None));
     let on_open: Rc<dyn Fn(FileItem)> = {
-        let navigate = navigate.clone();
+        let self_slot = self_slot.clone();
+        let chrome = chrome.clone();
         Rc::new(move |item: FileItem| {
-            if item.kind().is_directory() {
-                navigate(item.path.clone());
-            } else {
-                std::thread::spawn(move || {
-                    if let Err(err) = veyra_filesystem::open(&item.path) {
-                        tracing::warn!(path = %item.path, error = %err, "failed to open item");
-                    }
-                });
+            if let Some(tab) = self_slot.borrow().clone() {
+                open_item(&tab, &chrome, item);
             }
         })
-    };
-
-    let has_clipboard: Rc<dyn Fn() -> bool> = {
-        let clipboard = clipboard.clone();
-        Rc::new(move || clipboard.borrow().is_some())
     };
 
     let selections;
@@ -207,111 +328,92 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         };
     }
 
-    let content_page = adw::NavigationPage::new(&view_stack, "Files");
-    let sidebar_widget = sidebar::build(navigate.clone());
-    let sidebar_page = adw::NavigationPage::new(&sidebar_widget, "Sidebar");
+    let adw_page = tab_view.append(&view_stack);
 
-    let split_view = adw::NavigationSplitView::builder()
-        .sidebar(&sidebar_page)
-        .content(&content_page)
-        .sidebar_width_fraction(0.22)
-        .build();
+    let tab = TabPage {
+        state,
+        view_stack,
+        selections,
+        filter,
+        search_query,
+        adw_page: adw_page.clone(),
+    };
+    *self_slot.borrow_mut() = Some(tab.clone());
+    registry.borrow_mut().insert(adw_page.clone(), tab.clone());
 
-    let toolbar_view = adw::ToolbarView::new();
-    toolbar_view.add_top_bar(&header.widget);
-    toolbar_view.add_bottom_bar(&progress.widget);
-    toolbar_view.add_bottom_bar(&status_bar.widget);
-    toolbar_view.set_content(Some(&split_view));
+    tab_view.set_selected_page(&adw_page);
+    navigate_to(&tab, chrome, start_dir, false);
 
-    let window = adw::ApplicationWindow::builder()
-        .application(app)
-        .title("Veyra - Modern Linux File Manager")
-        .default_width(1200)
-        .default_height(720)
-        .content(&toolbar_view)
-        .build();
-
-    add_dev_icon_search_path(&window);
-    if let Some(app_id) = app.application_id() {
-        window.set_icon_name(Some(&app_id));
-    }
-    setup_shortcuts(
-        app,
-        &window,
-        &state,
-        &chrome,
-        &navigate,
-        &header.address_entry,
-    );
-    setup_operation_actions(
-        app,
-        &window,
-        &state,
-        &chrome,
-        &progress,
-        &view_stack,
-        &selections,
-        &clipboard,
-    );
-    setup_context_menu_actions(
-        app,
-        &window,
-        &state,
-        &chrome,
-        &view_stack,
-        &selections,
-        &on_open,
-    );
-
-    navigate_to(&state, &chrome, start_dir, false);
-
-    window
+    tab
 }
 
 /// Registers `win.*` actions for the navigation shortcuts and binds their
 /// accelerators on `app`. Actions (rather than raw key controllers) so the
 /// bindings respect normal GTK focus/shortcut-inhibition rules (e.g. they
 /// don't fire while a text entry elsewhere has focus and wants the key).
-fn setup_shortcuts(
+/// All navigation actions operate on whichever tab is currently active.
+#[allow(clippy::too_many_arguments)]
+fn setup_navigation_shortcuts(
     app: &adw::Application,
     window: &adw::ApplicationWindow,
-    state: &SharedState,
+    tab_view: &adw::TabView,
+    registry: &TabRegistry,
     chrome: &Chrome,
     navigate: &Rc<dyn Fn(VeyraPath)>,
     address_entry: &gtk4::Entry,
 ) {
     let action_back = gio::SimpleAction::new("go-back", None);
     {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
-        action_back.connect_activate(move |_, _| go_back(&state, &chrome));
+        action_back.connect_activate(move |_, _| {
+            if let Some(tab) = active_tab(&tab_view, &registry) {
+                go_back(&tab, &chrome);
+            }
+        });
     }
     window.add_action(&action_back);
     app.set_accels_for_action("win.go-back", &["<Alt>Left"]);
 
     let action_forward = gio::SimpleAction::new("go-forward", None);
     {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
-        action_forward.connect_activate(move |_, _| go_forward(&state, &chrome));
+        action_forward.connect_activate(move |_, _| {
+            if let Some(tab) = active_tab(&tab_view, &registry) {
+                go_forward(&tab, &chrome);
+            }
+        });
     }
     window.add_action(&action_forward);
     app.set_accels_for_action("win.go-forward", &["<Alt>Right"]);
 
     let action_up = gio::SimpleAction::new("go-up", None);
     {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let navigate = navigate.clone();
-        action_up.connect_activate(move |_, _| go_up(&state, &navigate));
+        action_up.connect_activate(move |_, _| {
+            if let Some(tab) = active_tab(&tab_view, &registry) {
+                go_up(&tab, &navigate);
+            }
+        });
     }
     window.add_action(&action_up);
     app.set_accels_for_action("win.go-up", &["<Alt>Up"]);
 
     let action_refresh = gio::SimpleAction::new("refresh", None);
     {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
-        action_refresh.connect_activate(move |_, _| refresh(&state, &chrome));
+        action_refresh.connect_activate(move |_, _| {
+            if let Some(tab) = active_tab(&tab_view, &registry) {
+                refresh(&tab.state, &chrome);
+            }
+        });
     }
     window.add_action(&action_refresh);
     app.set_accels_for_action("win.refresh", &["F5"]);
@@ -330,29 +432,97 @@ fn setup_shortcuts(
     app.set_accels_for_action("win.focus-address", &["<Primary>l"]);
 }
 
+/// Registers the Faz 7 tab-management `win.*` actions and their
+/// accelerators: `Ctrl+T` new tab (opened at the active tab's current
+/// location), `Ctrl+W` close active tab, `Ctrl+Tab`/`Ctrl+Shift+Tab` cycle
+/// tabs (delegated to `AdwTabView`'s own next/previous-page methods).
+fn setup_tab_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    tab_view: &adw::TabView,
+    registry: &TabRegistry,
+    chrome: &Chrome,
+    has_clipboard: Rc<dyn Fn() -> bool>,
+) {
+    let action_new_tab = gio::SimpleAction::new("new-tab", None);
+    {
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
+        let chrome = chrome.clone();
+        action_new_tab.connect_activate(move |_, _| {
+            let start_dir = active_tab(&tab_view, &registry)
+                .map(|tab| tab.state.borrow().current_dir.clone())
+                .unwrap_or_else(|| VeyraPath::from_local(gtk4::glib::home_dir()));
+            open_tab(
+                &tab_view,
+                &registry,
+                &chrome,
+                has_clipboard.clone(),
+                start_dir,
+            );
+        });
+    }
+    window.add_action(&action_new_tab);
+    app.set_accels_for_action("win.new-tab", &["<Primary>t"]);
+
+    let action_close_tab = gio::SimpleAction::new("close-tab", None);
+    {
+        let tab_view = tab_view.clone();
+        action_close_tab.connect_activate(move |_, _| {
+            if let Some(page) = tab_view.selected_page() {
+                tab_view.close_page(&page);
+            }
+        });
+    }
+    window.add_action(&action_close_tab);
+    app.set_accels_for_action("win.close-tab", &["<Primary>w"]);
+
+    let action_next_tab = gio::SimpleAction::new("next-tab", None);
+    {
+        let tab_view = tab_view.clone();
+        action_next_tab.connect_activate(move |_, _| {
+            tab_view.select_next_page();
+        });
+    }
+    window.add_action(&action_next_tab);
+    app.set_accels_for_action("win.next-tab", &["<Primary>Tab"]);
+
+    let action_previous_tab = gio::SimpleAction::new("previous-tab", None);
+    {
+        let tab_view = tab_view.clone();
+        action_previous_tab.connect_activate(move |_, _| {
+            tab_view.select_previous_page();
+        });
+    }
+    window.add_action(&action_previous_tab);
+    app.set_accels_for_action("win.previous-tab", &["<Primary><Shift>Tab"]);
+}
+
 /// Registers the Copy/Cut/Paste/Trash/Delete `win.*` actions and their
-/// accelerators. `Delete` only ever trashes (Rule #39: permanent delete
-/// must never be one accidental keypress) — permanent delete is
-/// `<Shift>Delete`, and always goes through `dialogs::delete_confirm`
-/// first (Rule #38).
+/// accelerators. All act on whichever tab is currently active. `Delete`
+/// only ever trashes (Rule #39: permanent delete must never be one
+/// accidental keypress) — permanent delete is `<Shift>Delete`, and always
+/// goes through `dialogs::delete_confirm` first (Rule #38).
 #[allow(clippy::too_many_arguments)]
 fn setup_operation_actions(
     app: &adw::Application,
     window: &adw::ApplicationWindow,
-    state: &SharedState,
+    tab_view: &adw::TabView,
+    registry: &TabRegistry,
     chrome: &Chrome,
     progress: &ProgressToastHandles,
-    view_stack: &gtk4::Stack,
-    selections: &ViewSelections,
     clipboard: &Rc<RefCell<Option<ClipboardEntry>>>,
 ) {
     let action_copy = gio::SimpleAction::new("copy-selection", None);
     {
-        let view_stack = view_stack.clone();
-        let selections = selections.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let clipboard = clipboard.clone();
         action_copy.connect_activate(move |_, _| {
-            if let Some(item) = selections.selected(&view_stack) {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
                 *clipboard.borrow_mut() = Some(ClipboardEntry {
                     path: item.path,
                     cut: false,
@@ -365,11 +535,14 @@ fn setup_operation_actions(
 
     let action_cut = gio::SimpleAction::new("cut-selection", None);
     {
-        let view_stack = view_stack.clone();
-        let selections = selections.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let clipboard = clipboard.clone();
         action_cut.connect_activate(move |_, _| {
-            if let Some(item) = selections.selected(&view_stack) {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
                 *clipboard.borrow_mut() = Some(ClipboardEntry {
                     path: item.path,
                     cut: true,
@@ -383,15 +556,19 @@ fn setup_operation_actions(
     let action_paste = gio::SimpleAction::new("paste", None);
     {
         let window = window.clone();
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
         let progress = progress.clone();
         let clipboard = clipboard.clone();
         action_paste.connect_activate(move |_, _| {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
             let Some(entry) = clipboard.borrow_mut().take() else {
                 return;
             };
-            let destination = state.borrow().current_dir.clone();
+            let destination = tab.state.borrow().current_dir.clone();
             let kind = if entry.cut {
                 OperationKind::Move
             } else {
@@ -399,7 +576,7 @@ fn setup_operation_actions(
             };
             run_bulk_operation(
                 &window,
-                &state,
+                &tab.state,
                 &chrome,
                 &progress,
                 kind,
@@ -414,16 +591,18 @@ fn setup_operation_actions(
     let action_trash = gio::SimpleAction::new("trash-selection", None);
     {
         let window = window.clone();
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
         let progress = progress.clone();
-        let view_stack = view_stack.clone();
-        let selections = selections.clone();
         action_trash.connect_activate(move |_, _| {
-            if let Some(item) = selections.selected(&view_stack) {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
                 run_bulk_operation(
                     &window,
-                    &state,
+                    &tab.state,
                     &chrome,
                     &progress,
                     OperationKind::Trash,
@@ -439,17 +618,19 @@ fn setup_operation_actions(
     let action_delete = gio::SimpleAction::new("delete-selection", None);
     {
         let window = window.clone();
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
         let progress = progress.clone();
-        let view_stack = view_stack.clone();
-        let selections = selections.clone();
         action_delete.connect_activate(move |_, _| {
-            let Some(item) = selections.selected(&view_stack) else {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
                 return;
             };
             let window_for_confirm = window.clone();
-            let state = state.clone();
+            let state = tab.state.clone();
             let chrome = chrome.clone();
             let progress = progress.clone();
             let path = item.path;
@@ -471,22 +652,22 @@ fn setup_operation_actions(
     app.set_accels_for_action("win.delete-selection", &["<Shift>Delete"]);
 }
 
-/// Registers the Faz 6 context-menu `win.*` actions: item actions (Open,
-/// Open With…, Open in New Window, Rename, Copy Path, Copy Location) and
+/// Registers the Faz 6/7 context-menu `win.*` actions: item actions (Open,
+/// Open With…, Open in New Tab/Window, Rename, Copy Path, Copy Location) and
 /// background actions (New Folder, New Document), plus the shared
 /// `win.not-implemented` disabled action every not-yet-built entry
-/// (Compress/Extract/Open Terminal Here/Properties/Open in New Tab) binds
-/// to. Copy/Cut/Paste/Trash/Delete are already registered by
-/// `setup_operation_actions` and are reused as-is by the context menus.
-#[allow(clippy::too_many_arguments)]
+/// (Compress/Extract/Open Terminal Here/Properties) binds to. All resolve
+/// the active tab dynamically — a context menu only ever acts on the
+/// visible (i.e. active) tab. Copy/Cut/Paste/Trash/Delete are already
+/// registered by `setup_operation_actions` and are reused as-is by the
+/// context menus.
 fn setup_context_menu_actions(
     app: &adw::Application,
     window: &adw::ApplicationWindow,
-    state: &SharedState,
+    tab_view: &adw::TabView,
+    registry: &TabRegistry,
     chrome: &Chrome,
-    view_stack: &gtk4::Stack,
-    selections: &ViewSelections,
-    on_open: &Rc<dyn Fn(FileItem)>,
+    has_clipboard: &Rc<dyn Fn() -> bool>,
 ) {
     let action_not_implemented = gio::SimpleAction::new("not-implemented", None);
     action_not_implemented.set_enabled(false);
@@ -494,12 +675,15 @@ fn setup_context_menu_actions(
 
     let action_open = gio::SimpleAction::new("open-selected", None);
     {
-        let view_stack = view_stack.clone();
-        let selections = selections.clone();
-        let on_open = on_open.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
+        let chrome = chrome.clone();
         action_open.connect_activate(move |_, _| {
-            if let Some(item) = selections.selected(&view_stack) {
-                on_open(item);
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
+                open_item(&tab, &chrome, item);
             }
         });
     }
@@ -508,23 +692,28 @@ fn setup_context_menu_actions(
     let action_open_with = gio::SimpleAction::new("open-with-selected", None);
     {
         let window = window.clone();
-        let view_stack = view_stack.clone();
-        let selections = selections.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         action_open_with.connect_activate(move |_, _| {
-            let Some(item) = selections.selected(&view_stack) else {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
                 return;
             };
-            show_open_with_dialog(&window, &item.path);
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
+                show_open_with_dialog(&window, &item.path);
+            }
         });
     }
     window.add_action(&action_open_with);
 
     let action_open_new_window = gio::SimpleAction::new("open-in-new-window-selected", None);
     {
-        let view_stack = view_stack.clone();
-        let selections = selections.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         action_open_new_window.connect_activate(move |_, _| {
-            if let Some(item) = selections.selected(&view_stack) {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
                 if item.kind().is_directory() {
                     spawn_new_window(&item.path);
                 }
@@ -533,20 +722,48 @@ fn setup_context_menu_actions(
     }
     window.add_action(&action_open_new_window);
 
+    let action_open_new_tab = gio::SimpleAction::new("open-in-new-tab-selected", None);
+    {
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
+        let chrome = chrome.clone();
+        let has_clipboard = has_clipboard.clone();
+        action_open_new_tab.connect_activate(move |_, _| {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            if item.kind().is_directory() {
+                open_tab(
+                    &tab_view,
+                    &registry,
+                    &chrome,
+                    has_clipboard.clone(),
+                    item.path,
+                );
+            }
+        });
+    }
+    window.add_action(&action_open_new_tab);
+
     let action_rename = gio::SimpleAction::new("rename-selected", None);
     {
         let window = window.clone();
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
-        let view_stack = view_stack.clone();
-        let selections = selections.clone();
         action_rename.connect_activate(move |_, _| {
-            let Some(item) = selections.selected(&view_stack) else {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
                 return;
             };
             let current_name = item.name().to_string();
             let path = item.path.clone();
-            let state = state.clone();
+            let state = tab.state.clone();
             let chrome = chrome.clone();
             let previous_name = current_name.clone();
             dialogs::rename_dialog::show(&window, &current_name, move |new_name| {
@@ -576,10 +793,13 @@ fn setup_context_menu_actions(
     let action_copy_path = gio::SimpleAction::new("copy-path-selected", None);
     {
         let window = window.clone();
-        let view_stack = view_stack.clone();
-        let selections = selections.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         action_copy_path.connect_activate(move |_, _| {
-            if let Some(item) = selections.selected(&view_stack) {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
                 window.clipboard().set_text(&item.path.to_string());
             }
         });
@@ -589,10 +809,13 @@ fn setup_context_menu_actions(
     let action_copy_location = gio::SimpleAction::new("copy-location-selected", None);
     {
         let window = window.clone();
-        let view_stack = view_stack.clone();
-        let selections = selections.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         action_copy_location.connect_activate(move |_, _| {
-            if let Some(item) = selections.selected(&view_stack) {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
                 window.clipboard().set_text(&parent_display(&item.path));
             }
         });
@@ -601,23 +824,44 @@ fn setup_context_menu_actions(
 
     let action_create_folder = gio::SimpleAction::new("create-folder", None);
     {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
         action_create_folder.connect_activate(move |_, _| {
-            create_child_entry(&state, &chrome, "New Folder", true);
+            if let Some(tab) = active_tab(&tab_view, &registry) {
+                create_child_entry(&tab.state, &chrome, "New Folder", true);
+            }
         });
     }
     window.add_action(&action_create_folder);
 
     let action_create_document = gio::SimpleAction::new("create-document", None);
     {
-        let state = state.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         let chrome = chrome.clone();
         action_create_document.connect_activate(move |_, _| {
-            create_child_entry(&state, &chrome, "New Document", false);
+            if let Some(tab) = active_tab(&tab_view, &registry) {
+                create_child_entry(&tab.state, &chrome, "New Document", false);
+            }
         });
     }
     window.add_action(&action_create_document);
+}
+
+/// Opens `item` in-place: navigates the owning tab for directories, or
+/// launches the system default application off the GTK main thread for
+/// files.
+fn open_item(tab: &TabPage, chrome: &Chrome, item: FileItem) {
+    if item.kind().is_directory() {
+        navigate_to(tab, chrome, item.path.clone(), true);
+    } else {
+        std::thread::spawn(move || {
+            if let Err(err) = veyra_filesystem::open(&item.path) {
+                tracing::warn!(path = %item.path, error = %err, "failed to open item");
+            }
+        });
+    }
 }
 
 /// Creates a new folder or empty file named `base_name` (auto-suffixed with
@@ -714,8 +958,8 @@ fn show_open_with_dialog(window: &adw::ApplicationWindow, path: &VeyraPath) {
 }
 
 /// Relaunches the Veyra binary pointed at `path`, standing in for "Open in
-/// New Window" until Faz 7 gives real in-process tabs/windows sharing one
-/// app instance's state.
+/// New Window" until a later phase gives real in-process multi-window state
+/// sharing.
 fn spawn_new_window(path: &VeyraPath) {
     let Ok(exe) = std::env::current_exe() else {
         tracing::warn!("failed to resolve current executable for new window");
@@ -787,10 +1031,11 @@ fn run_bulk_operation(
     });
 }
 
-/// Navigates to the current directory's parent, if any (no-op at the
+/// Navigates `tab` to its current directory's parent, if any (no-op at the
 /// filesystem root).
-fn go_up(state: &SharedState, navigate: &Rc<dyn Fn(VeyraPath)>) {
-    let parent = state
+fn go_up(tab: &TabPage, navigate: &Rc<dyn Fn(VeyraPath)>) {
+    let parent = tab
+        .state
         .borrow()
         .current_dir
         .as_local_path()
@@ -807,8 +1052,7 @@ fn refresh(state: &SharedState, chrome: &Chrome) {
     load_directory(state, chrome, path);
 }
 
-fn build_search_filter(state: &SharedState, query: Rc<RefCell<String>>) -> gtk4::CustomFilter {
-    let state = state.clone();
+fn build_search_filter(query: Rc<RefCell<String>>) -> gtk4::CustomFilter {
     gtk4::CustomFilter::new(move |object| {
         let needle = query.borrow();
         if needle.is_empty() {
@@ -818,17 +1062,17 @@ fn build_search_filter(state: &SharedState, query: Rc<RefCell<String>>) -> gtk4:
             return true;
         };
         let item = boxed.borrow::<FileItem>();
-        let _ = &state; // reserved for future scope (e.g. content search)
         item.name().to_lowercase().contains(&needle.to_lowercase())
     })
 }
 
-/// Navigates to `path`, pushing the previous location onto the back stack
-/// when `push_history` is true (false is used for the initial load and for
-/// back/forward navigation, which manage the stacks themselves).
-fn navigate_to(state: &SharedState, chrome: &Chrome, path: VeyraPath, push_history: bool) {
+/// Navigates `tab` to `path`, pushing the previous location onto its back
+/// stack when `push_history` is true (false is used for a tab's initial
+/// load and for back/forward navigation, which manage the stacks
+/// themselves).
+fn navigate_to(tab: &TabPage, chrome: &Chrome, path: VeyraPath, push_history: bool) {
     {
-        let mut state_mut = state.borrow_mut();
+        let mut state_mut = tab.state.borrow_mut();
         if push_history {
             let previous = state_mut.current_dir.clone();
             state_mut.history.record(previous);
@@ -836,13 +1080,13 @@ fn navigate_to(state: &SharedState, chrome: &Chrome, path: VeyraPath, push_histo
         state_mut.current_dir = path.clone();
     }
 
-    update_chrome(state, chrome);
-    load_directory(state, chrome, path);
+    update_chrome(tab, chrome);
+    load_directory(&tab.state, chrome, path);
 }
 
-fn go_back(state: &SharedState, chrome: &Chrome) {
+fn go_back(tab: &TabPage, chrome: &Chrome) {
     let target = {
-        let mut state_mut = state.borrow_mut();
+        let mut state_mut = tab.state.borrow_mut();
         let current = state_mut.current_dir.clone();
         let Some(previous) = state_mut.history.go_back(current) else {
             return;
@@ -850,13 +1094,13 @@ fn go_back(state: &SharedState, chrome: &Chrome) {
         state_mut.current_dir = previous.clone();
         previous
     };
-    update_chrome(state, chrome);
-    load_directory(state, chrome, target);
+    update_chrome(tab, chrome);
+    load_directory(&tab.state, chrome, target);
 }
 
-fn go_forward(state: &SharedState, chrome: &Chrome) {
+fn go_forward(tab: &TabPage, chrome: &Chrome) {
     let target = {
-        let mut state_mut = state.borrow_mut();
+        let mut state_mut = tab.state.borrow_mut();
         let current = state_mut.current_dir.clone();
         let Some(next) = state_mut.history.go_forward(current) else {
             return;
@@ -864,27 +1108,71 @@ fn go_forward(state: &SharedState, chrome: &Chrome) {
         state_mut.current_dir = next.clone();
         next
     };
-    update_chrome(state, chrome);
-    load_directory(state, chrome, target);
+    update_chrome(tab, chrome);
+    load_directory(&tab.state, chrome, target);
 }
 
-fn update_chrome(state: &SharedState, chrome: &Chrome) {
-    let state_ref = state.borrow();
-    chrome.back_button.set_sensitive(state_ref.can_go_back());
-    chrome
-        .forward_button
-        .set_sensitive(state_ref.can_go_forward());
-    chrome.up_button.set_sensitive(state_ref.can_go_up());
-    chrome
-        .address_entry
-        .set_text(&state_ref.current_dir.to_string());
+/// Refreshes every shared chrome widget (nav button sensitivity, address
+/// entry, breadcrumbs, status bar item count, view-mode toggle group) plus
+/// `tab`'s own `AdwTabPage` title, to reflect `tab`'s current state. Called
+/// on every navigation and whenever the active tab changes.
+fn update_chrome(tab: &TabPage, chrome: &Chrome) {
+    let (current_dir, item_count) = {
+        let state_ref = tab.state.borrow();
+        chrome.back_button.set_sensitive(state_ref.can_go_back());
+        chrome
+            .forward_button
+            .set_sensitive(state_ref.can_go_forward());
+        chrome.up_button.set_sensitive(state_ref.can_go_up());
+        chrome
+            .address_entry
+            .set_text(&state_ref.current_dir.to_string());
+        (state_ref.current_dir.clone(), state_ref.model.n_items())
+    };
+
+    tab.adw_page.set_title(&tab_title(&current_dir));
 
     let navigate: Rc<dyn Fn(VeyraPath)> = {
-        let state = state.clone();
+        let tab = tab.clone();
         let chrome = chrome.clone();
-        Rc::new(move |path: VeyraPath| navigate_to(&state, &chrome, path, true))
+        Rc::new(move |path: VeyraPath| navigate_to(&tab, &chrome, path, true))
     };
-    breadcrumbs::rebuild(&chrome.breadcrumbs_box, &state_ref.current_dir, navigate);
+    breadcrumbs::rebuild(&chrome.breadcrumbs_box, &current_dir, navigate);
+
+    chrome.status_left.set_label(&count_label(item_count));
+    update_free_space(&tab.state, chrome);
+
+    let active_name = tab.view_stack.visible_child_name();
+    for (mode, button) in &chrome.view_switcher_buttons {
+        let should_be_active = active_name.as_deref() == Some(mode.stack_name());
+        if button.is_active() != should_be_active {
+            button.set_active(should_be_active);
+        }
+    }
+}
+
+/// The `AdwTabPage` title for `path`: `Home` for the user's home directory,
+/// otherwise its final path component (falling back to the raw path for
+/// roots and other edge cases with no final component).
+fn tab_title(path: &VeyraPath) -> String {
+    match path {
+        VeyraPath::Local(local) => {
+            if *local == gtk4::glib::home_dir() {
+                "Home".to_string()
+            } else {
+                local
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string())
+            }
+        }
+        VeyraPath::Uri(uri) => uri
+            .trim_end_matches('/')
+            .rsplit_once('/')
+            .map(|(_, last)| last.to_string())
+            .filter(|last| !last.is_empty())
+            .unwrap_or_else(|| path.to_string()),
+    }
 }
 
 fn load_directory(state: &SharedState, chrome: &Chrome, path: VeyraPath) {
@@ -905,18 +1193,13 @@ fn on_directory_loaded(
 ) {
     match result {
         Ok(items) => {
-            let count = items.len();
+            let count = items.len() as u32;
             let model = state.borrow().model.clone();
             model.remove_all();
             for item in items {
                 model.append(&gtk4::glib::BoxedAnyObject::new(item));
             }
-            let label = if count == 1 {
-                "1 item".to_string()
-            } else {
-                format!("{count} items")
-            };
-            chrome.status_left.set_label(&label);
+            chrome.status_left.set_label(&count_label(count));
             update_free_space(state, chrome);
         }
         Err(err) => {
@@ -924,6 +1207,14 @@ fn on_directory_loaded(
             chrome.status_left.set_label(&format!("Error: {err}"));
             chrome.status_right.set_label("");
         }
+    }
+}
+
+fn count_label(count: u32) -> String {
+    if count == 1 {
+        "1 item".to_string()
+    } else {
+        format!("{count} items")
     }
 }
 
@@ -967,5 +1258,47 @@ fn add_dev_icon_search_path(window: &adw::ApplicationWindow) {
     let dev_icons_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/icons");
     if dev_icons_dir.is_dir() {
         icon_theme.add_search_path(&dev_icons_dir);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tab_title_uses_home_label_for_home_directory() {
+        let home = VeyraPath::from_local(gtk4::glib::home_dir());
+        assert_eq!(tab_title(&home), "Home");
+    }
+
+    #[test]
+    fn tab_title_uses_final_local_path_component() {
+        let path = VeyraPath::from_local(gtk4::glib::home_dir().join("Projects/Veyra"));
+        assert_eq!(tab_title(&path), "Veyra");
+    }
+
+    #[test]
+    fn tab_title_falls_back_to_raw_path_for_filesystem_root() {
+        let root = VeyraPath::from_local(std::path::PathBuf::from("/"));
+        assert_eq!(tab_title(&root), "/");
+    }
+
+    #[test]
+    fn tab_title_falls_back_to_raw_uri_when_no_segment_remains() {
+        let uri = VeyraPath::from_uri("trash:///");
+        assert_eq!(tab_title(&uri), "trash:///");
+    }
+
+    #[test]
+    fn tab_title_uses_final_uri_path_segment_when_present() {
+        let uri = VeyraPath::from_uri("sftp://host/remote/folder");
+        assert_eq!(tab_title(&uri), "folder");
+    }
+
+    #[test]
+    fn count_label_pluralizes_correctly() {
+        assert_eq!(count_label(0), "0 items");
+        assert_eq!(count_label(1), "1 item");
+        assert_eq!(count_label(2), "2 items");
     }
 }

@@ -11,11 +11,11 @@
 //! returning the view widget itself rather than a row descendant, and opens
 //! the background menu instead.
 //!
-//! Menu entries for actions not yet implemented in earlier phases (Compress/
-//! Extract: Faz 19, Open Terminal Here: Faz 23, Properties: Faz 12, Open in
-//! New Tab: Faz 7) are shown insensitive, bound to the shared
-//! `win.not-implemented` action, with the owning phase noted in the label —
-//! per Rule #2 (no monolithic leaps across the roadmap).
+//! Menu entries for actions not yet implemented in later phases (Compress/
+//! Extract: Faz 19, Open Terminal Here: Faz 23, Properties: Faz 12) are shown
+//! insensitive, bound to the shared `win.not-implemented` action, with the
+//! owning phase noted in the label — per Rule #2 (no monolithic leaps across
+//! the roadmap). "Open in New Tab" is real as of Faz 7.
 
 use std::rc::Rc;
 
@@ -82,7 +82,10 @@ fn build_item_menu(item: &FileItem) -> gio::Menu {
     open_section.append(Some("Open"), Some("win.open-selected"));
     open_section.append(Some("Open With…"), Some("win.open-with-selected"));
     if is_dir {
-        open_section.append(Some("Open in New Tab (Faz 7)"), Some("win.not-implemented"));
+        open_section.append(
+            Some("Open in New Tab"),
+            Some("win.open-in-new-tab-selected"),
+        );
         open_section.append(
             Some("Open in New Window"),
             Some("win.open-in-new-window-selected"),

@@ -1,14 +1,13 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use gtk4::prelude::*;
 use libadwaita as adw;
 
+use crate::tab_page::{active_tab, TabRegistry};
 use crate::views::ViewMode;
 
 /// Handles the window needs after the header bar is built: the navigation
-/// buttons (their sensitivity is updated on every navigation) and the
-/// breadcrumbs container (rebuilt on every navigation).
+/// buttons (their sensitivity is updated on every navigation), the
+/// breadcrumbs container (rebuilt on every navigation), and the view-mode
+/// toggle buttons (kept in sync with the active tab's view stack).
 #[derive(Clone)]
 pub(crate) struct HeaderBarHandles {
     pub widget: adw::HeaderBar,
@@ -21,13 +20,15 @@ pub(crate) struct HeaderBarHandles {
     /// Swaps between the breadcrumbs row and the editable address entry.
     pub title_stack: gtk4::Stack,
     pub address_entry: gtk4::Entry,
+    /// One toggle button per view mode, for syncing the active state to
+    /// whichever tab is currently selected.
+    pub view_switcher_buttons: Vec<(ViewMode, gtk4::ToggleButton)>,
 }
 
-pub(crate) fn build(
-    view_stack: &gtk4::Stack,
-    search_query: Rc<RefCell<String>>,
-    filter: gtk4::CustomFilter,
-) -> HeaderBarHandles {
+/// `tab_view`/`registry` let the search entry and view-mode switcher act on
+/// whichever tab is currently active, since both the search filter and the
+/// view stack are per-tab state (Faz 7).
+pub(crate) fn build(tab_view: &adw::TabView, registry: TabRegistry) -> HeaderBarHandles {
     let widget = adw::HeaderBar::new();
 
     let back_button = nav_button("go-previous-symbolic", "Go Back");
@@ -105,10 +106,17 @@ pub(crate) fn build(
 
     let search_entry = gtk4::SearchEntry::new();
     search_entry.set_hexpand(true);
-    search_entry.connect_search_changed(move |entry| {
-        *search_query.borrow_mut() = entry.text().to_string();
-        filter.changed(gtk4::FilterChange::Different);
-    });
+    {
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
+        search_entry.connect_search_changed(move |entry| {
+            let Some(tab) = active_tab(&tab_view, &registry) else {
+                return;
+            };
+            *tab.search_query.borrow_mut() = entry.text().to_string();
+            tab.filter.changed(gtk4::FilterChange::Different);
+        });
+    }
 
     let search_toggle = gtk4::ToggleButton::new();
     search_toggle.set_icon_name("system-search-symbolic");
@@ -130,7 +138,7 @@ pub(crate) fn build(
     }
     widget.pack_end(&search_toggle);
 
-    widget.pack_end(&view_switcher(view_stack));
+    let view_switcher_buttons = view_switcher(&widget, tab_view, registry);
 
     HeaderBarHandles {
         widget,
@@ -142,6 +150,7 @@ pub(crate) fn build(
         breadcrumbs_box,
         title_stack,
         address_entry,
+        view_switcher_buttons,
     }
 }
 
@@ -152,7 +161,15 @@ fn nav_button(icon_name: &str, tooltip: &str) -> gtk4::Button {
     button
 }
 
-fn view_switcher(view_stack: &gtk4::Stack) -> gtk4::Box {
+/// Builds the Icon/Compact/Details toggle group and packs it into `header`.
+/// Each toggle acts on the currently active tab's view stack, and returns
+/// the `(mode, button)` pairs so the caller can keep the pressed button in
+/// sync when the active tab changes.
+fn view_switcher(
+    header: &adw::HeaderBar,
+    tab_view: &adw::TabView,
+    registry: TabRegistry,
+) -> Vec<(ViewMode, gtk4::ToggleButton)> {
     let box_ = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     box_.add_css_class("linked");
 
@@ -166,6 +183,7 @@ fn view_switcher(view_stack: &gtk4::Stack) -> gtk4::Box {
         (ViewMode::Details, "view-list-symbolic", "Details View"),
     ];
 
+    let mut buttons = Vec::with_capacity(modes.len());
     let group_leader: Option<gtk4::ToggleButton> = None;
     let mut group_leader = group_leader;
 
@@ -181,18 +199,23 @@ fn view_switcher(view_stack: &gtk4::Stack) -> gtk4::Box {
             button.set_active(true);
         }
 
-        let view_stack = view_stack.clone();
+        let tab_view = tab_view.clone();
+        let registry = registry.clone();
         button.connect_toggled(move |btn| {
             if btn.is_active() {
-                view_stack.set_visible_child_name(mode.stack_name());
+                if let Some(tab) = active_tab(&tab_view, &registry) {
+                    tab.view_stack.set_visible_child_name(mode.stack_name());
+                }
             }
         });
 
         box_.append(&button);
+        buttons.push((mode, button.clone()));
         if group_leader.is_none() {
             group_leader = Some(button);
         }
     }
 
-    box_
+    header.pack_end(&box_);
+    buttons
 }

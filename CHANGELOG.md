@@ -1,5 +1,24 @@
 # Changelog
 
+## Faz 7 — Tabs / Sekmeler (`veyra-ui`)
+
+### Eklenenler
+- **`tab_page.rs` (yeni, `veyra-ui`):** `TabPage` — her sekmenin izole durumu: kendi `AppState`'i (konum + geri/ileri geçmişi + öge modeli), kendi Icon/Compact/Details `GtkStack`'i, kendi üç görünümün `GtkSingleSelection` zinciri (`ViewSelections`), kendi arama sorgusu/filtresi. `TabRegistry` — `AdwTabView`'in verdiği `AdwTabPage`'i ilgili `TabPage`'e eşleyen `Rc<RefCell<HashMap<...>>>`; `glib` nesne sarmalayıcıları işaretçi kimliğiyle `Hash`/`Eq` uyguladığından `unsafe` qdata gerekmiyor (`#![forbid(unsafe_code)]` ile uyumlu). `active_tab()` — `AdwTabView::selected_page()`'i registry'den çözer; tüm `win.*` aksiyonları ve gezinme kısayolları bu yardımcıyla her zaman *o an görünür* sekmeyi hedefler.
+- **`window.rs`:** İçerik alanı artık `AdwTabBar` (başlığın altında) + `AdwTabView` (`veyra-ui` içinde çoklu sekme gövdesi). Tek sekmede `AdwTabBar` varsayılan olarak kendiliğinden gizlenir (standart tarayıcı davranışı), 2+ sekmede görünür. Sekme çubuğunun sonunda `win.new-tab`'e bağlı düz "+" butonu. `open_tab()` yeni bir sekme inşa edip kayda alır ve seçili sekme yapar; `update_chrome()` artık tek `AppState` yerine aktif sekmenin durumunu okuyup paylaşılan header/breadcrumbs/durum çubuğuna *ve* o sekmenin `AdwTabPage` başlığına (`tab_title()` — klasör adı, ev dizini için "Home") yansıtıyor; görünüm modu (Icon/Compact/Details) anahtarları da aktif sekmeyle senkron tutuluyor.
+- **Klavye kısayolları:** `Ctrl+T` yeni sekme (aktif sekmenin konumunda açılır), `Ctrl+W` aktif sekmeyi kapatır (son sekme her zaman açık kalır — `AdwTabView::close-page` sinyali son sekmede kapatmayı veto eder), `Ctrl+Tab`/`Ctrl+Shift+Tab` sekmeler arası ileri/geri (`AdwTabView::select_next_page`/`select_previous_page`).
+- **"Open in New Tab" (`context_menu.rs`, `window.rs`):** Faz 6'da devre dışı duran menü ögesi artık gerçek `win.open-in-new-tab-selected` aksiyonuna bağlı; klasör hedefini yeni bir sekmede açıp o sekmeye geçiyor.
+
+### Kapsam Notu (bilinçli sınırlama)
+- Kopyala/Kes panosu pencere genelinde tek slot olarak kalıyor (sekmeye özel değil) — çoğu dosya yöneticisinde olduğu gibi bir sekmede kopyalanan öge başka bir sekmeye yapıştırılabilir; bu Faz 7'nin izolasyon listesinde (konum/geçmiş/seçim/kaydırma/görünüm modu) yer almıyor.
+- Arama kutusu tek, paylaşılan bir başlık widget'ı; sorgu/filtre durumu sekmeye özel tutuluyor (her tuş vuruşu o anki aktif sekmenin filtresini günceller), ancak kutunun görünen metni sekme geçişinde otomatik değişmiyor — küçük, kabul edilebilir bir UX boşluğu.
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 81/81 (75 + yeni 6 birim test: `window.rs` içinde `tab_title()`/`count_label()`).
+- `cargo fmt --check`: temiz.
+- Manuel duman testi: `./target/debug/veyra` panik olmadan açıldı, ev dizini "Home" başlığıyla yüklendi; ikinci `cargo run` çağrısı GApplication tekil-örnek davranışıyla birinci pencereyi etkinleştirip 0 koduyla çıktı (beklenen). Not: bu ortamda Wayland girdi-enjeksiyon aracı (xdotool/ydotool/wtype) yok, bu yüzden sekme açma/kapatma/geçiş kısayolları ekran görüntüsüyle görsel olarak doğrulanamadı — doğrulama build/clippy/test/fmt ve kod incelemesiyle sınırlı kaldı.
+
 ## Faz 6 — Context Menu (`veyra-ui`, `veyra-app`)
 
 ### Eklenenler

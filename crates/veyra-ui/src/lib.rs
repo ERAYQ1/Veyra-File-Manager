@@ -18,6 +18,7 @@ mod operations;
 mod sidebar;
 mod state;
 mod statusbar;
+mod tab_page;
 mod views;
 mod widgets;
 mod window;
