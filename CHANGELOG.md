@@ -1,5 +1,31 @@
 # Changelog
 
+## Faz 9 — Search / Arama Motoru (`veyra-search` yeni crate, `veyra-ui`)
+
+### Eklenenler
+- **`veyra-search` (yeni workspace crate):** SQLite + FTS5 tabanlı arama motoru, UI'dan ve `veyra-filesystem`'den bağımsız (Kural #42) — indeksleyici GIO değil düz `std::fs` kullanıyor, UI'nin GLib main context'ine hiç bağımlı değil. Tek crate'te bu workspace'in ilk `#![forbid(unsafe_code)]` **taşımayan** modülü: arka plan indeksleyici thread'i kendini `nice(19)` ile düşük önceliğe alıyor (`indexer::lower_priority`), `# Safety` doc yorumuyla izole tek bir `unsafe` çağrısı — `veyra-app::root_guard`'ın `libc::geteuid` kullanımıyla aynı, bu projede zaten var olan desen.
+  - **`schema.rs`:** `directories`, `files`, `metadata` tabloları + `fts_index` FTS5 sanal tablosu (`filename, path, content_metadata`), istenen şemayla birebir.
+  - **`classify.rs`:** MIME türü + uzantı + çalıştırılabilir bit'ten `image`/`video`/`document`/`archive`/`executable`/`other` sınıflandırması (çalıştırılabilir bit her zaman MIME tahmininden önce gelir — `+x` bitli bir `text/plain` betik hâlâ "executable").
+  - **`query.rs`:** `name:`, `type:`, `size:>100MB`/`size:<10MB`, `modified:today`/`yesterday`/`last-week`/`last-month` sözdizimi ayrıştırıcısı + serbest metin terimleri, hepsi kombinasyon halinde (`type:image size:>10MB modified:last-week`). Tanınmayan bir `key:value` jetonu (bilinmeyen anahtar veya ayrıştırılamayan değer) sessizce serbest metne düşer — bir filtredeki yazım hatası tüm aramayı asla başarısız kılmaz.
+  - **`index.rs`:** `SearchIndex` — `index_entry`/`remove_path`/`search`; FTS5 `MATCH` sorgusuna giden her kullanıcı terimi tırnaklı bir cümle olarak alıntılanıyor (`fts5_quote`), böylece serbest metindeki `AND`/`OR`/`-`/`*` gibi FTS5 operatör sözdizimi asla sorgu söz dizimine karışamıyor (enjeksiyon hijyeni).
+  - **`indexer.rs`:** `spawn_background_index` — arka plan thread'inde özyinelemeli tarama; her 64 girdide bir 5ms uyku ile CPU/IO'yu serbest bırakıyor, sembolik bağlantı döngülerine karşı 64 seviye derinlik sınırı var.
+- **Gerçek `Ctrl+F` (`window.rs`, `headerbar.rs`):** Faz 3'ten beri `search_toggle` düğmesinin ipucu metni "Ctrl+F" diyordu ama gerçek bir klavye kısayolu hiç bağlanmamıştı (fark edilmemiş bir hata) — artık `win.toggle-search` aksiyonu düğmeyle aynı arama çubuğunu gerçekten açıp kapatıyor.
+- **Gelişmiş arama UI entegrasyonu (`headerbar.rs`, yeni `search_results.rs`):** Arama kutusuna yazılan sorgu `veyra_search::parse` ile ayrıştırılıyor; sorgu herhangi bir filtre kullanıyorsa (`has_filters()`), Faz 3'ün düz sekme-içi dosya adı filtresi yerine SQLite indeksine karşı arka planda (`fs_async::run_blocking`, ana thread asla bloklanmaz) sorgu çalıştırılıyor ve sonuçlar arama kutusunun altında satır satır (simge, ad, tam yol, boyut) gösteriliyor; bir satıra tıklamak odaklı paneli o konuma götürüyor (dizinse içine, dosyaysa üst dizinine). Düz metin sorguları (filtre yok) Faz 3 davranışını değiştirmeden kullanmaya devam ediyor.
+- **Başlangıçta arka plan indeksleme (`window.rs`):** Pencere açılışında ev dizini `veyra_search::spawn_background_index` ile düşük öncelikli arka planda taranmaya başlıyor; arama sonuçları anlamlı olsun diye. İndeks veritabanı `~/.cache/veyra/search_index.db` altında (`veyra_search::default_db_path`); açılamazsa (izin/disk hatası) panik yerine bellek-içi indekse geçiliyor ve durum loglanıyor (Kural #15).
+- **`veyra_ui::run` imzası:** artık `cache_dir: &Path` parametresi alıyor (indeks veritabanı konumu için); `main.rs` zaten çözülmüş `xdg_dirs.cache_dir`'i geçiyor.
+
+### Kapsam Notu (bilinçli sınırlama)
+- Arama sonuçları ayrı, hafif bir liste (simge + ad + yol + boyut) — mevcut Icon/Compact/Details görünümlerine (tam `FileItem` gerektirdikleri, ek `stat` I/O'su isteyen) enjekte edilmiyor. Bu, kapsamı makul tutmak için bilinçli bir tasarım tercihi; tıklama hâlâ gerçek gezinmeye bağlanıyor.
+- İndeksleyici yalnızca ev dizinini tarıyor (Faz 9'un "arka plan indeksleyici" hedefi); dosya sistemi değişikliklerini canlı izleyen bir `GFileMonitor` entegrasyonu ve manuel "Re-index" aksiyonu kapsam dışı bırakıldı — bir sonraki arama fazına aday.
+- İçerik arama (`content_metadata` sütunu, dosya içeriği tam metin arama) şema düzeyinde hazır ama şu an yalnızca `kind` sınıflandırmasıyla dolduruluyor — gerçek dosya içeriği indekslemesi (PDF/metin çıkarımı vb.) kapsam dışı.
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 118/118 (83 + yeni 35 birim/entegrasyon test: `veyra-search`'te `query.rs` sözdizimi ayrıştırıcı testleri, `classify.rs` sınıflandırma testleri, `index.rs` bellek-içi SQLite+FTS5 arama testleri — serbest metin, `type:`, `size:`, `modified:`, kombinasyon, yeniden indeksleme, silme, FTS5 özel karakter güvenliği — ve `indexer.rs` gerçek dizin tarama testleri).
+- `cargo fmt --check`: temiz.
+- Manuel duman testi: `./target/debug/veyra` panik olmadan açıldı; `~/.cache/veyra/search_index.db` gerçekten oluştu ve birkaç saniye içinde arka plan indeksleyici 5.915 satırı gerçekten indeksledi (`sqlite3 ... "select count(*) from files"` ile doğrulandı). Not: bu ortamda Wayland girdi-enjeksiyon aracı yok (önceki fazlarda da not edildi) — arama kutusuna yazma/sonuç tıklama/Ctrl+F görsel olarak elle tıklanarak doğrulanamadı; ekran görüntüsü denemesi başka bir tam ekran pencereyi yakaladığı için atıldı. Bu davranışlar kod incelemesi + `veyra-search`'ün 35 gerçek SQLite entegrasyon testi + build/clippy/test/fmt ile sınırlı doğrulandı.
+
 ## Faz 8 — Split View / Çift Panel (`veyra-ui`)
 
 ### Eklenenler

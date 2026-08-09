@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/veyra-core",
     "crates/veyra-filesystem",
+    "crates/veyra-search",
     "crates/veyra-ui",
     "crates/veyra-app",
 ]

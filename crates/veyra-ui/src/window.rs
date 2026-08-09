@@ -1,5 +1,7 @@
 use std::cell::RefCell;
+use std::path::Path;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gtk4::gio;
 use gtk4::glib;
@@ -7,6 +9,7 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 
 use veyra_filesystem::{FileItem, OperationKind, OperationRequest, VeyraPath};
+use veyra_search::SearchIndex;
 
 use crate::operations::OperationEvent;
 use crate::split_view::{self, Chrome, Panel, PanelId, Panels};
@@ -26,7 +29,11 @@ struct ClipboardEntry {
     cut: bool,
 }
 
-pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw::ApplicationWindow {
+pub(crate) fn build_window(
+    app: &adw::Application,
+    start_dir: VeyraPath,
+    cache_dir: &Path,
+) -> adw::ApplicationWindow {
     let left = split_view::build_panel(PanelId::Left);
     let right = split_view::build_panel(PanelId::Right);
     right.frame.set_visible(false);
@@ -44,7 +51,16 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         Rc::new(move || right_frame.is_visible())
     };
 
-    let header = headerbar::build(&panels, focused.clone());
+    let navigate: Rc<dyn Fn(VeyraPath)> = {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        Rc::new(move |path: VeyraPath| navigate_focused(&panels, &focused, path))
+    };
+
+    let search_index = Arc::new(open_search_index(cache_dir));
+    veyra_search::spawn_background_index(search_index.clone(), glib::home_dir());
+
+    let header = headerbar::build(&panels, focused.clone(), search_index, navigate.clone());
     let progress = widgets::progress_toast::build();
 
     wire_panel(&panels.left, &focused, &header);
@@ -77,11 +93,6 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
     paned.set_position(640);
 
     let content_page = adw::NavigationPage::new(&paned, "Files");
-    let navigate: Rc<dyn Fn(VeyraPath)> = {
-        let panels = panels.clone();
-        let focused = focused.clone();
-        Rc::new(move |path: VeyraPath| navigate_focused(&panels, &focused, path))
-    };
     let sidebar_widget = sidebar::build(navigate);
     let sidebar_page = adw::NavigationPage::new(&sidebar_widget, "Sidebar");
 
@@ -111,6 +122,7 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
     split_view::install_panel_css(&gtk4::prelude::WidgetExt::display(&window));
 
     setup_navigation_shortcuts(app, &window, &panels, &focused);
+    setup_search_shortcut(app, &window, &header);
     setup_tab_actions(
         app,
         &window,
@@ -361,6 +373,52 @@ fn navigate_focused(panels: &Panels, focused: &Rc<RefCell<PanelId>>, path: Veyra
 /// Registers `win.*` actions for the navigation shortcuts and binds their
 /// accelerators on `app`. All act on whichever tab is active in the
 /// currently focused panel.
+/// Opens the Faz 9 search index at `<cache_dir>/search_index.db`, falling
+/// back to an ephemeral in-memory index if the on-disk one can't be opened
+/// (permissions, disk full, corrupt file, ...). Search staying unavailable
+/// is a degraded experience, never a reason to crash the whole application
+/// (Rule #15).
+fn open_search_index(cache_dir: &Path) -> SearchIndex {
+    let db_path = veyra_search::default_db_path(cache_dir);
+    match SearchIndex::open(&db_path) {
+        Ok(index) => index,
+        Err(err) => {
+            tracing::warn!(
+                path = %db_path.display(),
+                error = %err,
+                "failed to open on-disk search index, falling back to in-memory"
+            );
+            SearchIndex::open_in_memory().unwrap_or_else(|err| {
+                // An in-memory SQLite connection failing to open means
+                // SQLite itself is unusable in this process; there is no
+                // sane fallback left, so this is one of the rare spots
+                // where surfacing failure loudly (rather than silently
+                // disabling search) is the right call.
+                panic!("failed to open in-memory search index: {err}")
+            })
+        }
+    }
+}
+
+/// Registers `win.toggle-search` (`Ctrl+F`): clicking the header search
+/// button and pressing Ctrl+F both toggle the same search bar, per Faz 9
+/// requirement A.
+fn setup_search_shortcut(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    header: &headerbar::HeaderBarHandles,
+) {
+    let action_toggle_search = gio::SimpleAction::new("toggle-search", None);
+    {
+        let search_toggle = header.search_toggle.clone();
+        action_toggle_search.connect_activate(move |_, _| {
+            search_toggle.set_active(!search_toggle.is_active());
+        });
+    }
+    window.add_action(&action_toggle_search);
+    app.set_accels_for_action("win.toggle-search", &["<Primary>f"]);
+}
+
 fn setup_navigation_shortcuts(
     app: &adw::Application,
     window: &adw::ApplicationWindow,

@@ -56,7 +56,7 @@ fn main() -> ExitCode {
     // directory; also handy for `veyra /some/path` from a shell/terminal).
     let start_dir = std::env::args().nth(1).map(|arg| VeyraPath::parse(&arg));
 
-    let exit_code = veyra_ui::run(APP_ID, start_dir);
+    let exit_code = veyra_ui::run(APP_ID, start_dir, &xdg_dirs.cache_dir);
 
     tracing::info!(code = exit_code.value(), "Veyra shut down");
 

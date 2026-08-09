@@ -15,6 +15,7 @@ mod fs_async;
 mod headerbar;
 mod history;
 mod operations;
+mod search_results;
 mod sidebar;
 mod split_view;
 mod state;
@@ -23,6 +24,8 @@ mod tab_page;
 mod views;
 mod widgets;
 mod window;
+
+use std::path::Path;
 
 use gtk4::glib;
 use libadwaita::prelude::*;
@@ -34,13 +37,16 @@ use veyra_filesystem::VeyraPath;
 /// application ID, starting in `start_dir` (the user's home directory when
 /// `None` — the default first-launch location, and what "Open in New
 /// Window" passes explicitly to open at the source item's directory).
+/// `cache_dir` is where the Faz 9 search index database lives
+/// (`<cache_dir>/search_index.db`).
 ///
 /// Blocks the calling thread until the GTK main loop exits. Must be called on
 /// the same thread the process started on (GTK main thread requirement).
-pub fn run(app_id: &str, start_dir: Option<VeyraPath>) -> glib::ExitCode {
+pub fn run(app_id: &str, start_dir: Option<VeyraPath>, cache_dir: &Path) -> glib::ExitCode {
     let app = Application::builder().application_id(app_id).build();
 
     let default_icon_name = app_id.to_string();
+    let cache_dir = cache_dir.to_path_buf();
     app.connect_activate(move |app| {
         tracing::info!("activating primary window");
         if let Some(display) = gtk4::gdk::Display::default() {
@@ -52,7 +58,7 @@ pub fn run(app_id: &str, start_dir: Option<VeyraPath>) -> glib::ExitCode {
         let start_dir = start_dir
             .clone()
             .unwrap_or_else(|| VeyraPath::from_local(glib::home_dir()));
-        window::build_window(app, start_dir).present();
+        window::build_window(app, start_dir, &cache_dir).present();
     });
 
     // `start_dir` is already resolved above from our own arg parsing
