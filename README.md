@@ -11,8 +11,11 @@ Veyra, Linux için **Dolphin** seviyesinde zengin özellikler sunan, **Rust**, *
 - **Non-Blocking UI**: Tüm dosya, indeksleme, thumbnail, arşiv ve ağ işlemleri arka plan işçileriyle (worker pool) asenkron çalışır, arayüz asla donmaz.
 - **Hızlı Arama Engine**: SQLite + FTS5 entegrasyonu ile bilgisayar kaynaklarını yormadan anlık tam metin dosya araması.
 - **Çoklu Görünüm Desteği**: Icon View, Compact View ve Details View (Column View).
-- **Gelişmiş Navigasyon**: Tıklanabilir breadcrumbs, adres satırı modu (`Ctrl+L`), sekmeler (`Ctrl+T`), split view (`F3`) ve Command Palette (`Ctrl+K`).
+- **Gelişmiş Navigasyon**: Tıklanabilir breadcrumbs, adres satırı modu (`Ctrl+L`), çoklu sekmeler (`Ctrl+T`), çift panel split view (`F3`, karşı panele kopyala/taşı) ve dinamik sağ tık context menu.
+- **Async Dosya İşlemleri**: Copy/Move/Delete/Trash arka plan kuyruğunda, canlı ilerleme çubuğu ve çakışma çözümleme diyaloğuyla.
 - **Güvenlik Odaklı**: Path traversal engelleme, symlink/TOCTOU koruması, root çalıştırma yasağı ve izolasyonlu Polkit/D-Bus ayrıcalıklı işlem modeli.
+
+> Command Palette (`Ctrl+K`) FAZ 24'te planlanıyor, henüz uygulanmadı — bkz. [docs/roadmap.md](docs/roadmap.md).
 
 ---
 
@@ -25,7 +28,8 @@ Veyra
 │
 ├── veyra-core         # Veri modelleri, config, loglama, temel hatalar ve trait'ler
 ├── veyra-filesystem   # GIO/GVfs dosya sistemi soyutlama katmanı, operasyon kuyruğu
-├── veyra-ui           # GTK4 & Libadwaita arayüz bileşenleri, görünümler, sekmeler
+├── veyra-search       # SQLite + FTS5 arama motoru, sorgu ayrıştırıcı, arka plan indeksleyici
+├── veyra-ui           # GTK4 & Libadwaita arayüz bileşenleri, görünümler, sekmeler, split view
 └── veyra-app          # Uygulama giriş noktası (binary), lifecycle, CLI ve D-Bus
 ```
 
@@ -34,7 +38,7 @@ Veyra
 ## 🚀 Kurulum ve Çalıştırma
 
 ### Gereksinimler
-- **Rust** (1.75 veya üzeri)
+- **Rust** (1.85 veya üzeri)
 - **GTK4** & **Libadwaita** geliştirme kütüphaneleri (`libgtk-4-dev`, `libadwaita-1-dev` veya dağıtımınızın eşdeğer paketleri)
 - **GIO / GLib** kütüphaneleri
 

@@ -14,7 +14,7 @@ edition = "2021"
 rust-version = "1.85"
 license = "GPL-3.0-or-later"
 authors = ["Veyra Contributors"]
-repository = "https://github.com/erayq1/veyra"
+repository = "https://github.com/ERAYQ1/Veyra-File-Manager"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
