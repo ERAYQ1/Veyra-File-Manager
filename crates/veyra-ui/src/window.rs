@@ -142,7 +142,7 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         });
     }
 
-    let on_open = {
+    let on_open: Rc<dyn Fn(FileItem)> = {
         let navigate = navigate.clone();
         Rc::new(move |item: FileItem| {
             if item.kind().is_directory() {
@@ -157,27 +157,45 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         })
     };
 
+    let has_clipboard: Rc<dyn Fn() -> bool> = {
+        let clipboard = clipboard.clone();
+        Rc::new(move || clipboard.borrow().is_some())
+    };
+
     let selections;
     {
         let model = state.borrow().model.clone();
         let filter = filter.clone();
         let on_open = on_open.clone();
 
-        let (icon_widget, icon_selection) = crate::views::build_icon_view(&model, &filter, {
-            let on_open = on_open.clone();
-            move |item| on_open(item)
-        });
-        view_stack.add_named(&icon_widget, Some(ViewMode::Icon.stack_name()));
-
-        let (compact_widget, compact_selection) =
-            crate::views::build_compact_view(&model, &filter, {
+        let (icon_widget, icon_selection) = crate::views::build_icon_view(
+            &model,
+            &filter,
+            {
                 let on_open = on_open.clone();
                 move |item| on_open(item)
-            });
+            },
+            has_clipboard.clone(),
+        );
+        view_stack.add_named(&icon_widget, Some(ViewMode::Icon.stack_name()));
+
+        let (compact_widget, compact_selection) = crate::views::build_compact_view(
+            &model,
+            &filter,
+            {
+                let on_open = on_open.clone();
+                move |item| on_open(item)
+            },
+            has_clipboard.clone(),
+        );
         view_stack.add_named(&compact_widget, Some(ViewMode::Compact.stack_name()));
 
-        let (details_widget, details_selection) =
-            crate::views::build_details_view(&model, &filter, move |item| on_open(item));
+        let (details_widget, details_selection) = crate::views::build_details_view(
+            &model,
+            &filter,
+            move |item| on_open(item),
+            has_clipboard,
+        );
         view_stack.add_named(&details_widget, Some(ViewMode::Details.stack_name()));
 
         view_stack.set_visible_child_name(ViewMode::Icon.stack_name());
@@ -234,6 +252,15 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         &view_stack,
         &selections,
         &clipboard,
+    );
+    setup_context_menu_actions(
+        app,
+        &window,
+        &state,
+        &chrome,
+        &view_stack,
+        &selections,
+        &on_open,
     );
 
     navigate_to(&state, &chrome, start_dir, false);
@@ -442,6 +469,264 @@ fn setup_operation_actions(
     }
     window.add_action(&action_delete);
     app.set_accels_for_action("win.delete-selection", &["<Shift>Delete"]);
+}
+
+/// Registers the Faz 6 context-menu `win.*` actions: item actions (Open,
+/// Open With…, Open in New Window, Rename, Copy Path, Copy Location) and
+/// background actions (New Folder, New Document), plus the shared
+/// `win.not-implemented` disabled action every not-yet-built entry
+/// (Compress/Extract/Open Terminal Here/Properties/Open in New Tab) binds
+/// to. Copy/Cut/Paste/Trash/Delete are already registered by
+/// `setup_operation_actions` and are reused as-is by the context menus.
+#[allow(clippy::too_many_arguments)]
+fn setup_context_menu_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    state: &SharedState,
+    chrome: &Chrome,
+    view_stack: &gtk4::Stack,
+    selections: &ViewSelections,
+    on_open: &Rc<dyn Fn(FileItem)>,
+) {
+    let action_not_implemented = gio::SimpleAction::new("not-implemented", None);
+    action_not_implemented.set_enabled(false);
+    window.add_action(&action_not_implemented);
+
+    let action_open = gio::SimpleAction::new("open-selected", None);
+    {
+        let view_stack = view_stack.clone();
+        let selections = selections.clone();
+        let on_open = on_open.clone();
+        action_open.connect_activate(move |_, _| {
+            if let Some(item) = selections.selected(&view_stack) {
+                on_open(item);
+            }
+        });
+    }
+    window.add_action(&action_open);
+
+    let action_open_with = gio::SimpleAction::new("open-with-selected", None);
+    {
+        let window = window.clone();
+        let view_stack = view_stack.clone();
+        let selections = selections.clone();
+        action_open_with.connect_activate(move |_, _| {
+            let Some(item) = selections.selected(&view_stack) else {
+                return;
+            };
+            show_open_with_dialog(&window, &item.path);
+        });
+    }
+    window.add_action(&action_open_with);
+
+    let action_open_new_window = gio::SimpleAction::new("open-in-new-window-selected", None);
+    {
+        let view_stack = view_stack.clone();
+        let selections = selections.clone();
+        action_open_new_window.connect_activate(move |_, _| {
+            if let Some(item) = selections.selected(&view_stack) {
+                if item.kind().is_directory() {
+                    spawn_new_window(&item.path);
+                }
+            }
+        });
+    }
+    window.add_action(&action_open_new_window);
+
+    let action_rename = gio::SimpleAction::new("rename-selected", None);
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let chrome = chrome.clone();
+        let view_stack = view_stack.clone();
+        let selections = selections.clone();
+        action_rename.connect_activate(move |_, _| {
+            let Some(item) = selections.selected(&view_stack) else {
+                return;
+            };
+            let current_name = item.name().to_string();
+            let path = item.path.clone();
+            let state = state.clone();
+            let chrome = chrome.clone();
+            let previous_name = current_name.clone();
+            dialogs::rename_dialog::show(&window, &current_name, move |new_name| {
+                if new_name.is_empty() || new_name == previous_name {
+                    return;
+                }
+                let state = state.clone();
+                let chrome = chrome.clone();
+                fs_async::run_blocking(
+                    move || veyra_filesystem::rename(&path, &new_name),
+                    move |result| match result {
+                        Ok(_) => refresh(&state, &chrome),
+                        Err(err) => {
+                            tracing::warn!(error = %err, "rename failed");
+                            chrome
+                                .status_left
+                                .set_label(&format!("Rename failed: {err}"));
+                        }
+                    },
+                );
+            });
+        });
+    }
+    window.add_action(&action_rename);
+    app.set_accels_for_action("win.rename-selected", &["F2"]);
+
+    let action_copy_path = gio::SimpleAction::new("copy-path-selected", None);
+    {
+        let window = window.clone();
+        let view_stack = view_stack.clone();
+        let selections = selections.clone();
+        action_copy_path.connect_activate(move |_, _| {
+            if let Some(item) = selections.selected(&view_stack) {
+                window.clipboard().set_text(&item.path.to_string());
+            }
+        });
+    }
+    window.add_action(&action_copy_path);
+
+    let action_copy_location = gio::SimpleAction::new("copy-location-selected", None);
+    {
+        let window = window.clone();
+        let view_stack = view_stack.clone();
+        let selections = selections.clone();
+        action_copy_location.connect_activate(move |_, _| {
+            if let Some(item) = selections.selected(&view_stack) {
+                window.clipboard().set_text(&parent_display(&item.path));
+            }
+        });
+    }
+    window.add_action(&action_copy_location);
+
+    let action_create_folder = gio::SimpleAction::new("create-folder", None);
+    {
+        let state = state.clone();
+        let chrome = chrome.clone();
+        action_create_folder.connect_activate(move |_, _| {
+            create_child_entry(&state, &chrome, "New Folder", true);
+        });
+    }
+    window.add_action(&action_create_folder);
+
+    let action_create_document = gio::SimpleAction::new("create-document", None);
+    {
+        let state = state.clone();
+        let chrome = chrome.clone();
+        action_create_document.connect_activate(move |_, _| {
+            create_child_entry(&state, &chrome, "New Document", false);
+        });
+    }
+    window.add_action(&action_create_document);
+}
+
+/// Creates a new folder or empty file named `base_name` (auto-suffixed with
+/// `(2)`, `(3)`, ... on collision, per `veyra_filesystem::suggest_name`)
+/// inside the current directory, then refreshes the listing.
+fn create_child_entry(state: &SharedState, chrome: &Chrome, base_name: &str, is_dir: bool) {
+    let dir = state.borrow().current_dir.clone();
+    let name = unique_child_name(&dir, base_name);
+    let path = child_path(&dir, &name);
+
+    let state = state.clone();
+    let chrome = chrome.clone();
+    fs_async::run_blocking(
+        move || {
+            if is_dir {
+                veyra_filesystem::create_dir(&path)
+            } else {
+                veyra_filesystem::create_file(&path)
+            }
+        },
+        move |result| match result {
+            Ok(()) => refresh(&state, &chrome),
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to create new entry");
+                chrome
+                    .status_left
+                    .set_label(&format!("Create failed: {err}"));
+            }
+        },
+    );
+}
+
+/// `base_name` if free in `dir`, otherwise the first free `base_name (N)`
+/// variant. A quick single `query_exists` stat per candidate on the GTK main
+/// thread — the same trade-off `dialogs::conflict_dialog::sibling_exists`
+/// already makes for the same reason (negligible cost, no async round trip
+/// needed just to name a new folder).
+fn unique_child_name(dir: &VeyraPath, base_name: &str) -> String {
+    let exists = |candidate: &str| {
+        child_path(dir, candidate)
+            .to_gio_file()
+            .query_exists(gio::Cancellable::NONE)
+    };
+    if !exists(base_name) {
+        base_name.to_string()
+    } else {
+        veyra_filesystem::suggest_name(base_name, exists)
+    }
+}
+
+fn child_path(dir: &VeyraPath, name: &str) -> VeyraPath {
+    match dir {
+        VeyraPath::Local(path) => VeyraPath::from_local(path.join(name)),
+        VeyraPath::Uri(uri) => VeyraPath::from_uri(format!("{}/{name}", uri.trim_end_matches('/'))),
+    }
+}
+
+/// The containing directory of `path`, as a display string (falls back to
+/// `path` itself if it has no parent, e.g. the filesystem root).
+fn parent_display(path: &VeyraPath) -> String {
+    match path {
+        VeyraPath::Local(local) => local
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| path.to_string()),
+        VeyraPath::Uri(uri) => uri
+            .trim_end_matches('/')
+            .rsplit_once('/')
+            .map(|(parent, _)| parent.to_string())
+            .unwrap_or_else(|| path.to_string()),
+    }
+}
+
+/// Shows the system application-chooser dialog for `path` and launches the
+/// chosen application on confirmation. A single `GAppInfo` launch (a fork +
+/// D-Bus activation, not filesystem I/O) is fast enough to run directly on
+/// the GTK main thread, unlike the bulk Copy/Move/Trash/Delete operations.
+fn show_open_with_dialog(window: &adw::ApplicationWindow, path: &VeyraPath) {
+    let file = path.to_gio_file();
+    let dialog = gtk4::AppChooserDialog::new(Some(window), gtk4::DialogFlags::MODAL, &file);
+    dialog.connect_response(move |dialog, response| {
+        if response == gtk4::ResponseType::Ok {
+            if let Some(app_info) = dialog.app_info() {
+                if let Err(err) =
+                    app_info.launch(std::slice::from_ref(&file), gio::AppLaunchContext::NONE)
+                {
+                    tracing::warn!(error = %err, "failed to launch chosen application");
+                }
+            }
+        }
+        dialog.close();
+    });
+    dialog.present();
+}
+
+/// Relaunches the Veyra binary pointed at `path`, standing in for "Open in
+/// New Window" until Faz 7 gives real in-process tabs/windows sharing one
+/// app instance's state.
+fn spawn_new_window(path: &VeyraPath) {
+    let Ok(exe) = std::env::current_exe() else {
+        tracing::warn!("failed to resolve current executable for new window");
+        return;
+    };
+    if let Err(err) = std::process::Command::new(exe)
+        .arg(path.to_string())
+        .spawn()
+    {
+        tracing::warn!(error = %err, "failed to open new window");
+    }
 }
 
 /// Starts `request` on a background thread and drives its event stream:

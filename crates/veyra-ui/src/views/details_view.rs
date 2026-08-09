@@ -1,4 +1,5 @@
 use std::cmp::Ordering as StdOrdering;
+use std::rc::Rc;
 
 use gtk4::gio;
 use gtk4::glib;
@@ -14,6 +15,7 @@ pub(crate) fn build_details_view(
     model: &gio::ListStore,
     filter: &gtk4::CustomFilter,
     on_open: impl Fn(FileItem) + 'static,
+    has_clipboard: Rc<dyn Fn() -> bool>,
 ) -> (gtk4::Widget, gtk4::SingleSelection) {
     let column_view = gtk4::ColumnView::new(None::<gtk4::SingleSelection>);
     column_view.set_show_row_separators(true);
@@ -52,6 +54,7 @@ pub(crate) fn build_details_view(
             on_open(item);
         }
     });
+    crate::context_menu::attach(&column_view, &selection, has_clipboard);
 
     let scrolled = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Automatic)

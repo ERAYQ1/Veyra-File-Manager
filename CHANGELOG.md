@@ -1,5 +1,27 @@
 # Changelog
 
+## Faz 6 — Context Menu (`veyra-ui`, `veyra-app`)
+
+### Eklenenler
+- **`context_menu.rs` (yeni, `veyra-ui`):** Öge ve boş-alan sağ tık popover menüleri için `gio::Menu` + `GtkPopoverMenu` altyapısı. Sağ tık `GtkGestureClick` (`BUTTON_SECONDARY`, `released`) her üç görünümün asıl `GtkGridView`/`GtkColumnView` widget'ına bağlanır — GTK4'ün dahili satır-seçim gesture'ı zaten *her* fare tuşunda (sadece primary değil) `released` anında seçimi günceller, bu yüzden bizim bubble-phase handler'ımız çalıştığında `selection.selected()` doğru ögeyi verir; ek pozisyon takibi gerekmez. Boş alan tıklaması `Widget::pick()` sonucunun görünüm widget'ının kendisi olup olmamasıyla ayırt edilir.
+  - **Öge menüsü:** Open, Open With… (`GtkAppChooserDialog`), Open in New Tab (Faz 7 — devre dışı), Open in New Window (yalnızca klasör; ayrı bir Veyra sürecini hedef dizinle yeniden başlatır), Copy/Cut (mevcut `win.copy-selection`/`win.cut-selection`'ı yeniden kullanır), Rename (F2, yeni `dialogs/rename_dialog.rs`), Move to Trash/Delete Permanently (mevcut aksiyonlar), Compress… (Faz 19 — devre dışı), Extract Here (yalnızca `.zip/.tar.gz/.7z/.xz` vb. tanınan arşiv uzantılarında görünür, Faz 19 — devre dışı), Open Terminal Here (Faz 23 — devre dışı), Copy Path, Copy Location, Properties (Faz 12 — devre dışı).
+  - **Boş alan menüsü:** New Folder / New Document (`veyra_filesystem::create_dir`/`create_file` + `suggest_name` ile çakışmasız isim), Paste (pano doluysa gerçek `win.paste`'e, boşsa devre dışı aksiyona bağlanır — her açılışta taze değerlendirilir), Open Terminal Here (Faz 23 — devre dışı), Properties (Faz 12 — devre dışı).
+- **`dialogs/rename_dialog.rs` (yeni, `veyra-ui`):** `AdwAlertDialog` + `Entry` tabanlı yeniden adlandırma istemi; ad kökü (uzantı hariç) önceden seçili, boş girişte "Rename" yanıtı devre dışı.
+- **Yeni `win.*` aksiyonları (`window.rs`):** `open-selected`, `open-with-selected`, `open-in-new-window-selected`, `rename-selected` (`F2`), `copy-path-selected`, `copy-location-selected`, `create-folder`, `create-document`, ve paylaşılan devre dışı `not-implemented` aksiyonu (henüz inşa edilmemiş her menü ögesi buna bağlanır).
+- **"Open in New Window" desteği (`veyra-ui::run`, `veyra-app::main`):** `veyra_ui::run` artık isteğe bağlı bir başlangıç dizini (`Option<VeyraPath>`) alıyor; `main.rs` ilk CLI argümanını (`veyra /some/path`) buna geçiriyor. `gio::Application::run()` yerine `run_with_args(&[])` kullanılıyor — argv'yi `GApplication`'ın kendi "open files" komut satırı işleyicisine (bu uygulama `HANDLES_OPEN` bildirmiyor) tekrar geçirmemek için; yol zaten yukarıda elle ayrıştırılıp `activate` içinde kullanılıyor.
+
+### Kapsam Notu (bilinçli sınırlama)
+- Compress/Extract (Faz 19 — Arşiv Yöneticisi), Open Terminal Here (Faz 23 — Terminal Entegrasyonu), Properties (Faz 12 — Özellikler Penceresi) ve Open in New Tab (Faz 7 — Sekmeler) roadmap'te sonraki fazlara ait; Kural #2 (No Monolithic Leaps) gereği bu fazda gerçek işlevsellik eklenmedi. Menüde görünürler ama devre dışıdırlar, etiketlerinde ait oldukları fazı belirtir (ör. "Compress… (Faz 19)") — kullanıcı onayıyla seçilen yaklaşım.
+- "Open in New Tab" için gerçek sekme altyapısı yok (Faz 7); bu yüzden şimdilik menüde yer almıyor değil, doğrudan devre dışı gösteriliyor (yukarıdaki not). "Open in New Window" ise gerçek ve çalışır durumda: hedef dizinle yeni bir Veyra süreci başlatır.
+- Properties penceresi Faz 12'ye kadar hem öge hem boş-alan menüsünde devre dışı; iki menü de aynı paylaşılan `win.not-implemented` aksiyonunu kullanıyor.
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 75/75 (yeni: `context_menu.rs` 2 birim test — arşiv uzantısı tanıma).
+- `cargo fmt --check`: temiz.
+- Manuel duman testi: `./target/debug/veyra` (varsayılan ev dizini) ve `./target/debug/veyra /tmp` (CLI ile başlangıç dizini) her ikisi de panik olmadan pencereyi açtı; `run_with_args` düzeltmesinden önce ikincisi `GLib-GIO-CRITICAL: This application can not open files` hatası veriyordu.
+
 ## Faz 5 — Dosya İşlemleri Sistemi (`veyra-filesystem`, `veyra-ui`)
 
 ### Eklenenler

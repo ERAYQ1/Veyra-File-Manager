@@ -1,0 +1,191 @@
+//! Faz 6: dynamic right-click context menus for the item views (Icon/
+//! Compact/Details) and their background (empty-space) area.
+//!
+//! GTK4's `GtkGridView`/`GtkColumnView` select the item under the pointer on
+//! *any* mouse button release (not just primary), so by the time our
+//! secondary-button `GtkGestureClick` fires (bubble phase, after the view's
+//! own row-selection gesture has already run at the target phase),
+//! `selection.selected()` already reflects the clicked item — no manual
+//! hit-to-position bookkeeping needed. A right-click that lands on empty
+//! space (no row widget under the pointer) is detected via `Widget::pick`
+//! returning the view widget itself rather than a row descendant, and opens
+//! the background menu instead.
+//!
+//! Menu entries for actions not yet implemented in earlier phases (Compress/
+//! Extract: Faz 19, Open Terminal Here: Faz 23, Properties: Faz 12, Open in
+//! New Tab: Faz 7) are shown insensitive, bound to the shared
+//! `win.not-implemented` action, with the owning phase noted in the label —
+//! per Rule #2 (no monolithic leaps across the roadmap).
+
+use std::rc::Rc;
+
+use gtk4::prelude::*;
+use gtk4::{gdk, gio};
+
+use veyra_filesystem::FileItem;
+
+use crate::views::selected_item;
+
+/// Attaches a secondary-click (right-click) popover context menu to `view`
+/// (the actual `GtkGridView`/`GtkColumnView`, not an enclosing
+/// `GtkScrolledWindow` — hit-testing relies on `view` itself being the "no
+/// item under the pointer" sentinel). `has_clipboard` is polled fresh on
+/// every background-menu build so the Paste entry's action binding (real
+/// `win.paste` vs. the shared disabled action) always matches the clipboard
+/// at click time.
+pub(crate) fn attach<V: IsA<gtk4::Widget> + Clone>(
+    view: &V,
+    selection: &gtk4::SingleSelection,
+    has_clipboard: Rc<dyn Fn() -> bool>,
+) {
+    let popover = gtk4::PopoverMenu::from_model(None::<&gio::MenuModel>);
+    popover.set_parent(view);
+    popover.set_has_arrow(false);
+    popover.set_halign(gtk4::Align::Start);
+
+    let gesture = gtk4::GestureClick::new();
+    gesture.set_button(gdk::BUTTON_SECONDARY);
+
+    let view_widget: gtk4::Widget = view.clone().upcast();
+    let selection = selection.clone();
+    gesture.connect_released(move |gesture, _n_press, x, y| {
+        gesture.set_state(gtk4::EventSequenceState::Claimed);
+
+        let hit_item = view_widget
+            .pick(x, y, gtk4::PickFlags::DEFAULT)
+            .is_some_and(|picked| picked != view_widget);
+
+        let menu = hit_item
+            .then(|| selected_item(&selection))
+            .flatten()
+            .map(|item| build_item_menu(&item))
+            .unwrap_or_else(|| build_background_menu(has_clipboard()));
+
+        popover.set_menu_model(Some(&menu));
+        popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        popover.popup();
+    });
+
+    view.add_controller(gesture);
+}
+
+/// Builds the per-item menu for `item`: entries that only make sense for a
+/// directory (Open in New Tab/Window) or that only apply to a recognized
+/// archive (Extract Here) are omitted or shown disabled accordingly.
+fn build_item_menu(item: &FileItem) -> gio::Menu {
+    let is_dir = item.kind().is_directory();
+    let is_archive = is_archive_name(item.name());
+
+    let menu = gio::Menu::new();
+
+    let open_section = gio::Menu::new();
+    open_section.append(Some("Open"), Some("win.open-selected"));
+    open_section.append(Some("Open With…"), Some("win.open-with-selected"));
+    if is_dir {
+        open_section.append(Some("Open in New Tab (Faz 7)"), Some("win.not-implemented"));
+        open_section.append(
+            Some("Open in New Window"),
+            Some("win.open-in-new-window-selected"),
+        );
+    }
+    menu.append_section(None, &open_section);
+
+    let clipboard_section = gio::Menu::new();
+    clipboard_section.append(Some("Copy"), Some("win.copy-selection"));
+    clipboard_section.append(Some("Cut"), Some("win.cut-selection"));
+    menu.append_section(None, &clipboard_section);
+
+    let mutate_section = gio::Menu::new();
+    mutate_section.append(Some("Rename"), Some("win.rename-selected"));
+    mutate_section.append(Some("Move to Trash"), Some("win.trash-selection"));
+    mutate_section.append(Some("Delete Permanently"), Some("win.delete-selection"));
+    menu.append_section(None, &mutate_section);
+
+    let archive_section = gio::Menu::new();
+    archive_section.append(Some("Compress… (Faz 19)"), Some("win.not-implemented"));
+    if is_archive {
+        archive_section.append(Some("Extract Here (Faz 19)"), Some("win.not-implemented"));
+    }
+    menu.append_section(None, &archive_section);
+
+    let path_section = gio::Menu::new();
+    path_section.append(
+        Some("Open Terminal Here (Faz 23)"),
+        Some("win.not-implemented"),
+    );
+    path_section.append(Some("Copy Path"), Some("win.copy-path-selected"));
+    path_section.append(Some("Copy Location"), Some("win.copy-location-selected"));
+    menu.append_section(None, &path_section);
+
+    let properties_section = gio::Menu::new();
+    properties_section.append(Some("Properties (Faz 12)"), Some("win.not-implemented"));
+    menu.append_section(None, &properties_section);
+
+    menu
+}
+
+/// Builds the empty-space (background) menu for the current directory.
+/// `has_clipboard` decides whether Paste is bound to the real `win.paste`
+/// action or the shared disabled `win.not-implemented` action.
+fn build_background_menu(has_clipboard: bool) -> gio::Menu {
+    let menu = gio::Menu::new();
+
+    let create_section = gio::Menu::new();
+    create_section.append(Some("New Folder"), Some("win.create-folder"));
+    create_section.append(Some("New Document"), Some("win.create-document"));
+    menu.append_section(None, &create_section);
+
+    let paste_section = gio::Menu::new();
+    let paste_action = if has_clipboard {
+        "win.paste"
+    } else {
+        "win.not-implemented"
+    };
+    paste_section.append(Some("Paste"), Some(paste_action));
+    menu.append_section(None, &paste_section);
+
+    let misc_section = gio::Menu::new();
+    misc_section.append(
+        Some("Open Terminal Here (Faz 23)"),
+        Some("win.not-implemented"),
+    );
+    menu.append_section(None, &misc_section);
+
+    let properties_section = gio::Menu::new();
+    properties_section.append(Some("Properties (Faz 12)"), Some("win.not-implemented"));
+    menu.append_section(None, &properties_section);
+
+    menu
+}
+
+/// Recognized archive extensions for the "Extract Here" entry's visibility.
+/// The actual extraction engine is Faz 19 — this only decides whether the
+/// (disabled) entry appears.
+fn is_archive_name(name: &str) -> bool {
+    const ARCHIVE_SUFFIXES: &[&str] = &[
+        ".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".7z", ".xz",
+        ".rar",
+    ];
+    let lower = name.to_lowercase();
+    ARCHIVE_SUFFIXES.iter().any(|ext| lower.ends_with(ext))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_common_archive_extensions() {
+        assert!(is_archive_name("backup.zip"));
+        assert!(is_archive_name("Backup.TAR.GZ"));
+        assert!(is_archive_name("data.7z"));
+        assert!(is_archive_name("data.tar.xz"));
+    }
+
+    #[test]
+    fn rejects_non_archive_names() {
+        assert!(!is_archive_name("notes.txt"));
+        assert!(!is_archive_name("archive-of-photos"));
+        assert!(!is_archive_name("gzip-notes.md"));
+    }
+}
