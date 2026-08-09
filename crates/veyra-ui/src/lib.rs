@@ -34,8 +34,15 @@ use veyra_filesystem::VeyraPath;
 pub fn run(app_id: &str) -> glib::ExitCode {
     let app = Application::builder().application_id(app_id).build();
 
-    app.connect_activate(|app| {
+    let default_icon_name = app_id.to_string();
+    app.connect_activate(move |app| {
         tracing::info!("activating primary window");
+        if let Some(display) = gtk4::gdk::Display::default() {
+            let icon_theme = gtk4::IconTheme::for_display(&display);
+            icon_theme.add_search_path("data/icons");
+        }
+        gtk4::Window::set_default_icon_name(&default_icon_name);
+
         let start_dir = VeyraPath::from_local(glib::home_dir());
         window::build_window(app, start_dir).present();
     });

@@ -214,6 +214,9 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         .build();
 
     add_dev_icon_search_path(&window);
+    if let Some(app_id) = app.application_id() {
+        window.set_icon_name(Some(&app_id));
+    }
     setup_shortcuts(
         app,
         &window,
