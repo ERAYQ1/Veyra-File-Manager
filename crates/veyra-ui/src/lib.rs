@@ -11,6 +11,7 @@
 mod breadcrumbs;
 mod fs_async;
 mod headerbar;
+mod history;
 mod sidebar;
 mod state;
 mod statusbar;

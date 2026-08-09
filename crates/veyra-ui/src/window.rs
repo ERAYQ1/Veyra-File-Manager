@@ -20,6 +20,8 @@ struct Chrome {
     forward_button: gtk4::Button,
     up_button: gtk4::Button,
     breadcrumbs_box: gtk4::Box,
+    title_stack: gtk4::Stack,
+    address_entry: gtk4::Entry,
     status_left: gtk4::Label,
     status_right: gtk4::Label,
 }
@@ -40,6 +42,8 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         forward_button: header.forward_button.clone(),
         up_button: header.up_button.clone(),
         breadcrumbs_box: header.breadcrumbs_box.clone(),
+        title_stack: header.title_stack.clone(),
+        address_entry: header.address_entry.clone(),
         status_left: status_bar.left_label.clone(),
         status_right: status_bar.right_label.clone(),
     };
@@ -67,16 +71,38 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
     {
         let state = state.clone();
         let navigate = navigate.clone();
-        header.up_button.connect_clicked(move |_| {
-            let parent = state
-                .borrow()
-                .current_dir
-                .as_local_path()
-                .and_then(|p| p.parent())
-                .map(|p| p.to_path_buf());
-            if let Some(parent) = parent {
-                navigate(VeyraPath::from_local(parent));
+        header
+            .up_button
+            .connect_clicked(move |_| go_up(&state, &navigate));
+    }
+    {
+        let navigate = navigate.clone();
+        header.home_button.connect_clicked(move |_| {
+            navigate(VeyraPath::from_local(gtk4::glib::home_dir()));
+        });
+    }
+    {
+        let state = state.clone();
+        let chrome = chrome.clone();
+        header
+            .refresh_button
+            .connect_clicked(move |_| refresh(&state, &chrome));
+    }
+    {
+        let state = state.clone();
+        let chrome = chrome.clone();
+        header.address_entry.connect_activate(move |entry| {
+            let text = entry.text();
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                navigate_to(
+                    &state,
+                    &chrome,
+                    VeyraPath::from_local(std::path::PathBuf::from(trimmed)),
+                    true,
+                );
             }
+            chrome.title_stack.set_visible_child_name("breadcrumbs");
         });
     }
 
@@ -144,10 +170,100 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         .build();
 
     add_dev_icon_search_path(&window);
+    setup_shortcuts(
+        app,
+        &window,
+        &state,
+        &chrome,
+        &navigate,
+        &header.address_entry,
+    );
 
     navigate_to(&state, &chrome, start_dir, false);
 
     window
+}
+
+/// Registers `win.*` actions for the navigation shortcuts and binds their
+/// accelerators on `app`. Actions (rather than raw key controllers) so the
+/// bindings respect normal GTK focus/shortcut-inhibition rules (e.g. they
+/// don't fire while a text entry elsewhere has focus and wants the key).
+fn setup_shortcuts(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    state: &SharedState,
+    chrome: &Chrome,
+    navigate: &Rc<dyn Fn(VeyraPath)>,
+    address_entry: &gtk4::Entry,
+) {
+    let action_back = gio::SimpleAction::new("go-back", None);
+    {
+        let state = state.clone();
+        let chrome = chrome.clone();
+        action_back.connect_activate(move |_, _| go_back(&state, &chrome));
+    }
+    window.add_action(&action_back);
+    app.set_accels_for_action("win.go-back", &["<Alt>Left"]);
+
+    let action_forward = gio::SimpleAction::new("go-forward", None);
+    {
+        let state = state.clone();
+        let chrome = chrome.clone();
+        action_forward.connect_activate(move |_, _| go_forward(&state, &chrome));
+    }
+    window.add_action(&action_forward);
+    app.set_accels_for_action("win.go-forward", &["<Alt>Right"]);
+
+    let action_up = gio::SimpleAction::new("go-up", None);
+    {
+        let state = state.clone();
+        let navigate = navigate.clone();
+        action_up.connect_activate(move |_, _| go_up(&state, &navigate));
+    }
+    window.add_action(&action_up);
+    app.set_accels_for_action("win.go-up", &["<Alt>Up"]);
+
+    let action_refresh = gio::SimpleAction::new("refresh", None);
+    {
+        let state = state.clone();
+        let chrome = chrome.clone();
+        action_refresh.connect_activate(move |_, _| refresh(&state, &chrome));
+    }
+    window.add_action(&action_refresh);
+    app.set_accels_for_action("win.refresh", &["F5"]);
+
+    let action_focus_address = gio::SimpleAction::new("focus-address", None);
+    {
+        let chrome = chrome.clone();
+        let address_entry = address_entry.clone();
+        action_focus_address.connect_activate(move |_, _| {
+            chrome.title_stack.set_visible_child_name("address");
+            address_entry.grab_focus();
+            address_entry.select_region(0, -1);
+        });
+    }
+    window.add_action(&action_focus_address);
+    app.set_accels_for_action("win.focus-address", &["<Primary>l"]);
+}
+
+/// Navigates to the current directory's parent, if any (no-op at the
+/// filesystem root).
+fn go_up(state: &SharedState, navigate: &Rc<dyn Fn(VeyraPath)>) {
+    let parent = state
+        .borrow()
+        .current_dir
+        .as_local_path()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf());
+    if let Some(parent) = parent {
+        navigate(VeyraPath::from_local(parent));
+    }
+}
+
+/// Re-reads the current directory without touching navigation history.
+fn refresh(state: &SharedState, chrome: &Chrome) {
+    let path = state.borrow().current_dir.clone();
+    load_directory(state, chrome, path);
 }
 
 fn build_search_filter(state: &SharedState, query: Rc<RefCell<String>>) -> gtk4::CustomFilter {
@@ -174,8 +290,7 @@ fn navigate_to(state: &SharedState, chrome: &Chrome, path: VeyraPath, push_histo
         let mut state_mut = state.borrow_mut();
         if push_history {
             let previous = state_mut.current_dir.clone();
-            state_mut.back_stack.push(previous);
-            state_mut.forward_stack.clear();
+            state_mut.history.record(previous);
         }
         state_mut.current_dir = path.clone();
     }
@@ -187,11 +302,10 @@ fn navigate_to(state: &SharedState, chrome: &Chrome, path: VeyraPath, push_histo
 fn go_back(state: &SharedState, chrome: &Chrome) {
     let target = {
         let mut state_mut = state.borrow_mut();
-        let Some(previous) = state_mut.back_stack.pop() else {
+        let current = state_mut.current_dir.clone();
+        let Some(previous) = state_mut.history.go_back(current) else {
             return;
         };
-        let current = state_mut.current_dir.clone();
-        state_mut.forward_stack.push(current);
         state_mut.current_dir = previous.clone();
         previous
     };
@@ -202,11 +316,10 @@ fn go_back(state: &SharedState, chrome: &Chrome) {
 fn go_forward(state: &SharedState, chrome: &Chrome) {
     let target = {
         let mut state_mut = state.borrow_mut();
-        let Some(next) = state_mut.forward_stack.pop() else {
+        let current = state_mut.current_dir.clone();
+        let Some(next) = state_mut.history.go_forward(current) else {
             return;
         };
-        let current = state_mut.current_dir.clone();
-        state_mut.back_stack.push(current);
         state_mut.current_dir = next.clone();
         next
     };
@@ -221,6 +334,9 @@ fn update_chrome(state: &SharedState, chrome: &Chrome) {
         .forward_button
         .set_sensitive(state_ref.can_go_forward());
     chrome.up_button.set_sensitive(state_ref.can_go_up());
+    chrome
+        .address_entry
+        .set_text(&state_ref.current_dir.to_string());
 
     let navigate: Rc<dyn Fn(VeyraPath)> = {
         let state = state.clone();

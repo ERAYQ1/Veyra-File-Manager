@@ -15,7 +15,12 @@ pub(crate) struct HeaderBarHandles {
     pub back_button: gtk4::Button,
     pub forward_button: gtk4::Button,
     pub up_button: gtk4::Button,
+    pub home_button: gtk4::Button,
+    pub refresh_button: gtk4::Button,
     pub breadcrumbs_box: gtk4::Box,
+    /// Swaps between the breadcrumbs row and the editable address entry.
+    pub title_stack: gtk4::Stack,
+    pub address_entry: gtk4::Entry,
 }
 
 pub(crate) fn build(
@@ -28,17 +33,75 @@ pub(crate) fn build(
     let back_button = nav_button("go-previous-symbolic", "Go Back");
     let forward_button = nav_button("go-next-symbolic", "Go Forward");
     let up_button = nav_button("go-up-symbolic", "Go Up");
+    let home_button = nav_button("go-home-symbolic", "Go Home");
+    let refresh_button = nav_button("view-refresh-symbolic", "Refresh (F5)");
 
     let nav_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     nav_box.add_css_class("linked");
     nav_box.append(&back_button);
     nav_box.append(&forward_button);
     nav_box.append(&up_button);
+    nav_box.append(&home_button);
     widget.pack_start(&nav_box);
+    widget.pack_start(&refresh_button);
 
     let breadcrumbs_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
     breadcrumbs_box.set_halign(gtk4::Align::Center);
-    widget.set_title_widget(Some(&breadcrumbs_box));
+
+    let address_entry = gtk4::Entry::new();
+    address_entry.set_hexpand(true);
+    address_entry.set_tooltip_text(Some("Enter Location (Enter to go, Esc to cancel)"));
+    address_entry.update_property(&[gtk4::accessible::Property::Label("Address")]);
+
+    let title_stack = gtk4::Stack::new();
+    title_stack.set_hexpand(true);
+    title_stack.add_named(&breadcrumbs_box, Some("breadcrumbs"));
+    title_stack.add_named(&address_entry, Some("address"));
+    title_stack.set_visible_child_name("breadcrumbs");
+    widget.set_title_widget(Some(&title_stack));
+
+    // Clicking empty space in the breadcrumbs row (not on a segment button,
+    // since GestureClick's default TARGET phase only sees events aimed at
+    // this widget itself) switches to address-entry mode.
+    let breadcrumbs_click = gtk4::GestureClick::new();
+    {
+        let title_stack = title_stack.clone();
+        let address_entry = address_entry.clone();
+        breadcrumbs_click.connect_released(move |gesture, _, _, _| {
+            gesture.set_state(gtk4::EventSequenceState::Claimed);
+            title_stack.set_visible_child_name("address");
+            address_entry.grab_focus();
+            address_entry.select_region(0, -1);
+        });
+    }
+    breadcrumbs_box.add_controller(breadcrumbs_click);
+
+    // Esc cancels address entry and returns to the breadcrumbs view.
+    let address_key = gtk4::EventControllerKey::new();
+    {
+        let title_stack = title_stack.clone();
+        let breadcrumbs_box = breadcrumbs_box.clone();
+        address_key.connect_key_pressed(move |_, keyval, _, _| {
+            if keyval == gtk4::gdk::Key::Escape {
+                title_stack.set_visible_child_name("breadcrumbs");
+                breadcrumbs_box.grab_focus();
+                gtk4::glib::Propagation::Stop
+            } else {
+                gtk4::glib::Propagation::Proceed
+            }
+        });
+    }
+    address_entry.add_controller(address_key);
+
+    // Losing focus without pressing Enter also reverts to breadcrumbs mode.
+    let address_focus = gtk4::EventControllerFocus::new();
+    {
+        let title_stack = title_stack.clone();
+        address_focus.connect_leave(move |_| {
+            title_stack.set_visible_child_name("breadcrumbs");
+        });
+    }
+    address_entry.add_controller(address_focus);
 
     let search_entry = gtk4::SearchEntry::new();
     search_entry.set_hexpand(true);
@@ -74,7 +137,11 @@ pub(crate) fn build(
         back_button,
         forward_button,
         up_button,
+        home_button,
+        refresh_button,
         breadcrumbs_box,
+        title_stack,
+        address_entry,
     }
 }
 
