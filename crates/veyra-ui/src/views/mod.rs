@@ -41,6 +41,12 @@ pub(crate) fn item_at(model: &impl IsA<gio::ListModel>, position: u32) -> Option
     Some(cloned)
 }
 
+/// The currently selected item in `selection`, if any (`GTK_INVALID_LIST_POSITION`
+/// when nothing is selected, which `item_at` already treats as "no item").
+pub(crate) fn selected_item(selection: &gtk4::SingleSelection) -> Option<FileItem> {
+    item_at(selection, selection.selected())
+}
+
 /// Default ordering for the Icon and Compact views: directories before
 /// files, then case-insensitive name comparison. The Details view instead
 /// uses its own column-header-driven `ColumnViewSorter`.

@@ -9,13 +9,16 @@
 #![forbid(unsafe_code)]
 
 mod breadcrumbs;
+mod dialogs;
 mod fs_async;
 mod headerbar;
 mod history;
+mod operations;
 mod sidebar;
 mod state;
 mod statusbar;
 mod views;
+mod widgets;
 mod window;
 
 use gtk4::glib;

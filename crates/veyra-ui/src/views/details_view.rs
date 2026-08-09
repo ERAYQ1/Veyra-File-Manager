@@ -14,7 +14,7 @@ pub(crate) fn build_details_view(
     model: &gio::ListStore,
     filter: &gtk4::CustomFilter,
     on_open: impl Fn(FileItem) + 'static,
-) -> gtk4::Widget {
+) -> (gtk4::Widget, gtk4::SingleSelection) {
     let column_view = gtk4::ColumnView::new(None::<gtk4::SingleSelection>);
     column_view.set_show_row_separators(true);
 
@@ -58,7 +58,7 @@ pub(crate) fn build_details_view(
         .child(&column_view)
         .build();
 
-    scrolled.upcast()
+    (scrolled.upcast(), selection)
 }
 
 fn name_column() -> gtk4::ColumnViewColumn {

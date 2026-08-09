@@ -10,7 +10,7 @@ pub(crate) fn build_icon_view(
     model: &gio::ListStore,
     filter: &gtk4::CustomFilter,
     on_open: impl Fn(veyra_filesystem::FileItem) + 'static,
-) -> gtk4::Widget {
+) -> (gtk4::Widget, gtk4::SingleSelection) {
     let selection = build_selection(model, filter, Some(default_sorter()));
     let selection_for_activate = selection.clone();
 
@@ -26,5 +26,5 @@ pub(crate) fn build_icon_view(
         .child(&grid_view)
         .build();
 
-    scrolled.upcast()
+    (scrolled.upcast(), selection)
 }

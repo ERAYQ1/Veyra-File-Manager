@@ -2,14 +2,17 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::gio;
+use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita as adw;
 
-use veyra_filesystem::{FileItem, VeyraPath};
+use veyra_filesystem::{FileItem, OperationKind, OperationRequest, VeyraPath};
 
+use crate::operations::OperationEvent;
 use crate::state::{AppState, SharedState};
 use crate::views::ViewMode;
-use crate::{breadcrumbs, fs_async, headerbar, sidebar, statusbar};
+use crate::widgets::progress_toast::ProgressToastHandles;
+use crate::{breadcrumbs, dialogs, fs_async, headerbar, operations, sidebar, statusbar, widgets};
 
 /// Widgets that `navigate_to` needs to refresh after every navigation.
 /// Cloning is cheap: every field is a GTK widget handle (internally
@@ -26,6 +29,37 @@ struct Chrome {
     status_right: gtk4::Label,
 }
 
+/// A single Copy/Cut clipboard slot (Faz 5 operates on the current
+/// selection, not a multi-item marquee — see `AGENTS.md` scope note in the
+/// Faz 5 changelog entry). `cut` decides whether `win.paste` runs a Move or
+/// a Copy.
+#[derive(Clone)]
+struct ClipboardEntry {
+    path: VeyraPath,
+    cut: bool,
+}
+
+/// The three views' independent `GtkSingleSelection` chains, so keyboard
+/// operations (Copy/Cut/Trash/Delete) can find "the selected item" in
+/// whichever view is currently visible.
+#[derive(Clone)]
+struct ViewSelections {
+    icon: gtk4::SingleSelection,
+    compact: gtk4::SingleSelection,
+    details: gtk4::SingleSelection,
+}
+
+impl ViewSelections {
+    fn selected(&self, view_stack: &gtk4::Stack) -> Option<FileItem> {
+        let selection = match view_stack.visible_child_name().as_deref() {
+            Some(name) if name == ViewMode::Compact.stack_name() => &self.compact,
+            Some(name) if name == ViewMode::Details.stack_name() => &self.details,
+            _ => &self.icon,
+        };
+        crate::views::selected_item(selection)
+    }
+}
+
 pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw::ApplicationWindow {
     let state = AppState::new(start_dir.clone());
 
@@ -36,6 +70,8 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
 
     let header = headerbar::build(&view_stack, search_query, filter.clone());
     let status_bar = statusbar::build();
+    let progress = widgets::progress_toast::build();
+    let clipboard: Rc<RefCell<Option<ClipboardEntry>>> = Rc::new(RefCell::new(None));
 
     let chrome = Chrome {
         back_button: header.back_button.clone(),
@@ -121,29 +157,36 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         })
     };
 
+    let selections;
     {
         let model = state.borrow().model.clone();
         let filter = filter.clone();
         let on_open = on_open.clone();
-        view_stack.add_named(
-            &crate::views::build_icon_view(&model, &filter, {
+
+        let (icon_widget, icon_selection) = crate::views::build_icon_view(&model, &filter, {
+            let on_open = on_open.clone();
+            move |item| on_open(item)
+        });
+        view_stack.add_named(&icon_widget, Some(ViewMode::Icon.stack_name()));
+
+        let (compact_widget, compact_selection) =
+            crate::views::build_compact_view(&model, &filter, {
                 let on_open = on_open.clone();
                 move |item| on_open(item)
-            }),
-            Some(ViewMode::Icon.stack_name()),
-        );
-        view_stack.add_named(
-            &crate::views::build_compact_view(&model, &filter, {
-                let on_open = on_open.clone();
-                move |item| on_open(item)
-            }),
-            Some(ViewMode::Compact.stack_name()),
-        );
-        view_stack.add_named(
-            &crate::views::build_details_view(&model, &filter, move |item| on_open(item)),
-            Some(ViewMode::Details.stack_name()),
-        );
+            });
+        view_stack.add_named(&compact_widget, Some(ViewMode::Compact.stack_name()));
+
+        let (details_widget, details_selection) =
+            crate::views::build_details_view(&model, &filter, move |item| on_open(item));
+        view_stack.add_named(&details_widget, Some(ViewMode::Details.stack_name()));
+
         view_stack.set_visible_child_name(ViewMode::Icon.stack_name());
+
+        selections = ViewSelections {
+            icon: icon_selection,
+            compact: compact_selection,
+            details: details_selection,
+        };
     }
 
     let content_page = adw::NavigationPage::new(&view_stack, "Files");
@@ -158,6 +201,7 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
 
     let toolbar_view = adw::ToolbarView::new();
     toolbar_view.add_top_bar(&header.widget);
+    toolbar_view.add_bottom_bar(&progress.widget);
     toolbar_view.add_bottom_bar(&status_bar.widget);
     toolbar_view.set_content(Some(&split_view));
 
@@ -177,6 +221,16 @@ pub(crate) fn build_window(app: &adw::Application, start_dir: VeyraPath) -> adw:
         &chrome,
         &navigate,
         &header.address_entry,
+    );
+    setup_operation_actions(
+        app,
+        &window,
+        &state,
+        &chrome,
+        &progress,
+        &view_stack,
+        &selections,
+        &clipboard,
     );
 
     navigate_to(&state, &chrome, start_dir, false);
@@ -244,6 +298,205 @@ fn setup_shortcuts(
     }
     window.add_action(&action_focus_address);
     app.set_accels_for_action("win.focus-address", &["<Primary>l"]);
+}
+
+/// Registers the Copy/Cut/Paste/Trash/Delete `win.*` actions and their
+/// accelerators. `Delete` only ever trashes (Rule #39: permanent delete
+/// must never be one accidental keypress) — permanent delete is
+/// `<Shift>Delete`, and always goes through `dialogs::delete_confirm`
+/// first (Rule #38).
+#[allow(clippy::too_many_arguments)]
+fn setup_operation_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    state: &SharedState,
+    chrome: &Chrome,
+    progress: &ProgressToastHandles,
+    view_stack: &gtk4::Stack,
+    selections: &ViewSelections,
+    clipboard: &Rc<RefCell<Option<ClipboardEntry>>>,
+) {
+    let action_copy = gio::SimpleAction::new("copy-selection", None);
+    {
+        let view_stack = view_stack.clone();
+        let selections = selections.clone();
+        let clipboard = clipboard.clone();
+        action_copy.connect_activate(move |_, _| {
+            if let Some(item) = selections.selected(&view_stack) {
+                *clipboard.borrow_mut() = Some(ClipboardEntry {
+                    path: item.path,
+                    cut: false,
+                });
+            }
+        });
+    }
+    window.add_action(&action_copy);
+    app.set_accels_for_action("win.copy-selection", &["<Primary>c"]);
+
+    let action_cut = gio::SimpleAction::new("cut-selection", None);
+    {
+        let view_stack = view_stack.clone();
+        let selections = selections.clone();
+        let clipboard = clipboard.clone();
+        action_cut.connect_activate(move |_, _| {
+            if let Some(item) = selections.selected(&view_stack) {
+                *clipboard.borrow_mut() = Some(ClipboardEntry {
+                    path: item.path,
+                    cut: true,
+                });
+            }
+        });
+    }
+    window.add_action(&action_cut);
+    app.set_accels_for_action("win.cut-selection", &["<Primary>x"]);
+
+    let action_paste = gio::SimpleAction::new("paste", None);
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let chrome = chrome.clone();
+        let progress = progress.clone();
+        let clipboard = clipboard.clone();
+        action_paste.connect_activate(move |_, _| {
+            let Some(entry) = clipboard.borrow_mut().take() else {
+                return;
+            };
+            let destination = state.borrow().current_dir.clone();
+            let kind = if entry.cut {
+                OperationKind::Move
+            } else {
+                OperationKind::Copy
+            };
+            run_bulk_operation(
+                &window,
+                &state,
+                &chrome,
+                &progress,
+                kind,
+                vec![entry.path],
+                Some(destination),
+            );
+        });
+    }
+    window.add_action(&action_paste);
+    app.set_accels_for_action("win.paste", &["<Primary>v"]);
+
+    let action_trash = gio::SimpleAction::new("trash-selection", None);
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let chrome = chrome.clone();
+        let progress = progress.clone();
+        let view_stack = view_stack.clone();
+        let selections = selections.clone();
+        action_trash.connect_activate(move |_, _| {
+            if let Some(item) = selections.selected(&view_stack) {
+                run_bulk_operation(
+                    &window,
+                    &state,
+                    &chrome,
+                    &progress,
+                    OperationKind::Trash,
+                    vec![item.path],
+                    None,
+                );
+            }
+        });
+    }
+    window.add_action(&action_trash);
+    app.set_accels_for_action("win.trash-selection", &["Delete"]);
+
+    let action_delete = gio::SimpleAction::new("delete-selection", None);
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let chrome = chrome.clone();
+        let progress = progress.clone();
+        let view_stack = view_stack.clone();
+        let selections = selections.clone();
+        action_delete.connect_activate(move |_, _| {
+            let Some(item) = selections.selected(&view_stack) else {
+                return;
+            };
+            let window_for_confirm = window.clone();
+            let state = state.clone();
+            let chrome = chrome.clone();
+            let progress = progress.clone();
+            let path = item.path;
+            let path_for_delete = path.clone();
+            dialogs::delete_confirm::show(&window, std::slice::from_ref(&path), move || {
+                run_bulk_operation(
+                    &window_for_confirm,
+                    &state,
+                    &chrome,
+                    &progress,
+                    OperationKind::Delete,
+                    vec![path_for_delete],
+                    None,
+                );
+            });
+        });
+    }
+    window.add_action(&action_delete);
+    app.set_accels_for_action("win.delete-selection", &["<Shift>Delete"]);
+}
+
+/// Starts `request` on a background thread and drives its event stream:
+/// progress updates the bottom progress bar, conflicts open the modal
+/// resolution dialog, and completion refreshes the current directory
+/// listing (files changed on disk) and surfaces any errors on the status
+/// bar.
+fn run_bulk_operation(
+    window: &adw::ApplicationWindow,
+    state: &SharedState,
+    chrome: &Chrome,
+    progress: &ProgressToastHandles,
+    kind: OperationKind,
+    sources: Vec<VeyraPath>,
+    destination: Option<VeyraPath>,
+) {
+    if sources.is_empty() {
+        return;
+    }
+
+    let request = OperationRequest {
+        kind,
+        sources,
+        destination,
+    };
+    let (control, receiver) = operations::spawn(request);
+    widgets::progress_toast::begin(progress, &control, kind);
+
+    let window = window.clone();
+    let state = state.clone();
+    let chrome = chrome.clone();
+    let progress = progress.clone();
+    glib::spawn_future_local(async move {
+        while let Ok(event) = receiver.recv().await {
+            match event {
+                OperationEvent::Progress(p) => widgets::progress_toast::update(&progress, &p),
+                OperationEvent::Conflict(conflict, answer_tx) => {
+                    dialogs::conflict_dialog::show(&window, &conflict, move |decision| {
+                        let _ = answer_tx.send_blocking(decision);
+                    });
+                }
+                OperationEvent::Done(outcome) => {
+                    widgets::progress_toast::finish(&progress);
+                    refresh(&state, &chrome);
+                    if !outcome.errors.is_empty() {
+                        for (path, err) in &outcome.errors {
+                            tracing::warn!(path = %path, error = %err, "bulk operation error");
+                        }
+                        chrome.status_left.set_label(&format!(
+                            "{} error(s) during operation",
+                            outcome.errors.len()
+                        ));
+                    }
+                    break;
+                }
+            }
+        }
+    });
 }
 
 /// Navigates to the current directory's parent, if any (no-op at the
