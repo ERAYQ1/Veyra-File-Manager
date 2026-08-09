@@ -65,4 +65,4 @@ Tüm mimari kararlar ve geliştirme standartları `docs/` altında dokümante ed
 
 ## 📜 Lisans
 
-GPL-3.0 / MIT (Detaylar eklenektir).
+Bu proje **GNU General Public License v3.0 (GPL-3.0)** altında lisanslanmıştır. Detaylar için [LICENSE](LICENSE) dosyasına bakabilirsiniz.
