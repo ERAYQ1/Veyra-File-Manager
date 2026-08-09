@@ -38,6 +38,7 @@
 | `uuid` | Utilities | Unique task IDs for file operations queue and operation history tracking. | Apache 2.0 / MIT |
 | `mime_guess` | Utilities | Fast extension-to-MIME fallback mapping when GIO content-type query is insufficient. | MIT |
 | `walkdir` | Filesystem | Efficient directory traversal for deep disk analysis and recursive file counting. | Unlicense / MIT |
+| `libc` | Systems | Raw `geteuid(2)` syscall binding to enforce the no-root-by-default startup guard (`veyra-app` only). Std has no portable UID accessor. | MIT / Apache 2.0 |
 
 ---
 

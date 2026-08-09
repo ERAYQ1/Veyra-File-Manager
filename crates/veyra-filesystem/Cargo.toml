@@ -1,0 +1,12 @@
+[package]
+name = "veyra-filesystem"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Veyra filesystem abstraction layer: read/copy/move/trash, metadata, GVfs bridge."
+
+[dependencies]
+veyra-core = { path = "../veyra-core" }

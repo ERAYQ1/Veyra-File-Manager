@@ -1,0 +1,22 @@
+[package]
+name = "veyra-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Veyra application entry point: lifecycle, CLI, single-instance, crash handling."
+
+[[bin]]
+name = "veyra"
+path = "src/main.rs"
+
+[dependencies]
+veyra-core = { path = "../veyra-core" }
+veyra-filesystem = { path = "../veyra-filesystem" }
+veyra-ui = { path = "../veyra-ui" }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+libc = "0.2"

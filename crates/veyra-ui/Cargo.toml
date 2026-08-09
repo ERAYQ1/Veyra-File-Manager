@@ -1,0 +1,15 @@
+[package]
+name = "veyra-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Veyra GTK4 + Libadwaita user interface: windows, views, widgets."
+
+[dependencies]
+veyra-core = { path = "../veyra-core" }
+tracing.workspace = true
+gtk4 = { version = "0.9", package = "gtk4" }
+libadwaita = { version = "0.7" }
