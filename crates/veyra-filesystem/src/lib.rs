@@ -1,8 +1,23 @@
-//! Veyra filesystem abstraction layer.
-//!
-//! Empty in Faz 1 (Project Infrastructure) by design: directory reading, CRUD
-//! operations, metadata extraction and the GIO/GVfs bridge are implemented in
-//! Faz 2 (Dosya Sistemi Çekirdeği) per the Veyra roadmap. This crate exists
-//! now to fix the workspace boundary between UI and filesystem logic (Rule 41).
+//! Veyra filesystem abstraction layer: a unified, GIO-backed model over
+//! local and remote (GVfs) locations, plus the blocking CRUD/trash/open
+//! operations built on top of it. Contains no UI, GTK or Tokio code —
+//! `veyra-ui` calls into this crate from background workers only.
 
 #![forbid(unsafe_code)]
+
+mod error;
+mod kind;
+mod metadata;
+mod ops;
+mod path;
+mod permissions;
+
+pub use error::FsError;
+pub use kind::FileKind;
+pub use metadata::{format_size, FileItem, FileMetadata};
+pub use ops::{
+    copy, create_dir, create_file, delete, move_entry, open, read_dir, rename, restore_from_trash,
+    trash,
+};
+pub use path::VeyraPath;
+pub use permissions::FilePermissions;

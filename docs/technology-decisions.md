@@ -39,6 +39,8 @@
 | `mime_guess` | Utilities | Fast extension-to-MIME fallback mapping when GIO content-type query is insufficient. | MIT |
 | `walkdir` | Filesystem | Efficient directory traversal for deep disk analysis and recursive file counting. | Unlicense / MIT |
 | `libc` | Systems | Raw `geteuid(2)` syscall binding to enforce the no-root-by-default startup guard (`veyra-app` only). Std has no portable UID accessor. | MIT / Apache 2.0 |
+| `mime_guess` | Utilities | Extension-to-MIME fallback when GIO's `standard::content-type` lookup is unavailable or generic (`veyra-filesystem`). | MIT |
+| `tempfile` | Dev-only | Real, auto-cleaned temp directories for `veyra-filesystem` integration tests (permission/edge-case coverage, Rule #34/#35). Never compiled into shipped binaries (`dev-dependencies` only). | MIT / Apache 2.0 |
 
 ---
 
