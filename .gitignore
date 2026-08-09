@@ -1,27 +1,51 @@
-# Rust Cargo build outputs
+# ==========================================
+# Veyra File Manager — Production .gitignore
+# ==========================================
+
+# --- Rust & Cargo Build Outputs ---
 /target/
+**/target/
+cargo-timing.html
+*.rs.bk
 
-# Cargo lock file (keep if binary application, ignore if library - workspace root keeps lockfile in repo for reproducible builds)
-# Cargo.lock
-
-# Database temporary / local files
+# --- SQLite & Search Index Temporary Files ---
+*.db
+*.sqlite
 *.sqlite-wal
 *.sqlite-shm
 *.db-journal
 
-# IDE & Editor specific
+# --- IDEs & Editors ---
 .idea/
 .vscode/
 *.swp
 *.swo
+.*.swp
+.*.swo
 *~
+.helix/
+.kate-project*
+*.sublime-workspace
+*.sublime-project
+
+# --- Linux Desktop & OS Generated Artifacts ---
 .DS_Store
+Thumbs.db
+.directory
+.fuse_hidden*
+.Trash-*
 
-# Flatpak build directories
-.flatpak-builder/
-_build/
-build/
-
-# Temporary data / logs
+# --- Temporary Files, Logs & Scratch Artifacts ---
 *.log
 /scratch/
+/tmp/
+/temp/
+.env
+.env.*
+!.env.example
+
+# --- Flatpak & Build Tooling ---
+.flatpak-builder/
+_build/
+/build/
+/dist/
