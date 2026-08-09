@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="veyra-folder" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#62a0ea"/>
+      <stop offset="1" stop-color="#1c71d8"/>
+    </linearGradient>
+    <linearGradient id="veyra-tab" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#99c1f1"/>
+      <stop offset="1" stop-color="#62a0ea"/>
+    </linearGradient>
+    <linearGradient id="veyra-doc" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f6f5f4"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M20 40c0-4.4 3.6-8 8-8h20l8 10h44c4.4 0 8 3.6 8 8v46c0 4.4-3.6 8-8 8H28c-4.4 0-8-3.6-8-8Z"
+        fill="url(#veyra-tab)"/>
+
+  <rect x="18" y="34" width="26" height="16" rx="6" fill="url(#veyra-tab)"/>
+
+  <path d="M18 46c0-4.4 3.6-8 8-8h72c4.4 0 8 3.6 8 8v46c0 4.4-3.6 8-8 8H26c-4.4 0-8-3.6-8-8Z"
+        fill="url(#veyra-folder)"/>
+
+  <rect x="46" y="52" width="34" height="42" rx="4"
+        fill="url(#veyra-doc)" stroke="#1a5fb4" stroke-width="1.5"/>
+  <line x1="52" y1="62" x2="74" y2="62" stroke="#77767b" stroke-width="2.4" stroke-linecap="round"/>
+  <line x1="52" y1="70" x2="74" y2="70" stroke="#77767b" stroke-width="2.4" stroke-linecap="round"/>
+  <line x1="52" y1="78" x2="66" y2="78" stroke="#77767b" stroke-width="2.4" stroke-linecap="round"/>
+
+  <path d="M18 46c0-4.4 3.6-8 8-8h72c4.4 0 8 3.6 8 8v6H18Z" fill="#ffffff" opacity="0.16"/>
+</svg>

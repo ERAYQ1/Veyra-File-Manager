@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Veyra
+Comment=Modern Linux File Manager
+Exec=veyra %U
+Icon=io.github.erayq1.Veyra
+Terminal=false
+Categories=System;FileTools;FileManager;GTK;
+MimeType=inode/directory;
+StartupNotify=true
+X-GNOME-UsesNotifications=false

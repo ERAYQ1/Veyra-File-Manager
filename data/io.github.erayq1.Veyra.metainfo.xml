@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.erayq1.Veyra</id>
+  <name>Veyra</name>
+  <summary>Dolphin-level modern Linux file manager</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <developer id="io.github.erayq1">
+    <name>Veyra Contributors</name>
+  </developer>
+
+  <description>
+    <p>
+      Veyra is a modern, fast and secure file manager for the Linux desktop,
+      built in Rust with GTK4 and Libadwaita. It targets Dolphin-level
+      functionality with a keyboard-first, accessible and responsive
+      interface, without compromising on memory safety or performance under
+      very large directories.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Native GTK4 / Libadwaita interface following the GNOME HIG</li>
+      <li>Asynchronous, cancellable file operations that never block the UI</li>
+      <li>Full keyboard accessibility and AT-SPI screen reader support</li>
+      <li>Safe handling of archives, symlinks and network filesystems</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.erayq1.Veyra.desktop</launchable>
+
+  <url type="homepage">https://github.com/erayq1/veyra</url>
+  <url type="bugtracker">https://github.com/erayq1/veyra/issues</url>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-08-09">
+      <description>
+        <p>Faz 1: Proje altyapısı, ilk Libadwaita penceresi, XDG entegrasyonu.</p>
+      </description>
+    </release>
+  </releases>
+</component>
