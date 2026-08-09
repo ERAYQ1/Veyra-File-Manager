@@ -14,6 +14,7 @@ pub(crate) fn build_compact_view(
     filter: &gtk4::CustomFilter,
     on_open: impl Fn(veyra_filesystem::FileItem) + 'static,
     has_clipboard: Rc<dyn Fn() -> bool>,
+    split_active: Rc<dyn Fn() -> bool>,
 ) -> (gtk4::Widget, gtk4::SingleSelection) {
     let selection = build_selection(model, filter, Some(default_sorter()));
     let selection_for_activate = selection.clone();
@@ -26,7 +27,7 @@ pub(crate) fn build_compact_view(
     // Narrow horizontal item boxes (icon + name) pack into many columns,
     // giving the dense "flowing columns" layout Compact View is meant for.
     grid_view.set_min_columns(3);
-    crate::context_menu::attach(&grid_view, &selection, has_clipboard);
+    crate::context_menu::attach(&grid_view, &selection, has_clipboard, split_active);
 
     let scrolled = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)

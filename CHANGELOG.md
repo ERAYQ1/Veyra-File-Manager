@@ -1,5 +1,28 @@
 # Changelog
 
+## Faz 8 — Split View / Çift Panel (`veyra-ui`)
+
+### Eklenenler
+- **`split_view.rs` (yeni, `veyra-ui`):** `PanelId` (Left/Right, `.other()`), `Panel` (kendi `AdwTabView`'i + kendi `TabRegistry`'si + kendi tam gezinme `Chrome`'u: back/forward/up/home/refresh, breadcrumbs/adres, durum çubuğu), `Panels` (`left`/`right`), `focused_tab()`, `build_panel()`, `install_panel_css()`. Faz 7'nin pencere-geneli tek `Chrome`'u yerini panel başına tam bağımsız bir `Chrome`'a bırakıyor — bir panelin geri/ileri/yukarı/refresh/breadcrumb/adres/durum çubuğu widget'ları yalnızca o panele ait, hangi panelin odakta olduğuyla hiç koordinasyona ihtiyaç duymuyor. Bu da Faz 7'nin `navigate_to`/`go_back`/`go_forward`/`load_directory`/`update_chrome` fonksiyonlarının neredeyse hiç değişmeden yeniden kullanılmasını sağladı.
+- **Çift panel düzeni (`window.rs`):** İçerik alanı artık yatay `GtkPaned` — `start_child`/`end_child` sol/sağ paneller, kullanıcı ayırıcıyı sürükleyerek yeniden boyutlandırabiliyor (`shrink_*_child(false)` ile paneller sıfıra küçülmüyor). Sağ panel başlangıçta gizli (`frame.set_visible(false)`) ve sıfır sekmeyle kurulu; `F3` ile ilk açılışında sol panelin o anki konumunu ayna olarak yeni bir sekme açıyor (`win.toggle-split-view`).
+- **Aktif panel & bağımsız navigasyon:** Panel çerçevesine tıklamak (capture-phase `GtkGestureClick`, tıkladığı hiçbir widget'ı yutmuyor) odağı o panele taşıyor; odaklı panel `.veyra-active-panel` CSS sınıfıyla (`install_panel_css`, `@accent_color` kenarlık) vurgulanıyor — bölünmüş görünüm kapalıyken vurgu hiç gösterilmiyor. Her panelin kendi `AdwTabView`'i, kendi Faz 7 sekme izolasyonu (konum/geçmiş/seçim/görünüm modu) ile tamamen bağımsız.
+- **`Tab` ile panel odağı değişimi:** Bölünmüş görünüm açıkken ve odak bir metin girişinde değilken (`gtk4::Editable` kontrolü) `Tab` diğer panele geçiyor. Kasıtlı olarak pencere geneli bir `win.*` klavye kısayolu (accelerator) DEĞİL — her panelin kendi çerçevesine bağlı, bubble-phase `GtkEventControllerKey`. Gerekçe: pencere geneli bir `Tab` accelerator'ı `AdwAlertDialog` düğmeleri ve adres/arama giriş kutuları dahil uygulama genelindeki standart Tab-ile-odak-gezintisini kırardı (Kural #29 Keyboard Accessibility, Kural #4 Never Destroy Functionality) — bu yüzden kapsam bilinçli olarak panel çerçeveleriyle sınırlandı.
+- **Paneller arası hızlı işlemler:** `win.copy-to-other-panel-selected` (`Ctrl+Shift+O`) ve `win.move-to-other-panel-selected` (`Ctrl+Shift+M`) — odaklı panelin seçili ögesini karşı panelin o anki dizinine kopyalar/taşır (mevcut `run_bulk_operation` motoru üzerinden, Faz 5). Sağ tık öge menüsüne "Copy to Other Panel"/"Move to Other Panel" girişleri eklendi — yalnızca bölünmüş görünüm gerçekten ikinci bir panel gösteriyorken görünürler (devre dışı gösterilmiyorlar, tamamen kaldırılıyorlar — "Faz 7"deki gibi gelecekteki bir faz değil, şu an uygulanabilir olmayan bir bağlam olduğu için).
+- **`run_bulk_operation` genelleştirmesi (`window.rs`):** Tek `(state, chrome)` yerine `Vec<(SharedState, Chrome)>` "refresh_targets" alıyor — panel-içi işlemler (Paste/Trash/Delete) tek hedef geçiyor, paneller arası kopyala/taşı hem kaynak hem hedef panelin listesini işlem bitince tazeliyor.
+- **Slim `headerbar.rs`:** Geri/ileri/yukarı/ev/refresh/breadcrumb/adres artık pencere başlığında değil, panellerin kendi `Chrome`'unda; başlıkta yalnızca arama, görünüm modu anahtarı (Icon/Compact/Details — odaklı panelin aktif sekmesine uygulanır) ve yeni bölünmüş-görünüm aç/kapa düğmesi kaldı.
+
+### Kapsam Notu (bilinçli sınırlama)
+- Kopyala/Kes panosu hâlâ pencere genelinde tek slot (Faz 7'den miras) — panele özel değil.
+- Arama kutusu tek, paylaşılan bir widget; odaklı panelin sorgu/filtresini günceller ama panel değiştirince kutunun görünen metni otomatik değişmiyor (Faz 7'den miras aynı kapsam notu).
+- "Copy/Move to Other Panel" tek seçili ögeyle çalışıyor (Faz 5/6/7 ile aynı tek-seçim kapsamı) — alttaki `run_operation()` motoru zaten çoklu kaynağı destekliyor, çoklu seçim UI'si eklendiğinde yalnızca `sources` genişleyecek.
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 83/83 (81 + yeni 2 birim test: `split_view.rs` içinde `PanelId::other()` — panel odağı/karşı panel hesaplama mantığı).
+- `cargo fmt --check`: temiz.
+- Manuel duman testi: `./target/debug/veyra` panik olmadan açıldı; ekran görüntüsü tek-panel varsayılan durumu doğruladı (panel araç çubuğu: geri/ileri/yukarı/ev/refresh + adres + "73 items / 357.7 GB free" durum çubuğu, başlıkta bölünmüş-görünüm düğmesi). Not: bu ortamda Wayland girdi-enjeksiyon aracı yok (Faz 7'de de aynı kısıt not edilmişti) — `F3` ile panel açma, panel yeniden boyutlandırma, `Tab` ile odak geçişi ve paneller arası kopyala/taşı görsel olarak elle tıklanarak doğrulanamadı; bu davranışlar kod incelemesi + build/clippy/test/fmt ile sınırlı doğrulandı. Kullanıcının ilk elle denemesinde özellikle `Tab`-odak-geçişinin metin girişlerini bozmadığını teyit etmesi önerilir.
+
 ## Faz 7 — Tabs / Sekmeler (`veyra-ui`)
 
 ### Eklenenler

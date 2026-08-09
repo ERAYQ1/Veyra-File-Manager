@@ -16,6 +16,7 @@ mod headerbar;
 mod history;
 mod operations;
 mod sidebar;
+mod split_view;
 mod state;
 mod statusbar;
 mod tab_page;

@@ -15,7 +15,10 @@
 //! Extract: Faz 19, Open Terminal Here: Faz 23, Properties: Faz 12) are shown
 //! insensitive, bound to the shared `win.not-implemented` action, with the
 //! owning phase noted in the label — per Rule #2 (no monolithic leaps across
-//! the roadmap). "Open in New Tab" is real as of Faz 7.
+//! the roadmap). "Open in New Tab" is real as of Faz 7. "Copy/Move to Other
+//! Panel" (Faz 8) are real too, but only appear at all when the split view
+//! is currently showing a second panel to act as the destination — there is
+//! nothing to disable-and-label when the concept doesn't apply yet.
 
 use std::rc::Rc;
 
@@ -37,6 +40,7 @@ pub(crate) fn attach<V: IsA<gtk4::Widget> + Clone>(
     view: &V,
     selection: &gtk4::SingleSelection,
     has_clipboard: Rc<dyn Fn() -> bool>,
+    split_active: Rc<dyn Fn() -> bool>,
 ) {
     let popover = gtk4::PopoverMenu::from_model(None::<&gio::MenuModel>);
     popover.set_parent(view);
@@ -58,7 +62,7 @@ pub(crate) fn attach<V: IsA<gtk4::Widget> + Clone>(
         let menu = hit_item
             .then(|| selected_item(&selection))
             .flatten()
-            .map(|item| build_item_menu(&item))
+            .map(|item| build_item_menu(&item, split_active()))
             .unwrap_or_else(|| build_background_menu(has_clipboard()));
 
         popover.set_menu_model(Some(&menu));
@@ -72,7 +76,10 @@ pub(crate) fn attach<V: IsA<gtk4::Widget> + Clone>(
 /// Builds the per-item menu for `item`: entries that only make sense for a
 /// directory (Open in New Tab/Window) or that only apply to a recognized
 /// archive (Extract Here) are omitted or shown disabled accordingly.
-fn build_item_menu(item: &FileItem) -> gio::Menu {
+/// `is_split_active` gates the Faz 8 "Copy/Move to Other Panel" entries —
+/// they're omitted entirely (not shown-disabled) when there's no second
+/// panel to act as the destination.
+fn build_item_menu(item: &FileItem, is_split_active: bool) -> gio::Menu {
     let is_dir = item.kind().is_directory();
     let is_archive = is_archive_name(item.name());
 
@@ -97,6 +104,19 @@ fn build_item_menu(item: &FileItem) -> gio::Menu {
     clipboard_section.append(Some("Copy"), Some("win.copy-selection"));
     clipboard_section.append(Some("Cut"), Some("win.cut-selection"));
     menu.append_section(None, &clipboard_section);
+
+    if is_split_active {
+        let panel_section = gio::Menu::new();
+        panel_section.append(
+            Some("Copy to Other Panel"),
+            Some("win.copy-to-other-panel-selected"),
+        );
+        panel_section.append(
+            Some("Move to Other Panel"),
+            Some("win.move-to-other-panel-selected"),
+        );
+        menu.append_section(None, &panel_section);
+    }
 
     let mutate_section = gio::Menu::new();
     mutate_section.append(Some("Rename"), Some("win.rename-selected"));
