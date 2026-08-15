@@ -414,6 +414,20 @@ fn device_row(
     }
     actions.add_action(&action_eject);
 
+    let action_analyze = gio::SimpleAction::new("analyze", None);
+    action_analyze.set_enabled(entry.path.is_some());
+    {
+        let window = window.clone();
+        let navigate = navigate.clone();
+        let entry = entry.clone();
+        action_analyze.connect_activate(move |_, _| {
+            if let Some(path) = entry.path.clone() {
+                dialogs::disk_analyzer_dialog::show(&window, path, navigate.clone());
+            }
+        });
+    }
+    actions.add_action(&action_analyze);
+
     let action_properties = gio::SimpleAction::new("properties", None);
     action_properties.set_enabled(entry.path.is_some());
     {
@@ -435,6 +449,7 @@ fn device_row(
     menu.append(Some("Mount"), Some("device.mount"));
     menu.append(Some("Unmount"), Some("device.unmount"));
     menu.append(Some("Safe Removal / Eject"), Some("device.eject"));
+    menu.append(Some("Analyze Disk…"), Some("device.analyze"));
     menu.append(Some("Properties"), Some("device.properties"));
 
     let popover = gtk4::PopoverMenu::from_model(Some(&menu));

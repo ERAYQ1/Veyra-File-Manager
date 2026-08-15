@@ -164,7 +164,12 @@ pub(crate) fn build_window(
     };
 
     let content_page = adw::NavigationPage::new(&content_paned, "Files");
-    let sidebar_widget = sidebar::build(&window, navigate, open_in_new_tab, thumbnails.clone());
+    let sidebar_widget = sidebar::build(
+        &window,
+        navigate.clone(),
+        open_in_new_tab,
+        thumbnails.clone(),
+    );
     let sidebar_page = adw::NavigationPage::new(&sidebar_widget, "Sidebar");
 
     let sidebar_split = adw::NavigationSplitView::builder()
@@ -224,6 +229,7 @@ pub(crate) fn build_window(
     setup_preview_actions(app, &window, &preview, &header, refresh_preview);
     setup_recent_actions(&window, &panels, privacy_mode);
     setup_trash_actions(app, &window, &panels, &focused);
+    setup_disk_analyzer_actions(app, &window, &panels, &focused, navigate);
 
     window
 }
@@ -1476,6 +1482,58 @@ fn setup_preview_actions(
     }
     window.add_action(&action_toggle_preview);
     app.set_accels_for_action("win.toggle-preview", &["F9"]);
+}
+
+/// Registers the Faz 20 `win.analyze-disk-selected` (context menu entry for
+/// a selected folder) and `win.analyze-disk-current` (`Ctrl+Shift+U`, the
+/// focused panel's own current directory) actions, both opening the Disk
+/// Analyzer dialog. `navigate` is threaded through so the dialog's "Open in
+/// Folder" entries can jump the caller's file browser straight to a result.
+fn setup_disk_analyzer_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    focused: &Rc<RefCell<PanelId>>,
+    navigate: Rc<dyn Fn(VeyraPath)>,
+) {
+    let action_analyze_selected = gio::SimpleAction::new("analyze-disk-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        let navigate = navigate.clone();
+        action_analyze_selected.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            if !item.kind().is_directory() {
+                return;
+            }
+            dialogs::disk_analyzer_dialog::show(&window, item.path, navigate.clone());
+        });
+    }
+    window.add_action(&action_analyze_selected);
+
+    let action_analyze_current = gio::SimpleAction::new("analyze-disk-current", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_analyze_current.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let path = tab.state.borrow().current_dir.clone();
+            dialogs::disk_analyzer_dialog::show(&window, path, navigate.clone());
+        });
+    }
+    window.add_action(&action_analyze_current);
+    app.set_accels_for_action("win.analyze-disk-current", &["<Primary><Shift>u"]);
 }
 
 /// Registers the Faz 15 `win.clear-recent-history` (behind an `AdwAlertDialog`

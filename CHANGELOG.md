@@ -1,5 +1,37 @@
 # Changelog
 
+## Faz 20 — Disk Analyzer / Disk Kullanım Analizörü (`veyra-filesystem`, `veyra-ui`)
+
+### Eklenenler
+- **`veyra-filesystem::analyzer` (yeni modül):**
+  - **`UsageNode` veri modeli:** her düğüm `name`, `path`, `is_dir`, `size_bytes` (dizinler için özyinelemeli alt ağaç toplamı), `direct_file_count`, `direct_dir_count` ve boyuta göre büyükten küçüğe sıralı `children` taşır — dosyalar da ağaçta yaprak düğüm olarak yer alır.
+  - **`analyze_directory` (özyinelemeli tarama):** `count_dir_recursive` (Faz 12) ile aynı `OperationControl` iptal sözleşmesini paylaşır (Kural #13) — iptal, o ana kadar biriktirileni `Ok` olarak döner. `NOFOLLOW_SYMLINKS` sayesinde sembolik bağlantılı dizinler yaprak olarak sayılır, asla özyinelemeli gezilmez (Kural #22, döngü riski yok). Alt dizin numaralandırma hatası (izin reddi, eşzamanlı silme) o dalı atlar; yalnızca kök dizinin kendisi çözülemezse sert hata döner (Kural #18).
+  - **Türetilmiş görünümler — tek geçişte hesaplanır:** `largest_files`/`largest_dirs` (tüm ağaç genelinde en büyük 200 giriş, büyükten küçüğe), `duplicate_candidates` (aynı bayt boyutunu paylaşan ve `>= 1 MB` olan dosya grupları, `count >= 2`).
+- **UI & Diyalog (`veyra-ui`):**
+  - **`dialogs::disk_analyzer_dialog` (yeni):** `AdwDialog` tabanlı analizör penceresi. Tarama arka planda (`fs_async::run_blocking`) çalışır, kapatılırsa `OperationControl::cancel` ile anında durur.
+    - **Gezinti çubuğu:** kökten güncel dizine kadar tıklanabilir breadcrumb'lar; bir kırıntıya tıklamak o derinliğe geri döner.
+    - **Dağılım (Breakdown) sekmesi:** Cairo ile çizilen orantılı renkli segment çubuğu (en büyük 7 alt klasör + "Other" toplamı) ve altında tüm doğrudan alt öğelerin listesi (`AdwActionRow`, renk anahtarı, boyut, yüzde). Bir klasöre tıklamak **yeniden tarama yapmadan** önceden bellekte duran ağaçta derinlemesine gezinir (drill-down).
+    - **En Büyük Dosyalar sekmesi:** tüm ağaç genelinde en büyük dosyaların sıralı listesi, her satırda "Open in Folder" butonu (`navigate` callback'i ile ana pencereyi o klasöre götürür).
+    - **Yinelenen Adayları sekmesi:** aynı boyuttaki dosya grupları `AdwExpanderRow` ile gruplanır, her üye kendi "Open in Folder" aksiyonuna sahiptir.
+  - **Menü & Kısayol Entegrasyonu:**
+    - Klasör öğesi sağ-tık menüsüne "Analyze Disk Usage…" (`win.analyze-disk-selected`).
+    - Boş alan (arka plan) sağ-tık menüsüne "Analyze Disk Usage…" (`win.analyze-disk-current` — güncel dizin).
+    - `Ctrl+Shift+U` kısayolu güncel dizini analiz eder.
+    - Sidebar cihaz/aygıt sağ-tık menüsüne "Analyze Disk…" (`device.analyze`).
+
+### Testler
+- `veyra-filesystem`: 8 yeni birim testi (ağaç boyutu/sıralama, en büyük dosyalar, en büyük dizinler, eşik üstü/altı yineleme adayları, symlink döngü koruması, iptal, kök dizin bulunamadı hatası).
+- Toplam: 225/225 test (workspace genelinde, önceki 217'den +8).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 225/225 geçti.
+- `cargo fmt --all`: temiz.
+
+### Sıradaki Faz
+Faz 21 — (Onay bekleniyor.)
+
 ## Faz 19 — Archive Manager / Arşiv Yöneticisi (`veyra-filesystem`, `veyra-ui`)
 
 ### Eklenenler

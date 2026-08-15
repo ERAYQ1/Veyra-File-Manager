@@ -153,6 +153,13 @@ fn build_item_menu(item: &FileItem, is_split_active: bool) -> gio::Menu {
             Some("win.add-to-bookmarks-selected"),
         );
         menu.append_section(None, &bookmark_section);
+
+        let analyze_section = gio::Menu::new();
+        analyze_section.append(
+            Some("Analyze Disk Usage…"),
+            Some("win.analyze-disk-selected"),
+        );
+        menu.append_section(None, &analyze_section);
     }
 
     let clipboard_section = gio::Menu::new();
@@ -227,6 +234,10 @@ fn build_background_menu(has_clipboard: bool) -> gio::Menu {
     misc_section.append(
         Some("Open Terminal Here (Faz 23)"),
         Some("win.not-implemented"),
+    );
+    misc_section.append(
+        Some("Analyze Disk Usage…"),
+        Some("win.analyze-disk-current"),
     );
     menu.append_section(None, &misc_section);
 

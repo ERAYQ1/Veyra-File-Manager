@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 mod advanced;
+mod analyzer;
 mod archive;
 mod conflict;
 mod dircount;
@@ -19,6 +20,7 @@ mod progress;
 mod queue;
 
 pub use advanced::{stat_advanced, AdvancedInfo};
+pub use analyzer::{analyze_directory, AnalysisResult, DuplicateGroup, UsageEntry, UsageNode};
 pub use archive::{create_archive, extract_archive, ArchiveFormat, ArchiveOutcome, SkipReason};
 pub use conflict::{suggest_name, Conflict, ConflictDecision};
 pub use dircount::{count_dir_recursive, DirCount};
