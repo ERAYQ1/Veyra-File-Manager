@@ -11,6 +11,7 @@
 mod archive_ops;
 mod bookmarks;
 mod breadcrumbs;
+mod command_palette;
 mod context_menu;
 mod devices;
 mod dialogs;

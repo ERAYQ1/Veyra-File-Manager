@@ -1,5 +1,30 @@
 # Changelog
 
+## Faz 24 — Command Palette (Komut Paleti & Hızlı Eylem Yöneticisi) (`veyra-ui`)
+
+### Eklenenler
+- **`command_palette` (yeni modül, `veyra-ui`):** GTK widget'larından tamamen bağımsız, saf ve %100 birim testli komut modeli ve puanlamalı bulanık arama motoru.
+  - **`CommandItem`:** `id`, `title`, `category`, `icon_name`, `shortcut`, `action_name`, `action_target` (`Option<glib::Variant>` — `win.set-view-mode` / `win.sort-by` gibi parametreli aksiyonlar için).
+  - **`all_commands()`:** 25 komutluk tam liste — File Operations (New Folder, New Document, Compress Selection…, Extract Archive…, Empty Trash, Copy Path, Copy Location), Navigation (New Tab, Close Tab, Open in New Window, Toggle Split View, Open Terminal Here), View (Toggle Hidden Files, Toggle File Preview, Icon/Compact/Details View), Tools (Analyze Disk Usage…, Connect to Server…, Open Properties, Search Files), Sort & Filter (Sort by Name/Size/Modified/Type). Her komut, ilgili menü öğesinin veya kısayolunun tetiklediği gerçek `win.*` aksiyonuna bağlanır — ikinci bir mantık kopyası yok.
+  - **`fuzzy_score(query, target)` (saf, birim testli):** sıralı karakter alt-dizisi eşleşmesi; kelime başı bonusu, ardışık eşleşme bonusu (koşu uzadıkça artan), tam eşleşme ve önek eşleşmesi ağırlıklandırması.
+  - **`filter_commands(query, commands)`:** boş/boşluk sorguda kategoriye göre gruplu orijinal sırayı korur; dolu sorguda puana göre azalan sırada filtrelenmiş sonuç döner (kararlı sıralama — eşit puanlarda orijinal sıra korunur).
+- **`dialogs::command_palette_dialog` (yeni):** `AdwDialog` tabanlı Spotlight tarzı overlay. Üstte `GtkSearchEntry`, altında kategori başlıklı (`GtkListBox::set_header_func`) filtrelenmiş `AdwActionRow` listesi (ikon + başlık + klavye kısayolu rozeti). Odak açılışta doğrudan arama kutusunda kalır; `Yukarı`/`Aşağı` gerçek widget odağını arama kutusundan asla almayan bir program içi seçim imleci taşır (yazmaya devam edilebilir), seçili satır otomatik görünür alana kaydırılır (`Adjustment::clamp_page`). `Enter`/tıklama seçili komutu `gtk_widget_activate_action_variant` ile pencere üzerinde tetikler ve paleti kapatır; `Escape` `AdwDialog`'un varsayılan kapatma kısayoluyla kapanır.
+- **`window.rs`:** `setup_command_palette_actions` — `win.command-palette` (`Ctrl+K` / `Ctrl+Shift+P`, diyaloğu açar), `win.set-view-mode` (string parametreli: `icon`/`compact`/`details`, header bar'ın görünüm anahtarlayıcı düğmelerini `sync_view_switcher` ile eşitler, `Ctrl+1`/`Ctrl+2`/`Ctrl+3`), `win.sort-by` (string parametreli: `name`/`size`/`modified`/`type`, odaklı sekmenin `sort_config`'ini günceller — Sort & Filter menüsü zaten her açılışta `tab.sort_config`'i tazelediğinden ayrı bir eşitleme gerekmez). Ayrıca daha önce kısayolu olmayan `win.create-folder`'a `Ctrl+Shift+N` eklendi.
+
+### Testler
+- `veyra-ui::command_palette`: 14 yeni birim testi — `fuzzy_score` (boş sorgu, sırasız alt-dizi reddi, eşleşmeyen karakter reddi, büyük/küçük harf duyarsızlık, tam eşleşme > dağınık eşleşme, önek eşleşmesi > önek olmayan alt-dizi, kelime başı > kelime içi, ardışık koşu > dağınık eşit uzunluk), `filter_commands` (boş/boşluk sorgu kategori sırasını korur, en iyi eşleşme önce, eşleşmeyen sorgu boş sonuç), komut listesi bütünlüğü (`id` tekilliği, her komutun bir `win.*` aksiyonunu hedeflemesi).
+- Toplam: 263/263 test (workspace genelinde, önceki 249'dan +14).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 263/263 geçti.
+- `cargo fmt --all -- --check`: temiz.
+- **Not:** Bu ortamda görüntü sunucusu (display server) yok; diyaloğun görsel/etkileşimli doğrulaması (klavye gezinme, kaydırma, odak davranışı) gerçek bir GTK oturumunda elle test edilmedi — yalnızca derleme + birim testleri doğrulandı.
+
+### Sıradaki Faz
+Faz 25 (Onay bekleniyor.)
+
 ## Faz 23 — Terminal Integration (Burada Terminal Aç) (`veyra-ui`)
 
 ### Eklenenler

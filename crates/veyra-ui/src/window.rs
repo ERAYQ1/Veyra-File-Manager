@@ -226,12 +226,13 @@ pub(crate) fn build_window(
         thumbnails.clone(),
     );
     setup_properties_actions(app, &window, &panels, &focused, thumbnails);
-    setup_preview_actions(app, &window, &preview, &header, refresh_preview);
+    setup_preview_actions(app, &window, &preview, &header, refresh_preview.clone());
     setup_recent_actions(&window, &panels, privacy_mode);
     setup_trash_actions(app, &window, &panels, &focused);
     setup_disk_analyzer_actions(app, &window, &panels, &focused, navigate.clone());
     setup_terminal_actions(app, &window, &panels, &focused);
     setup_network_actions(&window, navigate);
+    setup_command_palette_actions(app, &window, &panels, &focused, &header, refresh_preview);
 
     window
 }
@@ -1401,6 +1402,7 @@ fn setup_context_menu_actions(
         });
     }
     window.add_action(&action_create_folder);
+    app.set_accels_for_action("win.create-folder", &["<Primary><Shift>n"]);
 
     let action_create_document = gio::SimpleAction::new("create-document", None);
     {
@@ -1640,6 +1642,89 @@ fn setup_network_actions(window: &adw::ApplicationWindow, navigate: Rc<dyn Fn(Ve
         });
     }
     window.add_action(&action_connect);
+}
+
+/// Registers the Faz 24 Command Palette actions: `win.command-palette`
+/// (`Ctrl+K` / `Ctrl+Shift+P`) opens the dialog; `win.set-view-mode` and
+/// `win.sort-by` (both string-parameterized) back the palette's View and
+/// Sort & Filter entries, since those choices previously only existed as
+/// header-bar toggle button / popover check-button handlers with no
+/// standalone `win.*` action to search for or trigger by shortcut.
+/// `win.set-view-mode` reuses `sync_view_switcher` so the header bar's own
+/// toggle buttons stay in sync when a view mode is set from the palette;
+/// `win.sort-by` mirrors the Sort & Filter popover's per-key check-button
+/// handler in `headerbar.rs`, which re-reads `tab.sort_config` fresh every
+/// time it's opened, so no equivalent sync-back is needed there.
+fn setup_command_palette_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    focused: &Rc<RefCell<PanelId>>,
+    header: &headerbar::HeaderBarHandles,
+    refresh_preview: Rc<dyn Fn()>,
+) {
+    let action_command_palette = gio::SimpleAction::new("command-palette", None);
+    {
+        let window = window.clone();
+        action_command_palette.connect_activate(move |_, _| {
+            dialogs::command_palette_dialog::show(&window);
+        });
+    }
+    window.add_action(&action_command_palette);
+    app.set_accels_for_action("win.command-palette", &["<Primary>k", "<Primary><Shift>p"]);
+
+    let action_set_view_mode =
+        gio::SimpleAction::new("set-view-mode", Some(&String::static_variant_type()));
+    {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        let header = header.clone();
+        action_set_view_mode.connect_activate(move |_, parameter| {
+            let Some(mode_name) = parameter.and_then(glib::Variant::str) else {
+                return;
+            };
+            let mode = match mode_name {
+                "icon" => ViewMode::Icon,
+                "compact" => ViewMode::Compact,
+                "details" => ViewMode::Details,
+                _ => return,
+            };
+            let Some(tab) = split_view::focused_tab(&panels, &focused) else {
+                return;
+            };
+            tab.view_stack.set_visible_child_name(mode.stack_name());
+            sync_view_switcher(&header.view_switcher_buttons, &tab);
+            refresh_preview();
+        });
+    }
+    window.add_action(&action_set_view_mode);
+    app.set_accels_for_action("win.set-view-mode::icon", &["<Primary>1"]);
+    app.set_accels_for_action("win.set-view-mode::compact", &["<Primary>2"]);
+    app.set_accels_for_action("win.set-view-mode::details", &["<Primary>3"]);
+
+    let action_sort_by = gio::SimpleAction::new("sort-by", Some(&String::static_variant_type()));
+    {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_sort_by.connect_activate(move |_, parameter| {
+            let Some(key_name) = parameter.and_then(glib::Variant::str) else {
+                return;
+            };
+            let key = match key_name {
+                "name" => crate::sorting::SortKey::Name,
+                "size" => crate::sorting::SortKey::Size,
+                "modified" => crate::sorting::SortKey::Modified,
+                "type" => crate::sorting::SortKey::Type,
+                _ => return,
+            };
+            let Some(tab) = split_view::focused_tab(&panels, &focused) else {
+                return;
+            };
+            tab.sort_config.borrow_mut().key = key;
+            tab.resort();
+        });
+    }
+    window.add_action(&action_sort_by);
 }
 
 /// Registers the Faz 15 `win.clear-recent-history` (behind an `AdwAlertDialog`
