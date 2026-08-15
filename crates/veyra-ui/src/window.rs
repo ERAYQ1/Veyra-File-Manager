@@ -69,6 +69,8 @@ pub(crate) fn build_window(
     let search_index = Arc::new(open_search_index(cache_dir));
     veyra_search::spawn_background_index(search_index.clone(), glib::home_dir());
 
+    let thumbnails = crate::thumbnails::ThumbnailService::new(cache_dir.join("thumbnails"));
+
     let header = headerbar::build(
         &panels,
         focused.clone(),
@@ -92,6 +94,7 @@ pub(crate) fn build_window(
         has_clipboard.clone(),
         split_active.clone(),
         refresh_preview.clone(),
+        thumbnails.clone(),
         start_dir,
     );
     if let Some(tab) = active_tab(&panels.left.tab_view, &panels.left.registry) {
@@ -157,6 +160,7 @@ pub(crate) fn build_window(
         has_clipboard.clone(),
         split_active.clone(),
         refresh_preview.clone(),
+        thumbnails.clone(),
     );
     setup_split_view_actions(
         app,
@@ -167,6 +171,7 @@ pub(crate) fn build_window(
         &progress,
         has_clipboard.clone(),
         refresh_preview.clone(),
+        thumbnails.clone(),
     );
     setup_operation_actions(app, &window, &panels, &focused, &progress, &clipboard);
     setup_context_menu_actions(
@@ -177,6 +182,7 @@ pub(crate) fn build_window(
         has_clipboard,
         split_active,
         refresh_preview.clone(),
+        thumbnails,
     );
     setup_preview_actions(app, &window, &preview, &header, refresh_preview);
 
@@ -566,6 +572,7 @@ fn setup_navigation_shortcuts(
 /// Registers the Faz 7 tab-management `win.*` actions and their
 /// accelerators: `Ctrl+T` new tab, `Ctrl+W` close active tab, `Ctrl+Tab`/
 /// `Ctrl+Shift+Tab` cycle tabs — all scoped to the currently focused panel.
+#[allow(clippy::too_many_arguments)]
 fn setup_tab_actions(
     app: &adw::Application,
     window: &adw::ApplicationWindow,
@@ -574,12 +581,14 @@ fn setup_tab_actions(
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
     refresh_preview: Rc<dyn Fn()>,
+    thumbnails: Rc<crate::thumbnails::ThumbnailService>,
 ) {
     let action_new_tab = gio::SimpleAction::new("new-tab", None);
     {
         let panels = panels.clone();
         let focused = focused.clone();
         let refresh_preview = refresh_preview.clone();
+        let thumbnails = thumbnails.clone();
         action_new_tab.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let start_dir = active_tab(&panel.tab_view, &panel.registry)
@@ -592,6 +601,7 @@ fn setup_tab_actions(
                 has_clipboard.clone(),
                 split_active.clone(),
                 refresh_preview.clone(),
+                thumbnails.clone(),
                 start_dir,
             );
         });
@@ -654,6 +664,7 @@ fn setup_split_view_actions(
     progress: &ProgressToastHandles,
     has_clipboard: Rc<dyn Fn() -> bool>,
     refresh_preview: Rc<dyn Fn()>,
+    thumbnails: Rc<crate::thumbnails::ThumbnailService>,
 ) {
     let action_toggle_split = gio::SimpleAction::new("toggle-split-view", None);
     {
@@ -661,6 +672,7 @@ fn setup_split_view_actions(
         let focused = focused.clone();
         let header = header.clone();
         let refresh_preview = refresh_preview.clone();
+        let thumbnails = thumbnails.clone();
         action_toggle_split.connect_activate(move |_, _| {
             let showing = !panels.right.frame.is_visible();
             if showing && panels.right.tab_view.n_pages() == 0 {
@@ -676,6 +688,7 @@ fn setup_split_view_actions(
                     has_clipboard.clone(),
                     split_active,
                     refresh_preview.clone(),
+                    thumbnails.clone(),
                     start_dir,
                 );
             }
@@ -926,6 +939,7 @@ fn setup_operation_actions(
 /// and Copy/Move-to-Other-Panel are already registered by
 /// `setup_operation_actions`/`setup_split_view_actions` and are reused
 /// as-is by the context menus.
+#[allow(clippy::too_many_arguments)]
 fn setup_context_menu_actions(
     app: &adw::Application,
     window: &adw::ApplicationWindow,
@@ -934,6 +948,7 @@ fn setup_context_menu_actions(
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
     refresh_preview: Rc<dyn Fn()>,
+    thumbnails: Rc<crate::thumbnails::ThumbnailService>,
 ) {
     let action_not_implemented = gio::SimpleAction::new("not-implemented", None);
     action_not_implemented.set_enabled(false);
@@ -997,6 +1012,7 @@ fn setup_context_menu_actions(
         let has_clipboard = has_clipboard.clone();
         let split_active = split_active.clone();
         let refresh_preview = refresh_preview.clone();
+        let thumbnails = thumbnails.clone();
         action_open_new_tab.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
@@ -1013,6 +1029,7 @@ fn setup_context_menu_actions(
                     has_clipboard.clone(),
                     split_active.clone(),
                     refresh_preview.clone(),
+                    thumbnails.clone(),
                     item.path,
                 );
             }
@@ -1156,6 +1173,7 @@ fn setup_preview_actions(
 /// an independent `AppState` (location, history, item model), its own
 /// Icon/Compact/Details view stack, per-view selections, and its own search
 /// query/filter — the isolation Faz 7 requires, per panel (Faz 8).
+#[allow(clippy::too_many_arguments)]
 fn open_tab(
     tab_view: &adw::TabView,
     registry: &TabRegistry,
@@ -1163,6 +1181,7 @@ fn open_tab(
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
     refresh_preview: Rc<dyn Fn()>,
+    thumbnails: Rc<crate::thumbnails::ThumbnailService>,
     start_dir: VeyraPath,
 ) -> TabPage {
     let state = AppState::new(start_dir.clone());
@@ -1200,6 +1219,7 @@ fn open_tab(
             },
             has_clipboard.clone(),
             split_active.clone(),
+            thumbnails.clone(),
         );
         view_stack.add_named(&icon_widget, Some(ViewMode::Icon.stack_name()));
 
@@ -1212,6 +1232,7 @@ fn open_tab(
             },
             has_clipboard.clone(),
             split_active.clone(),
+            thumbnails.clone(),
         );
         view_stack.add_named(&compact_widget, Some(ViewMode::Compact.stack_name()));
 
@@ -1221,6 +1242,7 @@ fn open_tab(
             move |item| on_open(item),
             has_clipboard,
             split_active,
+            thumbnails,
         );
         view_stack.add_named(&details_widget, Some(ViewMode::Details.stack_name()));
 

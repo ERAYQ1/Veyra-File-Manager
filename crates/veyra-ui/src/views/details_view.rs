@@ -7,6 +7,7 @@ use gtk4::prelude::*;
 
 use veyra_filesystem::FileItem;
 
+use crate::thumbnails::ThumbnailService;
 use crate::views::{icon_name_for, item_at};
 
 /// Tabular view: Name, Size, Type, Modified, Permissions — each column
@@ -17,11 +18,12 @@ pub(crate) fn build_details_view(
     on_open: impl Fn(FileItem) + 'static,
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
+    thumbnails: Rc<ThumbnailService>,
 ) -> (gtk4::Widget, gtk4::SingleSelection) {
     let column_view = gtk4::ColumnView::new(None::<gtk4::SingleSelection>);
     column_view.set_show_row_separators(true);
 
-    let name_col = name_column();
+    let name_col = name_column(thumbnails);
     column_view.append_column(&name_col);
     column_view.append_column(&text_column("Size", 100, size_label, |a, b| {
         a.metadata.size_bytes.cmp(&b.metadata.size_bytes)
@@ -65,7 +67,7 @@ pub(crate) fn build_details_view(
     (scrolled.upcast(), selection)
 }
 
-fn name_column() -> gtk4::ColumnViewColumn {
+fn name_column(thumbnails: Rc<ThumbnailService>) -> gtk4::ColumnViewColumn {
     let factory = gtk4::SignalListItemFactory::new();
 
     factory.connect_setup(|_, list_item| {
@@ -87,7 +89,7 @@ fn name_column() -> gtk4::ColumnViewColumn {
         list_item.set_child(Some(&row));
     });
 
-    factory.connect_bind(|_, list_item| {
+    factory.connect_bind(move |_, list_item| {
         let Some(item) = list_item
             .item()
             .and_then(|o| o.downcast::<glib::BoxedAnyObject>().ok())
@@ -105,6 +107,7 @@ fn name_column() -> gtk4::ColumnViewColumn {
         let mut child = row.first_child();
         if let Some(icon) = child.and_then(|w| w.downcast::<gtk4::Image>().ok()) {
             icon.set_icon_name(Some(icon_name_for(&file_item)));
+            thumbnails.bind(&icon, &file_item);
             child = icon.next_sibling();
         } else {
             child = None;

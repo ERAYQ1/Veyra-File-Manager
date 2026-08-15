@@ -1,5 +1,29 @@
 # Changelog
 
+## Faz 11 — Thumbnail Engine / Küçük Resim Motoru & Önbellek (`veyra-ui`)
+
+### Eklenenler
+- **Yeni modül `veyra-ui/src/thumbnails.rs`:** iki seviyeli, tamamen asenkron küçük resim önbellek/üretim motoru. `ThumbnailService` (`window.rs`'te bir kez inşa edilip `has_clipboard`/`split_active` ile aynı `Rc` deseniyle her sekmeye/görünüme taşınıyor) tek genel giriş noktası olan `bind(&GtkImage, &FileItem)`'ı sunuyor.
+  - **L1 bellek içi LRU:** `lru::LruCache<PathBuf, {mtime, Pixbuf}>`, sabit 1000 öge kapasitesiyle (Kural #31/#40) — en eski öge otomatik tahliye ediliyor, `mtime` uyuşmazlığında (dosya değişmiş) kayıt geçersiz sayılıp siliniyor.
+  - **L2 disk önbelleği:** `<xdg-cache>/veyra/thumbnails/normal/<md5(file://URI)>.png`, freedesktop.org adlandırma kuralının aynısı. Geçersiz kılma: kaynak dosyanın `mtime`'ı önbellek PNG'sinin kendi dosya sistemi `mtime`'ından yeniyse önbellek atlanıp yeniden üretiliyor — ek PNG metadata'sı gerekmiyor. Atomik yazma: aynı dizinde `.png.tmp-<pid>-<thread-id>` geçici dosyasına yazılıp `rename` ile hedefe taşınıyor, böylece yarım yazılmış bir PNG asla okunamıyor.
+  - **Arka plan işçi havuzu:** `fs_async::run_blocking`'in istek-başına-thread deseninin aksine (Kural #33 kaynak bilinci — hızlı bir kaydırma tek seferde onlarca öge bağlar), 2 kalıcı işçi thread'i `async_channel` üzerinden paylaşılan bir istek kuyruğunu tüketiyor. Sonuç `preview.rs`'teki `DecodedImage` deseniyle aynı şekilde `Send`-güvenli ham piksel arabelleği (`glib::Bytes`) olarak ana thread'e dönüyor; `gdk_pixbuf::Pixbuf`/`gdk4::Texture` yeniden kurulumu (main-thread-only GObject'ler) yalnızca orada yapılıyor.
+  - **Widget geri dönüşüm koruması:** `#![forbid(unsafe_code)]` altında `GObject` qdata kullanılamadığından (bu, `unsafe fn data::<T>()` gerektiriyor), koruma `GtkImage::widget-name` özelliğine (tamamen safe get/set) bağlanan dosya-yolu tabanlı bir jetonla yapılıyor — `bind()` her çağrıldığında jetonu hemen günceller; gecikmeli asenkron sonuç geldiğinde jeton uyuşmazsa (öge hızlı kaydırmada başka bir dosyaya yeniden bağlanmış) sonuç sessizce atılıyor.
+  - **Format/hata yönetimi (Kural #15):** yalnızca `FileKind::Regular` + `mime_type` `image/` ile başlayan yerel dosyalar aday (semboling bağlantılar TOCTOU/sembolik-bağlantı belirsizliği yüzünden hariç, Kural #22; uzak GVfs bağlamaları da hariç). Decode `gdk_pixbuf::Pixbuf::from_file_at_scale` (128×128, en-boy oranı korunarak) ile yapılıyor — PNG/JPEG/WEBP/GIF/BMP/ICO/SVG'yi (kurulu librsvg yükleyicisi varsa) kapsıyor; bozuk/çözülemeyen dosyalar `panic!` yerine `None` döndürüp çağrı yerinde zaten ayarlanmış sembolik ikonun aynen kalmasını sağlıyor.
+- **Görünüm entegrasyonu (`views/mod.rs`, `views/icon_view.rs`, `views/compact_view.rs`, `views/details_view.rs`):** `build_grid_view` (Icon + Compact) ve `details_view`'in `name_column` fabrikası artık `connect_bind` içinde önce her zaman `icon_name_for` ile sembolik ikonu basıyor (anında, senkron fallback), sonra `thumbnails.bind(&icon, &file_item)` çağırıyor — L1 isabetinde `Pixbuf` hemen `gdk4::Texture`'a çevrilip senkron olarak basılıyor, aksi halde arka plan isteği kuyruğa giriyor ve sembolik ikon üretim tamamlanana kadar yerinde kalıyor. UI thread hiçbir zaman disk/decode işlemi yapmıyor (Kural #11/#12).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: tümü geçti (yeni 8 birim test: L1 LRU tahliye + `get`'te tazeleme, MD5 URI hash'inin `md5sum` ile çapraz doğrulanmış sabit değeri, önbellek tazelik kontrolü — eksik dosya/kaynak-daha-yeni/önbellek-daha-yeni üç senaryosu, jeton benzersizliği, `thumbnailable_path`'in dizin/metin/görsel ayrımı).
+- **Manuel duman testi:** `./target/debug/veyra`, 5 renkli PNG içeren geçici bir dizine karşı gerçek Wayland ekranında çalıştırıldı ve ekran görüntüsü alındı — Icon View'de tüm 5 dosya kendi renklerini gösteren gerçek küçük resimlerle (sembolik ikon değil) render edildi; `~/.cache/veyra/thumbnails/normal/` altında beklenen MD5 adlı PNG dosyalarının oluştuğu doğrulandı. Compact/Details view'leri aynı `bind()` çağrısını ve `build_grid_view`'i paylaştığından ayrıca görsel olarak test edilmedi (bu ortamda `xdotool`/`wmctrl` yok, görünüm değiştirmek için tıklama otomasyonu yapılamadı).
+
+### Bağımlılık Değişiklikleri
+- `veyra-ui`'ye iki yeni bağımlılık: `lru = "0.12"` (L1 LRU önbellek — stdlib'de karşılığı yok) ve `md-5 = "0.10"` (RustCrypto, XDG küçük resim adlandırma sözleşmesinin gerektirdiği MD5 hash — stdlib'de yok). İkisi de MIT/Apache-2.0, GPL-3.0-or-later ile uyumlu.
+
+### Sıradaki Faz
+Faz 12. Onay bekleniyor.
+
 ## Faz 10 — File Preview / Dosya Önizleme Paneli (`veyra-ui`)
 
 ### Eklenenler

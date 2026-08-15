@@ -3,6 +3,7 @@ mod details_view;
 mod icon_view;
 
 use std::cmp::Ordering as StdOrdering;
+use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{gio, glib};
@@ -12,6 +13,8 @@ pub(crate) use details_view::build_details_view;
 pub(crate) use icon_view::build_icon_view;
 
 use veyra_filesystem::{FileItem, FileKind};
+
+use crate::thumbnails::ThumbnailService;
 
 /// The three directory presentation modes Faz 3 ships. Details Sorting &
 /// Filtering polish (multi-column, folders-first override) is Faz 13.
@@ -94,6 +97,7 @@ pub(crate) fn build_grid_view(
     selection: &gtk4::SingleSelection,
     icon_size: i32,
     horizontal_item: bool,
+    thumbnails: Rc<ThumbnailService>,
     on_activate: impl Fn(u32) + 'static,
 ) -> gtk4::GridView {
     let factory = gtk4::SignalListItemFactory::new();
@@ -128,7 +132,7 @@ pub(crate) fn build_grid_view(
         list_item.set_child(Some(&item_box));
     });
 
-    factory.connect_bind(|_, list_item| {
+    factory.connect_bind(move |_, list_item| {
         let Some(item) = list_item
             .item()
             .and_then(|o| o.downcast::<glib::BoxedAnyObject>().ok())
@@ -146,6 +150,7 @@ pub(crate) fn build_grid_view(
         let mut child = item_box.first_child();
         if let Some(icon) = child.and_then(|w| w.downcast::<gtk4::Image>().ok()) {
             icon.set_icon_name(Some(icon_name_for(&file_item)));
+            thumbnails.bind(&icon, &file_item);
             child = icon.next_sibling();
         } else {
             child = None;

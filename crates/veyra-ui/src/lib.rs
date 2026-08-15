@@ -22,6 +22,7 @@ mod split_view;
 mod state;
 mod statusbar;
 mod tab_page;
+mod thumbnails;
 mod views;
 mod widgets;
 mod window;
