@@ -1,4 +1,5 @@
 pub(crate) mod clear_recent_confirm;
+pub(crate) mod compress_dialog;
 pub(crate) mod conflict_dialog;
 pub(crate) mod delete_confirm;
 pub(crate) mod empty_trash_confirm;

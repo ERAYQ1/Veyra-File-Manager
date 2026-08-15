@@ -71,7 +71,7 @@ impl OperationControl {
     /// Blocks the calling (worker) thread while paused. Returns `true` if
     /// the operation should stop now (cancelled either before or while
     /// waiting out a pause).
-    fn wait_if_paused(&self) -> bool {
+    pub(crate) fn wait_if_paused(&self) -> bool {
         while self.is_paused() {
             if self.is_cancelled() {
                 return true;

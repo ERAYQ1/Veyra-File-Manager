@@ -20,7 +20,8 @@ use crate::tab_page::{active_tab, TabPage, TabRegistry, ViewSelections};
 use crate::views::ViewMode;
 use crate::widgets::progress_toast::ProgressToastHandles;
 use crate::{
-    breadcrumbs, dialogs, fs_async, headerbar, operations, recent, sidebar, trash, widgets,
+    archive_ops, breadcrumbs, dialogs, fs_async, headerbar, operations, recent, sidebar, trash,
+    widgets,
 };
 
 /// A single Copy/Cut clipboard slot, shared across both panels and all their
@@ -208,6 +209,7 @@ pub(crate) fn build_window(
         thumbnails.clone(),
     );
     setup_operation_actions(app, &window, &panels, &focused, &progress, &clipboard);
+    setup_archive_actions(&window, &panels, &focused, &progress);
     setup_context_menu_actions(
         app,
         &window,
@@ -984,6 +986,146 @@ fn setup_operation_actions(
     }
     window.add_action(&action_delete);
     app.set_accels_for_action("win.delete-selection", &["<Shift>Delete"]);
+}
+
+/// Registers Faz 19's compress/extract `win.*` actions, all resolving the
+/// focused panel's active tab and its single selection dynamically, same as
+/// `setup_operation_actions`. "Extract Here" and "Extract to…" only ever
+/// get bound to an archive in the context menu (`context_menu.rs` gates
+/// their visibility on the file name), but each action re-checks the
+/// format itself so a stray activation never tries to extract a non-archive.
+fn setup_archive_actions(
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    focused: &Rc<RefCell<PanelId>>,
+    progress: &ProgressToastHandles,
+) {
+    let action_compress = gio::SimpleAction::new("compress-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        let progress = progress.clone();
+        action_compress.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            let Some(default_stem) = item.path.file_name() else {
+                return;
+            };
+            let current_dir = tab.state.borrow().current_dir.clone();
+            let state = tab.state.clone();
+            let chrome = panel.chrome.clone();
+            let progress = progress.clone();
+            let source = item.path;
+            dialogs::compress_dialog::show(
+                &window,
+                &default_stem,
+                veyra_filesystem::ArchiveFormat::Zip,
+                move |name, format| {
+                    let output_path = child_path(&current_dir, &name);
+                    let (control, receiver) =
+                        archive_ops::spawn_compress(output_path, vec![source], format);
+                    run_archive_operation(
+                        vec![(state, chrome)],
+                        &progress,
+                        "Compressing",
+                        control,
+                        receiver,
+                    );
+                },
+            );
+        });
+    }
+    window.add_action(&action_compress);
+
+    let action_extract_here = gio::SimpleAction::new("extract-here-selected", None);
+    {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        let progress = progress.clone();
+        action_extract_here.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            let Some(name) = item.path.file_name() else {
+                return;
+            };
+            let Some(format) = veyra_filesystem::ArchiveFormat::from_name(&name) else {
+                return;
+            };
+            let stem = name
+                .strip_suffix(format.extension())
+                .unwrap_or(&name)
+                .to_string();
+            let current_dir = tab.state.borrow().current_dir.clone();
+            let destination = child_path(&current_dir, &stem);
+
+            let (control, receiver) = archive_ops::spawn_extract(item.path, destination);
+            run_archive_operation(
+                vec![(tab.state.clone(), panel.chrome.clone())],
+                &progress,
+                "Extracting",
+                control,
+                receiver,
+            );
+        });
+    }
+    window.add_action(&action_extract_here);
+
+    let action_extract_to = gio::SimpleAction::new("extract-to-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        let progress = progress.clone();
+        action_extract_to.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            let state = tab.state.clone();
+            let chrome = panel.chrome.clone();
+            let progress = progress.clone();
+            let archive_path = item.path;
+
+            let file_dialog = gtk4::FileDialog::builder().title("Extract to…").build();
+            let window_for_dialog = window.clone();
+            file_dialog.select_folder(
+                Some(&window_for_dialog),
+                gio::Cancellable::NONE,
+                move |result| {
+                    let Ok(folder) = result else {
+                        return;
+                    };
+                    let Some(path) = folder.path() else {
+                        return;
+                    };
+                    let destination = VeyraPath::from_local(path);
+                    let (control, receiver) = archive_ops::spawn_extract(archive_path, destination);
+                    run_archive_operation(
+                        vec![(state, chrome)],
+                        &progress,
+                        "Extracting",
+                        control,
+                        receiver,
+                    );
+                },
+            );
+        });
+    }
+    window.add_action(&action_extract_to);
 }
 
 /// Registers the Faz 6/7/8 context-menu `win.*` actions: item actions
@@ -1828,6 +1970,76 @@ fn run_bulk_operation(
                                 "{} error(s) during operation",
                                 outcome.errors.len()
                             ));
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/// Drives a Faz 19 compress/extract event stream, the archive-ops
+/// counterpart to `run_bulk_operation`: progress updates the same bottom
+/// progress bar (relabeled via `verb`), and completion refreshes every
+/// `(state, chrome)` in `refresh_targets` and surfaces errors/skips on the
+/// first target's status bar. There is no conflict round trip here —
+/// `extract_archive` never prompts, it just skips unsafe/symlink entries
+/// (Rule #21/#22) and reports them in `ArchiveOutcome::skipped`.
+fn run_archive_operation(
+    refresh_targets: Vec<(SharedState, Chrome)>,
+    progress: &ProgressToastHandles,
+    verb: &'static str,
+    control: veyra_filesystem::OperationControl,
+    receiver: async_channel::Receiver<archive_ops::ArchiveEvent>,
+) {
+    widgets::progress_toast::begin_with_verb(progress, &control, verb);
+
+    let progress = progress.clone();
+    glib::spawn_future_local(async move {
+        while let Ok(event) = receiver.recv().await {
+            match event {
+                archive_ops::ArchiveEvent::Progress(p) => {
+                    widgets::progress_toast::update(&progress, &p)
+                }
+                archive_ops::ArchiveEvent::Done(result) => {
+                    widgets::progress_toast::finish(&progress);
+                    for (state, chrome) in &refresh_targets {
+                        refresh(state, chrome);
+                    }
+                    let Some((_, chrome)) = refresh_targets.first() else {
+                        break;
+                    };
+                    match result {
+                        Ok(outcome) if outcome.cancelled => {
+                            chrome.status_left.set_label("Cancelled");
+                        }
+                        Ok(outcome) => {
+                            for (name, err) in &outcome.errors {
+                                tracing::warn!(entry = %name, error = %err, "archive operation error");
+                            }
+                            if !outcome.errors.is_empty() {
+                                chrome.status_left.set_label(&format!(
+                                    "{} error(s) during archive operation",
+                                    outcome.errors.len()
+                                ));
+                            } else if !outcome.skipped.is_empty() {
+                                chrome.status_left.set_label(&format!(
+                                    "{} unsafe entr{} skipped",
+                                    outcome.skipped.len(),
+                                    if outcome.skipped.len() == 1 {
+                                        "y"
+                                    } else {
+                                        "ies"
+                                    }
+                                ));
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(error = %err, "archive operation failed");
+                            chrome
+                                .status_left
+                                .set_label(&format!("Archive failed: {err}"));
                         }
                     }
                     break;

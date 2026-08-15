@@ -16,6 +16,12 @@ chrono.workspace = true
 gio = "0.20"
 glib = "0.20"
 mime_guess = "2"
+zip = { version = "7", default-features = false, features = ["deflate", "time"] }
+tar = "0.4"
+flate2 = "1"
+xz2 = "0.1"
+zstd = "0.13"
+sevenz-rust = "0.6"
 
 [dev-dependencies]
 tempfile = "3"

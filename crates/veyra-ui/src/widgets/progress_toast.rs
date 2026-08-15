@@ -122,13 +122,24 @@ pub(crate) fn begin(
     control: &OperationControl,
     kind: OperationKind,
 ) {
+    begin_with_verb(handles, control, verb(kind));
+}
+
+/// Like [`begin`], for operations outside the Copy/Move/Trash/Delete
+/// `OperationKind` set (Faz 19's Compress/Extract, which share the same
+/// `OperationControl`/`Progress` machinery but aren't bulk file ops).
+pub(crate) fn begin_with_verb(
+    handles: &ProgressToastHandles,
+    control: &OperationControl,
+    verb: &'static str,
+) {
     *handles.control.borrow_mut() = Some(control.clone());
-    *handles.verb.borrow_mut() = verb(kind);
+    *handles.verb.borrow_mut() = verb;
     handles
         .pause_button
         .set_icon_name("media-playback-pause-symbolic");
     handles.pause_button.set_tooltip_text(Some("Pause"));
-    handles.title_label.set_label(verb(kind));
+    handles.title_label.set_label(verb);
     handles.detail_label.set_label("");
     handles.progress_bar.set_fraction(0.0);
     handles.widget.set_reveal_child(true);

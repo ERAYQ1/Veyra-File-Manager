@@ -39,6 +39,9 @@ pub enum FsError {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("archive error: {0}")]
+    Archive(String),
 }
 
 /// Maps a `glib::Error` returned by a GIO call against `path` into the

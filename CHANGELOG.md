@@ -1,5 +1,36 @@
 # Changelog
 
+## Faz 19 — Archive Manager / Arşiv Yöneticisi (`veyra-filesystem`, `veyra-ui`)
+
+### Eklenenler
+- **`veyra-filesystem::archive` (yeni modül paketi):**
+  - **`ArchiveFormat` (`format.rs`):** `Zip`, `Tar`, `TarGz`, `TarXz`, `TarZst`, `SevenZip` formatlarının tespiti (`.tar.gz`, `.tar.xz`, `.tar.zst` çift uzantı önceliğiyle) ve uzantı eşlemeleri.
+  - **Güvenlik Katmanı (`security.rs` — Kural #21, #22):** Zip Slip / Path Traversal saldırılarına karşı tam koruma. Her girdi yolu normalize edilir (`..` dizin kaçışları engellenir), mutlak yollar ve Windows sürücü harfleri güvenli göreceli yola indirgenir. Hedef kök dizin dışına kaçan veya geçersiz yollar sessizce atlanır (`ArchiveOutcome.skipped`). Sembolik bağlantı saldırılarına karşı arşiv içi symlink'lerin hedef dışına yazması engellenir.
+  - **Sıkıştırma Motoru (`compress.rs`):** `create_archive` — kaynak dosya ve klasörleri özyinelemeli paketler, `OperationControl` ile anlık iptal edilebilir (`is_cancelled`), atomik `.tmp` geçici dosyasına yazıp işlem bitince hedefe taşır.
+  - **Çıkarma Motoru (`extract.rs`):** `extract_archive` — ZIP, TAR, TAR.GZ, TAR.XZ, TAR.ZST ve 7Z arşivlerini hedef dizine güvenle açar; canlı bayt/dosya ilerlemesi (`Progress`) bildirir.
+- **UI & Diyalog Entegrasyonu (`veyra-ui`):**
+  - **`dialogs::compress_dialog` (yeni):** `AdwAlertDialog` tabanlı sıkıştırma diyaloğu — arşiv adı girişi (uzantı otomatik temizlenir ve seçilen formata göre eklenir) ve format seçici (`.zip`, `.tar.gz`, `.tar.xz`, `.tar.zst`, `.7z`).
+  - **`archive_ops.rs` (yeni):** `spawn_compress` ve `spawn_extract` asenkron köprüleri — ağır I/O işlemlerini arka planda `fs_async::run_blocking` ile çalıştırır, UI thread'ini asla bloklamaz (Kural #11/#12).
+  - **Alt İlerleme Çubuğu (`ProgressToast`):** Arşivleme ve çıkarma sırasında canlı ilerleme, Pause/Resume ve Cancel butonlarıyla kullanıcıya gösterilir.
+  - **Context Menu (`context_menu.rs`) & Aksiyonlar:**
+    - Seçili dosya/klasörlerde "Compress…" (`win.compress-selected`).
+    - Arşiv dosyalarında "Extract Here" (`win.extract-here-selected`) ve "Extract to…" (`win.extract-to-selected` — `GtkFileDialog` ile hedef klasör seçimi).
+    - Güvensiz veya atlanan girdi varsa durum çubuğunda bildirim gösterilir.
+
+### Testler
+- `veyra-filesystem`: 14 yeni birim testi (format tespiti, Zip Slip engelleme, mutlak yol temizleme, ZIP / TAR.GZ / 7Z sıkıştırma ve çıkarma round-trip testleri, iptal edilince tmp dosyasının temizlenmesi).
+- `veyra-ui`: 2 yeni birim testi (`compress_dialog` uzantı temizleme).
+- Toplam: 211/211 test (workspace genelinde, önceki 197'den +14).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 211/211 geçti.
+- `cargo fmt --all --check`: temiz.
+
+### Sıradaki Faz
+Faz 20 — Disk Analyzer (Etkileşimli disk kullanım analizi & ağaç haritası). Onay bekleniyor.
+
 ## Faz 18 — Trash Integration (Çöp Kutusu Entegrasyonu) (`veyra-filesystem`, `veyra-ui`)
 
 ### Eklenenler
