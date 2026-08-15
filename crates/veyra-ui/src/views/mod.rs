@@ -126,6 +126,13 @@ pub(crate) fn build_grid_view(
         else {
             return;
         };
+        // Faz 14: recycled list items must have the class explicitly
+        // cleared for non-hidden entries, not just set for hidden ones.
+        if file_item.metadata.is_hidden {
+            item_box.add_css_class("veyra-hidden-item");
+        } else {
+            item_box.remove_css_class("veyra-hidden-item");
+        }
         let mut child = item_box.first_child();
         if let Some(icon) = child.and_then(|w| w.downcast::<gtk4::Image>().ok()) {
             icon.set_icon_name(Some(icon_name_for(&file_item)));

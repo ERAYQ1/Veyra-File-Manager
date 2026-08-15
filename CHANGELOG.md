@@ -1,5 +1,28 @@
 # Changelog
 
+## Faz 14 — Hidden Files / Gizli Dosyalar (`veyra-ui`)
+
+### Eklenenler
+- **`Ctrl+H` (`win.toggle-hidden-files`):** odaklı panelin aktif sekmesinde gizli dosya/dizinlerin gösterimini açıp kapatır. `setup_navigation_shortcuts` içine eklendi (`window.rs`), diğer `win.*` kısayollarıyla aynı `SimpleAction` deseni.
+- **`.hidden` ve dotfile desteği "bedava":** `veyra-filesystem`'in `build_file_item`'ı GIO'nun `standard::is-hidden` özniteliğini zaten okuyor (`metadata.rs:125`) — GIO'nun yerel arka ucu bunu hem `.` ile başlayan adlar hem de dizinin kendi `.hidden` listesi için otomatik hesaplıyor, bu yüzden Faz 14 `veyra-filesystem`'de değişiklik gerektirmedi; iş tamamen UI filtre/görünüm katmanında.
+- **`TabPage.show_hidden: Rc<RefCell<bool>>`:** Faz 7 sekme izolasyonuna (Kural #51) uygun, her sekme kendi gizli-dosya tercihini taşır; varsayılan `false`.
+- **`sorting::passes_hidden_filter(item, show_hidden)`:** `window.rs`'teki `build_combined_filter`'a üçüncü bir `AND` koşulu olarak eklendi (arama metni ve `QuickFilter`'ın yanına).
+- **Görsel ayrıştırma:** yeni `.veyra-hidden-item` CSS sınıfı (`split_view.rs`'in mevcut `install_panel_css` sağlayıcısına eklendi — `opacity: 0.55; font-style: italic;`). Icon/Compact görünümde öge kutusuna, Details görünümde Name hücresinin satırına ve diğer sütun hücrelerinin etiketlerine uygulanıyor; geri dönüştürülen liste ögelerinde sınıf her `bind`'de açıkça set/kaldırılıyor (aksi halde eski ögenin sınıfı sızabilir).
+
+### Testler
+- `sorting.rs`'e 3 yeni birim testi: gizli öge `show_hidden=false` iken filtrelenir, `show_hidden=true` iken gösterilir, görünür öge her iki durumda da geçer.
+- Toplam: 162/162 test (workspace genelinde).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 162/162 geçti.
+- `cargo fmt --check`: temiz.
+- Uygulama gerçek Wayland (KDE Plasma) oturumunda çalıştırıldı; varsayılan (`show_hidden=false`) durumda `~` dizinindeki dotfile'ların (`.bashrc`, `.gitconfig`, vb.) artık listede görünmediği ekran görüntüsüyle doğrulandı. **Not:** bu sandbox'ta Wayland girdi otomasyon aracı bulunmadığından `Ctrl+H`'nin canlı tıklama/tuş simülasyonuyla açılıp-dimmed-görünüm-göstermesi otomatik sürülemedi; toggle mantığı birim testleri ve statik inceleme ile doğrulandı (Faz 13'teki aynı sınırlama).
+
+### Sıradaki Faz
+Faz 15. Onay bekleniyor.
+
 ## Faz 13 — Sorting & Filtering / Sıralama ve Filtreleme (`veyra-ui`)
 
 ### Eklenenler

@@ -284,6 +284,14 @@ impl QuickFilter {
         &["zip", "tar", "gz", "7z", "xz", "bz2", "zst", "rar"];
 }
 
+/// Faz 14: whether `item` should be visible given the tab's hidden-files
+/// toggle. `is_hidden` already covers both dotfiles and a directory's
+/// `.hidden` listing (GIO's `standard::is-hidden`, see
+/// `veyra-filesystem`'s `build_file_item`) — this just applies the toggle.
+pub(crate) fn passes_hidden_filter(item: &FileItem, show_hidden: bool) -> bool {
+    show_hidden || !item.metadata.is_hidden
+}
+
 /// Directories always pass every quick filter (they're navigation, not
 /// filtered content) — only regular files are matched against the type
 /// criteria below.
@@ -525,6 +533,29 @@ mod tests {
     }
 
     // --- QuickFilter ---
+
+    // --- passes_hidden_filter (Faz 14) ---
+
+    #[test]
+    fn hidden_item_is_filtered_out_when_show_hidden_is_false() {
+        let mut hidden = file_with("secret", 0, None, "text/plain", false);
+        hidden.metadata.is_hidden = true;
+        assert!(!passes_hidden_filter(&hidden, false));
+    }
+
+    #[test]
+    fn hidden_item_is_shown_when_show_hidden_is_true() {
+        let mut hidden = file_with(".bashrc", 0, None, "text/plain", false);
+        hidden.metadata.is_hidden = true;
+        assert!(passes_hidden_filter(&hidden, true));
+    }
+
+    #[test]
+    fn visible_item_always_passes_regardless_of_toggle() {
+        let visible = file_with("readme.md", 0, None, "text/plain", false);
+        assert!(passes_hidden_filter(&visible, false));
+        assert!(passes_hidden_filter(&visible, true));
+    }
 
     #[test]
     fn quick_filter_all_matches_everything() {

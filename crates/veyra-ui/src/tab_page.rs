@@ -64,6 +64,12 @@ pub(crate) struct TabPage {
     /// Faz 13: the active quick file-type/attribute filter, ANDed with
     /// `search_query` in `filter`.
     pub quick_filter: Rc<RefCell<QuickFilter>>,
+    /// Faz 14: whether hidden files (dotfiles and entries listed in a
+    /// directory's `.hidden` file — both already folded into
+    /// `FileMetadata::is_hidden` by GIO) are shown in this tab. Toggled by
+    /// Ctrl+H (`win.toggle-hidden-files`), isolated per tab like every
+    /// other view/filter/sort preference (Kural #51).
+    pub show_hidden: Rc<RefCell<bool>>,
     /// The `GtkCustomSorter` all three views' `GtkSortListModel`s share;
     /// `resort()` is the only thing that needs to touch it directly.
     pub sorter: gtk4::CustomSorter,

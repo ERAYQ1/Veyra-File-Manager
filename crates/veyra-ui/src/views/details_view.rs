@@ -188,6 +188,13 @@ fn name_column(thumbnails: Rc<ThumbnailService>) -> gtk4::ColumnViewColumn {
         else {
             return;
         };
+        // Faz 14: recycled list items must have the class explicitly
+        // cleared for non-hidden entries, not just set for hidden ones.
+        if file_item.metadata.is_hidden {
+            row.add_css_class("veyra-hidden-item");
+        } else {
+            row.remove_css_class("veyra-hidden-item");
+        }
         let mut child = row.first_child();
         if let Some(icon) = child.and_then(|w| w.downcast::<gtk4::Image>().ok()) {
             icon.set_icon_name(Some(icon_name_for(&file_item)));
@@ -246,6 +253,12 @@ fn text_column(
             .and_then(|w| w.downcast::<gtk4::Label>().ok())
         {
             label.set_text(&render(&file_item));
+            // Faz 14: dim the rest of the row to match the Name cell.
+            if file_item.metadata.is_hidden {
+                label.add_css_class("veyra-hidden-item");
+            } else {
+                label.remove_css_class("veyra-hidden-item");
+            }
         }
     });
 

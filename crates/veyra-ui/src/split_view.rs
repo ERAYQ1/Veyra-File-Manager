@@ -229,11 +229,16 @@ fn nav_button(icon_name: &str, tooltip: &str) -> gtk4::Button {
 /// it for `display`. `.veyra-panel` always reserves the same 2px
 /// transparent border, so toggling `.veyra-active-panel` on/off never
 /// shifts layout.
+///
+/// Also installs `.veyra-hidden-item` (Faz 14): dims and italicizes hidden
+/// files/directories in every view when the tab's Ctrl+H toggle is showing
+/// them, so they read as visually distinct from regular entries.
 pub(crate) fn install_panel_css(display: &gtk4::gdk::Display) {
     let provider = gtk4::CssProvider::new();
     provider.load_from_data(
         ".veyra-panel { border: 2px solid transparent; }\n\
-         .veyra-panel.veyra-active-panel { border: 2px solid @accent_color; border-radius: 6px; }",
+         .veyra-panel.veyra-active-panel { border: 2px solid @accent_color; border-radius: 6px; }\n\
+         .veyra-hidden-item { opacity: 0.55; font-style: italic; }",
     );
     gtk4::style_context_add_provider_for_display(
         display,

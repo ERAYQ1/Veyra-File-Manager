@@ -568,6 +568,26 @@ fn setup_navigation_shortcuts(
     }
     window.add_action(&action_focus_address);
     app.set_accels_for_action("win.focus-address", &["<Primary>l"]);
+
+    // Faz 14: hidden files (dotfiles + `.hidden`-listed entries, both
+    // already folded into `FileMetadata::is_hidden` by GIO) are shown/hidden
+    // per tab, matching Faz 7's isolation (Kural #51).
+    let action_toggle_hidden = gio::SimpleAction::new("toggle-hidden-files", None);
+    {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_toggle_hidden.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            if let Some(tab) = active_tab(&panel.tab_view, &panel.registry) {
+                let mut show_hidden = tab.show_hidden.borrow_mut();
+                *show_hidden = !*show_hidden;
+                drop(show_hidden);
+                tab.refresh_filter();
+            }
+        });
+    }
+    window.add_action(&action_toggle_hidden);
+    app.set_accels_for_action("win.toggle-hidden-files", &["<Primary>h"]);
 }
 
 /// Registers the Faz 7 tab-management `win.*` actions and their
@@ -1268,7 +1288,12 @@ fn open_tab(
     let state = AppState::new(start_dir.clone());
     let search_query = Rc::new(RefCell::new(String::new()));
     let quick_filter = Rc::new(RefCell::new(crate::sorting::QuickFilter::default()));
-    let filter = build_combined_filter(search_query.clone(), quick_filter.clone());
+    let show_hidden = Rc::new(RefCell::new(false));
+    let filter = build_combined_filter(
+        search_query.clone(),
+        quick_filter.clone(),
+        show_hidden.clone(),
+    );
     let sort_config = Rc::new(RefCell::new(crate::sorting::SortConfig::default()));
     let sorter = crate::sorting::build_sorter(sort_config.clone());
     let sort_sync_guard = Rc::new(std::cell::Cell::new(false));
@@ -1367,6 +1392,7 @@ fn open_tab(
         search_query,
         sort_config,
         quick_filter,
+        show_hidden,
         sorter,
         details_column_view: details_column_view_slot,
         details_sort_columns: details_sort_columns_slot,
@@ -1592,17 +1618,26 @@ fn refresh(state: &SharedState, chrome: &Chrome) {
     load_directory(state, chrome, path);
 }
 
-/// ANDs the free-text search query with the tab's active `QuickFilter`
-/// (Faz 13): an item must match both to remain visible.
+/// ANDs the free-text search query, the tab's active `QuickFilter` (Faz 13),
+/// and the hidden-files toggle (Faz 14): an item must pass all three to
+/// remain visible. `is_hidden` already covers both dotfiles and a
+/// directory's `.hidden` listing — GIO's `standard::is-hidden` computes it
+/// for us (see `veyra-filesystem`'s `build_file_item`), so no extra
+/// filesystem-side work is needed here.
 fn build_combined_filter(
     query: Rc<RefCell<String>>,
     quick_filter: Rc<RefCell<crate::sorting::QuickFilter>>,
+    show_hidden: Rc<RefCell<bool>>,
 ) -> gtk4::CustomFilter {
     gtk4::CustomFilter::new(move |object| {
         let Some(boxed) = object.downcast_ref::<gtk4::glib::BoxedAnyObject>() else {
             return true;
         };
         let item = boxed.borrow::<FileItem>();
+
+        if !crate::sorting::passes_hidden_filter(&item, *show_hidden.borrow()) {
+            return false;
+        }
 
         let needle = query.borrow();
         if !needle.is_empty() && !item.name().to_lowercase().contains(&needle.to_lowercase()) {
