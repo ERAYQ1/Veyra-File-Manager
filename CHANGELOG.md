@@ -1,5 +1,31 @@
 # Changelog
 
+## Faz 21 — Network (Ağ Dosya Sistemleri & Tarayıcısı) (`veyra-ui`)
+
+### Eklenenler
+- **`network` (yeni modül, `veyra-ui`):** GVfs üzerinden uzak sunuculara bağlanma mantığı; Kural #44 gereği çekirdek `veyra-filesystem`'den ayrı tutuldu.
+  - **`NetworkProtocol`:** `Sftp` (`sftp://`/`ssh://`), `Smb`, `Ftp`, `Dav`, `Davs` — her biri şema, diyalog rozeti (chip) etiketi ve simge adı taşır.
+  - **`detect_protocol` / `parse_server_address` (saf, birim testli):** `[user@]host[:port][/path]` biçimini şemalı ya da şemasız girdi için ayrıştırıp doğrular, boş adres/desteklenmeyen şema/eksik host hatalarını ayrı ayrı raporlar.
+  - **`mount_remote_location` (asenkron):** `gio::File::mount_enclosing_volume_future` + `gtk4::MountOperation` (Kural #11/#12: GTK ana thread'ini bloklamaz). Kimlik doğrulama tamamen GTK'nın yerleşik parola diyaloğu üzerinden yürür — bu modül hiçbir zaman düz metin parola görmez (Kural #23). Zaten bağlı bir konum veya kullanıcının iptal ettiği bir bağlantı isteği zarifçe ele alınır; diğer hatalar `AdwAlertDialog`'a uygun, ham GLib metni içermeyen mesajlara çevrilir (Host not found / Timed out / Connection refused / Authentication failed).
+  - **Sunucu geçmişi:** `~/.config/veyra/network_history` — en fazla 10 kayıt, en son bağlanılan başta, atomik yazım (`bookmarks.rs` ile aynı `.tmp` + rename deseni).
+- **`dialogs::connect_server_dialog` (yeni):** `AdwDialog` tabanlı "Connect to Server" diyaloğu — sunucu adresi girişi, SFTP/SMB/FTP/WebDAV hızlı şema seçici (linked toggle grubu), canlı doğrulama ile etkinleşen Connect butonu, bağlanırken spinner + durum satırı, başarısız bağlantıda satır içi hata mesajı, ve tıklanınca adres alanını dolduran/silinebilen Recent Servers listesi.
+- **Sidebar entegrasyonu (`sidebar.rs`):** Devices'tan ayrı yeni **Network** bölümü — sabit "Network" kökü (`network:///`), altında canlı SFTP/SMB/FTP/WebDAV bağlantıları (`devices.rs`'teki mevcut satır bileşeni yeniden kullanılarak: tıkla-git, sağ tık Unmount/Open in New Tab/Properties menüsü, satır içi eject/unmount butonu), en altta **"+ Connect to Server…"** (`win.connect-to-server`). Aynı yedi `GVolumeMonitor` hotplug sinyali artık hem Devices hem Network bölümünü tazeler.
+- **`devices.rs` güncellemesi:** `scan()` artık SFTP/SMB/FTP/WebDAV bağlı noktalarını atlar (Network bölümüne taşındı); MTP/`trash://` gibi diğer uzak GVfs arka uçları Devices'ta değişmeden kalır — mevcut işlevsellik korunur (Kural #4).
+- **`window.rs`:** `win.connect-to-server` aksiyonu, diyaloğu açar; başarılı bağlantı odaklanmış paneli yeni bağlanan konuma yönlendirir.
+
+### Testler
+- `veyra-ui::network`: 11 yeni birim testi (protokol tespiti, tam/şemasız URI ayrıştırma, kullanıcı adı+port, host eksik/boş adres/desteklenmeyen şema hataları, büyük/küçük harf duyarsız şema, geçmiş round-trip + tekilleştirme + üst sınır).
+- Toplam: 236/236 test (workspace genelinde, önceki 225'ten +11).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 236/236 geçti.
+- `cargo fmt --all`: temiz.
+
+### Sıradaki Faz
+Faz 22 — (Onay bekleniyor.)
+
 ## Faz 20 — Disk Analyzer / Disk Kullanım Analizörü (`veyra-filesystem`, `veyra-ui`)
 
 ### Eklenenler

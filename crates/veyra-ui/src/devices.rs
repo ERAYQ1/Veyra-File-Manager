@@ -90,6 +90,13 @@ pub(crate) fn scan(monitor: &gio::VolumeMonitor) -> Vec<DeviceEntry> {
 
     for mount in monitor.mounts() {
         let path = mount_path(&mount.root());
+        // Faz 21: SFTP/SMB/FTP/WebDAV mounts get their own sidebar Network
+        // section (`network::scan_mounts`) instead of appearing here too.
+        // Every other remote GVfs backend (MTP phones, `trash://`, ...)
+        // stays in Devices, unaffected.
+        if matches!(&path, VeyraPath::Uri(uri) if crate::network::detect_protocol(uri).is_some()) {
+            continue;
+        }
         let is_root = matches!(&path, VeyraPath::Local(p) if p.as_os_str() == "/");
         let volume = mount.volume();
         let drive = mount.drive();

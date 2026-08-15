@@ -17,6 +17,7 @@ mod dialogs;
 mod fs_async;
 mod headerbar;
 mod history;
+mod network;
 mod operations;
 mod preview;
 mod recent;

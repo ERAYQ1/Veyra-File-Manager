@@ -12,6 +12,7 @@ use crate::bookmarks::{self, Bookmark};
 use crate::devices::{self, DeviceEntry};
 use crate::dialogs;
 use crate::fs_async;
+use crate::network;
 use crate::thumbnails::ThumbnailService;
 
 /// Builds the Places + Bookmarks + Devices sidebar. Places are the standard
@@ -144,34 +145,87 @@ pub(crate) fn build(
     };
     refresh_devices();
 
-    // Faz 17: live hotplug — any of these seven `GVolumeMonitor` signals
-    // means the device list (or a row's mount/eject affordances) may be
-    // stale, so all of them just re-render the whole section from scratch.
-    {
+    // Faz 21: Network section — the "Network" (`network:///` local-network
+    // browse) root always shown, live-refreshed active SFTP/SMB/FTP/WebDAV
+    // mounts below it, and a "+ Connect to Server…" action at the bottom.
+    root.append(&section_heading("Network"));
+    root.append(&row(
+        "Network",
+        "network-workgroup-symbolic",
+        VeyraPath::from_uri("network:///"),
+        &navigate,
+    ));
+    let network_box = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    root.append(&network_box);
+
+    let refresh_network: Rc<dyn Fn()> = {
+        let network_box = network_box.clone();
+        let window = window.clone();
+        let navigate = navigate.clone();
+        let open_in_new_tab = open_in_new_tab.clone();
+        let thumbnails = thumbnails.clone();
+        let monitor = monitor.clone();
+        Rc::new(move || {
+            refresh_network_box(
+                &network_box,
+                &monitor,
+                &window,
+                &navigate,
+                &open_in_new_tab,
+                &thumbnails,
+            )
+        })
+    };
+    refresh_network();
+
+    let connect_button = gtk4::Button::builder().css_classes(["flat"]).build();
+    connect_button.set_action_name(Some("win.connect-to-server"));
+    connect_button.update_property(&[gtk4::accessible::Property::Label("Connect to Server")]);
+    let connect_content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    connect_content.append(&gtk4::Image::from_icon_name("list-add-symbolic"));
+    let connect_label = gtk4::Label::new(Some("Connect to Server…"));
+    connect_label.set_xalign(0.0);
+    connect_content.append(&connect_label);
+    connect_button.set_child(Some(&connect_content));
+    root.append(&connect_button);
+
+    // Faz 17/21: live hotplug — any of these seven `GVolumeMonitor` signals
+    // means the Devices list, a row's mount/eject affordances, or the
+    // Network section's active mounts may be stale, so all of them
+    // re-render both sections from scratch.
+    let refresh_all: Rc<dyn Fn()> = {
         let refresh_devices = refresh_devices.clone();
-        monitor.connect_mount_added(move |_, _| refresh_devices());
+        let refresh_network = refresh_network.clone();
+        Rc::new(move || {
+            refresh_devices();
+            refresh_network();
+        })
+    };
+    {
+        let refresh_all = refresh_all.clone();
+        monitor.connect_mount_added(move |_, _| refresh_all());
     }
     {
-        let refresh_devices = refresh_devices.clone();
-        monitor.connect_mount_removed(move |_, _| refresh_devices());
+        let refresh_all = refresh_all.clone();
+        monitor.connect_mount_removed(move |_, _| refresh_all());
     }
     {
-        let refresh_devices = refresh_devices.clone();
-        monitor.connect_mount_changed(move |_, _| refresh_devices());
+        let refresh_all = refresh_all.clone();
+        monitor.connect_mount_changed(move |_, _| refresh_all());
     }
     {
-        let refresh_devices = refresh_devices.clone();
-        monitor.connect_volume_added(move |_, _| refresh_devices());
+        let refresh_all = refresh_all.clone();
+        monitor.connect_volume_added(move |_, _| refresh_all());
     }
     {
-        let refresh_devices = refresh_devices.clone();
-        monitor.connect_volume_removed(move |_, _| refresh_devices());
+        let refresh_all = refresh_all.clone();
+        monitor.connect_volume_removed(move |_, _| refresh_all());
     }
     {
-        let refresh_devices = refresh_devices.clone();
-        monitor.connect_drive_connected(move |_, _| refresh_devices());
+        let refresh_all = refresh_all.clone();
+        monitor.connect_drive_connected(move |_, _| refresh_all());
     }
-    monitor.connect_drive_disconnected(move |_, _| refresh_devices());
+    monitor.connect_drive_disconnected(move |_, _| refresh_all());
 
     let scrolled = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
@@ -269,6 +323,54 @@ fn refresh_devices_box(
     };
 
     for entry in devices::scan(monitor) {
+        container.append(&device_row(
+            entry,
+            window,
+            navigate,
+            open_in_new_tab,
+            thumbnails,
+            &refresh_self,
+        ));
+    }
+}
+
+/// Rebuilds `container`'s children from `network::scan_mounts` — the
+/// currently active SFTP/SMB/FTP/WebDAV mounts. Reuses `device_row` since a
+/// network row needs the exact same click-to-navigate, right-click
+/// Unmount/Open in New Tab/Properties menu, and inline eject affordances a
+/// Devices row already has.
+fn refresh_network_box(
+    container: &gtk4::Box,
+    monitor: &gio::VolumeMonitor,
+    window: &adw::ApplicationWindow,
+    navigate: &Rc<dyn Fn(VeyraPath)>,
+    open_in_new_tab: &Rc<dyn Fn(VeyraPath)>,
+    thumbnails: &Rc<ThumbnailService>,
+) {
+    while let Some(child) = container.first_child() {
+        container.remove(&child);
+    }
+
+    let refresh_self: Rc<dyn Fn()> = {
+        let container = container.clone();
+        let monitor = monitor.clone();
+        let window = window.clone();
+        let navigate = navigate.clone();
+        let open_in_new_tab = open_in_new_tab.clone();
+        let thumbnails = thumbnails.clone();
+        Rc::new(move || {
+            refresh_network_box(
+                &container,
+                &monitor,
+                &window,
+                &navigate,
+                &open_in_new_tab,
+                &thumbnails,
+            )
+        })
+    };
+
+    for entry in network::scan_mounts(monitor) {
         container.append(&device_row(
             entry,
             window,

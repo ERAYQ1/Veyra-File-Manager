@@ -229,7 +229,8 @@ pub(crate) fn build_window(
     setup_preview_actions(app, &window, &preview, &header, refresh_preview);
     setup_recent_actions(&window, &panels, privacy_mode);
     setup_trash_actions(app, &window, &panels, &focused);
-    setup_disk_analyzer_actions(app, &window, &panels, &focused, navigate);
+    setup_disk_analyzer_actions(app, &window, &panels, &focused, navigate.clone());
+    setup_network_actions(&window, navigate);
 
     window
 }
@@ -1534,6 +1535,20 @@ fn setup_disk_analyzer_actions(
     }
     window.add_action(&action_analyze_current);
     app.set_accels_for_action("win.analyze-disk-current", &["<Primary><Shift>u"]);
+}
+
+/// Registers Faz 21's `win.connect-to-server`, activated by the sidebar's
+/// Network section "+ Connect to Server…" button. Shows the dialog; a
+/// successful connection navigates the focused panel into the new mount.
+fn setup_network_actions(window: &adw::ApplicationWindow, navigate: Rc<dyn Fn(VeyraPath)>) {
+    let action_connect = gio::SimpleAction::new("connect-to-server", None);
+    {
+        let window = window.clone();
+        action_connect.connect_activate(move |_, _| {
+            dialogs::connect_server_dialog::show(&window, navigate.clone());
+        });
+    }
+    window.add_action(&action_connect);
 }
 
 /// Registers the Faz 15 `win.clear-recent-history` (behind an `AdwAlertDialog`
