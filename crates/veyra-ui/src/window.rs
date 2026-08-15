@@ -161,7 +161,7 @@ pub(crate) fn build_window(
     };
 
     let content_page = adw::NavigationPage::new(&content_paned, "Files");
-    let sidebar_widget = sidebar::build(&window, navigate, open_in_new_tab);
+    let sidebar_widget = sidebar::build(&window, navigate, open_in_new_tab, thumbnails.clone());
     let sidebar_page = adw::NavigationPage::new(&sidebar_widget, "Sidebar");
 
     let sidebar_split = adw::NavigationSplitView::builder()

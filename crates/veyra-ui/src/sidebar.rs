@@ -4,12 +4,15 @@ use gtk4::glib::UserDirectory;
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib};
 use libadwaita as adw;
+use libadwaita::prelude::*;
 
 use veyra_filesystem::VeyraPath;
 
 use crate::bookmarks::{self, Bookmark};
+use crate::devices::{self, DeviceEntry};
 use crate::dialogs;
 use crate::fs_async;
+use crate::thumbnails::ThumbnailService;
 
 /// Builds the Places + Bookmarks + Devices sidebar. Places are the standard
 /// XDG user directories (resolved via GLib so localized folder names are
@@ -22,6 +25,7 @@ pub(crate) fn build(
     window: &adw::ApplicationWindow,
     navigate: Rc<dyn Fn(VeyraPath)>,
     open_in_new_tab: Rc<dyn Fn(VeyraPath)>,
+    thumbnails: Rc<ThumbnailService>,
 ) -> gtk4::Widget {
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
     root.set_margin_top(12);
@@ -116,27 +120,58 @@ pub(crate) fn build(
     bookmarks_section.add_controller(drop_target);
 
     root.append(&section_heading("Devices"));
-    let devices = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
-    root.append(&devices);
+    let devices_box = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    root.append(&devices_box);
 
     let monitor = gio::VolumeMonitor::get();
-    refresh_devices(&devices, &monitor, &navigate);
-
-    let on_change = {
-        let devices = devices.clone();
+    let refresh_devices: Rc<dyn Fn()> = {
+        let devices_box = devices_box.clone();
+        let window = window.clone();
         let navigate = navigate.clone();
+        let open_in_new_tab = open_in_new_tab.clone();
+        let thumbnails = thumbnails.clone();
         let monitor = monitor.clone();
-        move || refresh_devices(&devices, &monitor, &navigate)
+        Rc::new(move || {
+            refresh_devices_box(
+                &devices_box,
+                &monitor,
+                &window,
+                &navigate,
+                &open_in_new_tab,
+                &thumbnails,
+            )
+        })
     };
+    refresh_devices();
+
+    // Faz 17: live hotplug — any of these seven `GVolumeMonitor` signals
+    // means the device list (or a row's mount/eject affordances) may be
+    // stale, so all of them just re-render the whole section from scratch.
     {
-        let on_change = on_change.clone();
-        monitor.connect_mount_added(move |_, _| on_change());
+        let refresh_devices = refresh_devices.clone();
+        monitor.connect_mount_added(move |_, _| refresh_devices());
     }
     {
-        let on_change = on_change.clone();
-        monitor.connect_mount_removed(move |_, _| on_change());
+        let refresh_devices = refresh_devices.clone();
+        monitor.connect_mount_removed(move |_, _| refresh_devices());
     }
-    monitor.connect_mount_changed(move |_, _| on_change());
+    {
+        let refresh_devices = refresh_devices.clone();
+        monitor.connect_mount_changed(move |_, _| refresh_devices());
+    }
+    {
+        let refresh_devices = refresh_devices.clone();
+        monitor.connect_volume_added(move |_, _| refresh_devices());
+    }
+    {
+        let refresh_devices = refresh_devices.clone();
+        monitor.connect_volume_removed(move |_, _| refresh_devices());
+    }
+    {
+        let refresh_devices = refresh_devices.clone();
+        monitor.connect_drive_connected(move |_, _| refresh_devices());
+    }
+    monitor.connect_drive_disconnected(move |_, _| refresh_devices());
 
     let scrolled = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
@@ -198,28 +233,378 @@ fn places_entries() -> Vec<(&'static str, &'static str, VeyraPath)> {
     entries
 }
 
-fn refresh_devices(
+/// Rebuilds `container`'s children from `devices::scan` — root filesystem,
+/// every active mount, and every not-yet-mounted volume (USB stick plugged
+/// in but unopened, optical disc not yet accessed). Called once at sidebar
+/// build time and again on every `GVolumeMonitor` hotplug signal.
+fn refresh_devices_box(
     container: &gtk4::Box,
     monitor: &gio::VolumeMonitor,
+    window: &adw::ApplicationWindow,
     navigate: &Rc<dyn Fn(VeyraPath)>,
+    open_in_new_tab: &Rc<dyn Fn(VeyraPath)>,
+    thumbnails: &Rc<ThumbnailService>,
 ) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
 
-    for mount in monitor.mounts() {
-        let root_file = mount.root();
-        let path = match root_file.path() {
-            Some(local) => VeyraPath::from_local(local),
-            None => VeyraPath::from_uri(root_file.uri().to_string()),
-        };
-        container.append(&row(
-            &mount.name(),
-            "drive-harddisk-symbolic",
-            path,
+    let refresh_self: Rc<dyn Fn()> = {
+        let container = container.clone();
+        let monitor = monitor.clone();
+        let window = window.clone();
+        let navigate = navigate.clone();
+        let open_in_new_tab = open_in_new_tab.clone();
+        let thumbnails = thumbnails.clone();
+        Rc::new(move || {
+            refresh_devices_box(
+                &container,
+                &monitor,
+                &window,
+                &navigate,
+                &open_in_new_tab,
+                &thumbnails,
+            )
+        })
+    };
+
+    for entry in devices::scan(monitor) {
+        container.append(&device_row(
+            entry,
+            window,
             navigate,
+            open_in_new_tab,
+            thumbnails,
+            &refresh_self,
         ));
     }
+}
+
+/// Builds one Devices row: icon, name + live usage subtitle (queried async
+/// per Rule #11/#12 — never blocks the row from appearing), an inline
+/// Unmount/Eject button when applicable, and a right-click context menu
+/// (Open in New Tab / Mount / Unmount / Safe Removal / Properties, each
+/// enabled only when the underlying `gio` object supports it).
+fn device_row(
+    entry: DeviceEntry,
+    window: &adw::ApplicationWindow,
+    navigate: &Rc<dyn Fn(VeyraPath)>,
+    open_in_new_tab: &Rc<dyn Fn(VeyraPath)>,
+    thumbnails: &Rc<ThumbnailService>,
+    on_changed: &Rc<dyn Fn()>,
+) -> gtk4::Widget {
+    let entry = Rc::new(entry);
+
+    let button = gtk4::Button::builder().css_classes(["flat"]).build();
+    button.set_accessible_role(gtk4::AccessibleRole::Button);
+    button.update_property(&[gtk4::accessible::Property::Label(entry.label.as_str())]);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    let icon = gtk4::Image::from_icon_name(entry.icon_name);
+    content.append(&icon);
+
+    let text_box = gtk4::Box::new(gtk4::Orientation::Vertical, 1);
+    text_box.set_hexpand(true);
+    text_box.set_valign(gtk4::Align::Center);
+    let name_label = gtk4::Label::new(Some(&entry.label));
+    name_label.set_xalign(0.0);
+    name_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    text_box.append(&name_label);
+
+    let subtitle_label = gtk4::Label::new(Some(if entry.path.is_some() {
+        "Calculating…"
+    } else {
+        "Not mounted"
+    }));
+    subtitle_label.set_xalign(0.0);
+    subtitle_label.add_css_class("caption");
+    subtitle_label.add_css_class("dim-label");
+    subtitle_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    text_box.append(&subtitle_label);
+
+    let progress = gtk4::ProgressBar::new();
+    progress.set_visible(false);
+    text_box.append(&progress);
+
+    content.append(&text_box);
+
+    if entry.can_eject() || entry.can_unmount() {
+        let eject_button = gtk4::Button::from_icon_name("media-eject-symbolic");
+        eject_button.add_css_class("flat");
+        eject_button.set_valign(gtk4::Align::Center);
+        eject_button.set_tooltip_text(Some("Unmount / Eject"));
+        {
+            let window = window.clone();
+            let entry = entry.clone();
+            let on_changed = on_changed.clone();
+            eject_button.connect_clicked(move |_| {
+                request_eject_or_unmount(&window, &entry, on_changed.clone());
+            });
+        }
+        content.append(&eject_button);
+    }
+
+    button.set_child(Some(&content));
+
+    {
+        let window = window.clone();
+        let navigate = navigate.clone();
+        let entry = entry.clone();
+        let on_changed = on_changed.clone();
+        button.connect_clicked(move |_| {
+            if let Some(path) = entry.path.clone() {
+                navigate(path);
+            } else if let Some(volume) = entry.volume.clone() {
+                request_mount(&window, volume, navigate.clone(), on_changed.clone());
+            }
+        });
+    }
+
+    let actions = gio::SimpleActionGroup::new();
+
+    let action_open_tab = gio::SimpleAction::new("open-tab", None);
+    action_open_tab.set_enabled(entry.path.is_some());
+    {
+        let open_in_new_tab = open_in_new_tab.clone();
+        let entry = entry.clone();
+        action_open_tab.connect_activate(move |_, _| {
+            if let Some(path) = entry.path.clone() {
+                open_in_new_tab(path);
+            }
+        });
+    }
+    actions.add_action(&action_open_tab);
+
+    let action_mount = gio::SimpleAction::new("mount", None);
+    action_mount.set_enabled(entry.can_mount());
+    {
+        let window = window.clone();
+        let navigate = navigate.clone();
+        let entry = entry.clone();
+        let on_changed = on_changed.clone();
+        action_mount.connect_activate(move |_, _| {
+            if let Some(volume) = entry.volume.clone() {
+                request_mount(&window, volume, navigate.clone(), on_changed.clone());
+            }
+        });
+    }
+    actions.add_action(&action_mount);
+
+    let action_unmount = gio::SimpleAction::new("unmount", None);
+    action_unmount.set_enabled(entry.can_unmount());
+    {
+        let window = window.clone();
+        let entry = entry.clone();
+        let on_changed = on_changed.clone();
+        action_unmount.connect_activate(move |_, _| {
+            request_eject_or_unmount(&window, &entry, on_changed.clone());
+        });
+    }
+    actions.add_action(&action_unmount);
+
+    let action_eject = gio::SimpleAction::new("eject", None);
+    action_eject.set_enabled(entry.can_eject());
+    {
+        let window = window.clone();
+        let entry = entry.clone();
+        let on_changed = on_changed.clone();
+        action_eject.connect_activate(move |_, _| {
+            request_eject_or_unmount(&window, &entry, on_changed.clone());
+        });
+    }
+    actions.add_action(&action_eject);
+
+    let action_properties = gio::SimpleAction::new("properties", None);
+    action_properties.set_enabled(entry.path.is_some());
+    {
+        let window = window.clone();
+        let entry = entry.clone();
+        let thumbnails = thumbnails.clone();
+        action_properties.connect_activate(move |_, _| {
+            if let Some(path) = entry.path.clone() {
+                show_device_properties(&window, path, thumbnails.clone());
+            }
+        });
+    }
+    actions.add_action(&action_properties);
+
+    button.insert_action_group("device", Some(&actions));
+
+    let menu = gio::Menu::new();
+    menu.append(Some("Open in New Tab"), Some("device.open-tab"));
+    menu.append(Some("Mount"), Some("device.mount"));
+    menu.append(Some("Unmount"), Some("device.unmount"));
+    menu.append(Some("Safe Removal / Eject"), Some("device.eject"));
+    menu.append(Some("Properties"), Some("device.properties"));
+
+    let popover = gtk4::PopoverMenu::from_model(Some(&menu));
+    popover.set_parent(&button);
+    popover.set_has_arrow(false);
+    popover.set_halign(gtk4::Align::Start);
+
+    let gesture = gtk4::GestureClick::new();
+    gesture.set_button(gdk::BUTTON_SECONDARY);
+    gesture.connect_released(move |gesture, _n_press, x, y| {
+        gesture.set_state(gtk4::EventSequenceState::Claimed);
+        popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        popover.popup();
+    });
+    button.add_controller(gesture);
+
+    if let Some(path) = entry.path.clone() {
+        fs_async::run_blocking(
+            move || devices::query_usage(&path),
+            move |usage| match usage {
+                Some(usage) => {
+                    subtitle_label.set_text(&devices::format_usage(&usage));
+                    progress.set_fraction(devices::usage_fraction(&usage));
+                    progress.set_visible(true);
+                }
+                None => subtitle_label.set_text("Usage unavailable"),
+            },
+        );
+    }
+
+    button.upcast()
+}
+
+/// Mounts `volume` (prompting for credentials/decryption via a default
+/// `GMountOperation` if the backend needs it — password-protected network
+/// shares, LUKS-encrypted volumes), then navigates into it once mounted.
+/// Failure surfaces as an `AdwAlertDialog` rather than a silent no-op or a
+/// crash (Rule #15/#18).
+fn request_mount(
+    window: &adw::ApplicationWindow,
+    volume: gio::Volume,
+    navigate: Rc<dyn Fn(VeyraPath)>,
+    on_changed: Rc<dyn Fn()>,
+) {
+    let window = window.clone();
+    glib::spawn_future_local(async move {
+        let operation = gio::MountOperation::new();
+        let result = volume
+            .mount_future(gio::MountMountFlags::NONE, Some(&operation))
+            .await;
+        match result {
+            Ok(()) => {
+                if let Some(mount) = volume.get_mount() {
+                    let root_file = mount.root();
+                    let path = match root_file.path() {
+                        Some(local) => VeyraPath::from_local(local),
+                        None => VeyraPath::from_uri(root_file.uri().to_string()),
+                    };
+                    navigate(path);
+                }
+                on_changed();
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to mount volume");
+                show_device_error(&window, "Unable to Mount Device", &err.to_string());
+            }
+        }
+    });
+}
+
+/// Unmounts (preferring the mount-level operation, since it's the most
+/// common case) or, for hardware that needs it, ejects `entry` — a mount
+/// busy with an open file, or a permissions failure, ends in an
+/// `AdwAlertDialog` instead of a stuck spinner or a panic (Rule #15/#18).
+fn request_eject_or_unmount(
+    window: &adw::ApplicationWindow,
+    entry: &DeviceEntry,
+    on_changed: Rc<dyn Fn()>,
+) {
+    let window = window.clone();
+    if let Some(mount) = entry.mount.clone() {
+        let use_eject = mount.can_eject();
+        glib::spawn_future_local(async move {
+            let operation = gio::MountOperation::new();
+            let result = if use_eject {
+                mount
+                    .eject_with_operation_future(gio::MountUnmountFlags::NONE, Some(&operation))
+                    .await
+            } else {
+                mount
+                    .unmount_with_operation_future(gio::MountUnmountFlags::NONE, Some(&operation))
+                    .await
+            };
+            match result {
+                Ok(()) => on_changed(),
+                Err(err) => {
+                    tracing::warn!(error = %err, "failed to unmount/eject device");
+                    show_device_error(&window, "Device is Busy", &err.to_string());
+                }
+            }
+        });
+        return;
+    }
+
+    if let Some(volume) = entry.volume.clone() {
+        glib::spawn_future_local(async move {
+            let operation = gio::MountOperation::new();
+            match volume
+                .eject_with_operation_future(gio::MountUnmountFlags::NONE, Some(&operation))
+                .await
+            {
+                Ok(()) => on_changed(),
+                Err(err) => {
+                    tracing::warn!(error = %err, "failed to eject volume");
+                    show_device_error(&window, "Unable to Eject Device", &err.to_string());
+                }
+            }
+        });
+        return;
+    }
+
+    if let Some(drive) = entry.drive.clone() {
+        glib::spawn_future_local(async move {
+            let operation = gio::MountOperation::new();
+            match drive
+                .eject_with_operation_future(gio::MountUnmountFlags::NONE, Some(&operation))
+                .await
+            {
+                Ok(()) => on_changed(),
+                Err(err) => {
+                    tracing::warn!(error = %err, "failed to eject drive");
+                    show_device_error(&window, "Unable to Eject Device", &err.to_string());
+                }
+            }
+        });
+    }
+}
+
+fn show_device_error(parent: &impl IsA<gtk4::Widget>, heading: &str, body: &str) {
+    let dialog = adw::AlertDialog::builder()
+        .heading(heading)
+        .body(body)
+        .build();
+    dialog.add_responses(&[("ok", "OK")]);
+    dialog.set_default_response(Some("ok"));
+    dialog.set_close_response("ok");
+    dialog.present(Some(parent));
+}
+
+/// Stats `path` off the GTK main thread (Rule #11/#12) and opens the shared
+/// Properties dialog on success; a device that vanished between the click
+/// and the stat (unplugged mid-click) fails gracefully via the same
+/// `AdwAlertDialog` pattern rather than panicking.
+fn show_device_properties(
+    window: &adw::ApplicationWindow,
+    path: VeyraPath,
+    thumbnails: Rc<ThumbnailService>,
+) {
+    let window = window.clone();
+    fs_async::run_blocking(
+        move || veyra_filesystem::stat(&path),
+        move |result| match result {
+            Ok(item) => {
+                dialogs::properties_dialog::show(&window, item, thumbnails, Rc::new(|| {}));
+            }
+            Err(err) => {
+                show_device_error(&window, "Unable to Read Device", &err.to_string());
+            }
+        },
+    );
 }
 
 fn row(

@@ -11,6 +11,7 @@
 mod bookmarks;
 mod breadcrumbs;
 mod context_menu;
+mod devices;
 mod dialogs;
 mod fs_async;
 mod headerbar;

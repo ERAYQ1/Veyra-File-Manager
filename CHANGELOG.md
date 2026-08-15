@@ -1,5 +1,34 @@
 # Changelog
 
+## Faz 17 — Devices & Volumes (Aygıtlar ve Sürücüler) (`veyra-ui`)
+
+### Eklenenler
+- **Yeni modül `devices.rs`:** `gio::VolumeMonitor`'ü tam kapasiteyle tarıyor — sadece aktif `mounts()` değil, henüz bağlanmamış `volumes()` (mount'u `None` olanlar: takılı ama açılmamış USB bellek, henüz erişilmemiş optik disk) ve kök dosya sistemi (`/`, her zaman "System" olarak, mount edilmemiş olsa bile listede) dahil.
+  - `scan(monitor) -> Vec<DeviceEntry>`: kök her zaman ilk sırada; zaten mount edilmiş bir volume, `monitor.volumes()` taramasında tekrar eklenmiyor (`get_mount().is_some()` ile filtreleniyor).
+  - `DeviceKind` + saf, `gio` tiplerinden bağımsız `classify(is_root, removable, optical, network) -> DeviceKind` fonksiyonu ve `icon_name(kind)` eşlemesi (System → `drive-harddisk-system-symbolic`, InternalDisk → `drive-harddisk-symbolic`, Removable → `drive-removable-media-symbolic`, Optical → `media-optical-symbolic`, Network → `network-server-symbolic`) — sınıflandırma mantığı canlı `Drive`/`Volume` nesnelerinden ayrıldığı için doğrudan birim testlenebiliyor.
+  - `DeviceEntry::can_mount/can_unmount/can_eject`: sağ-tık menüsü ve satır içi çıkarma butonunun etkin/pasif durumunu `gio::Mount`/`Volume`/`Drive`'ın kendi `can_*` bayraklarından türetiyor; kök dosya sistemi hiçbir zaman unmount/eject edilemez.
+  - `query_usage(path) -> Option<UsageInfo>`: `filesystem::size,free,used,type` özniteliklerini okuyor (bloklayıcı — her zaman `fs_async::run_blocking` üzerinden çağrılıyor, Kural #11/#12). `usage_fraction` (sıfır bölme güvenli, `[0,1]`'e clamp'li) ve `format_usage` ("512.0 MB free of 1.0 GB (ext4, 50% used)") ile UI'ye besleniyor.
+- **`sidebar.rs` — zenginleştirilmiş Devices satırı:** ikon + isim + canlı doluluk alt etiketi (`GtkProgressBar` ile), satır oluşturulur oluşturulmaz "Calculating…" gösterip kullanım bilgisini arka planda asenkron çekiyor; mount edilmemiş volume'lar "Not mounted" gösteriyor ve tıklanınca önce mount edip sonra o konuma gidiyor. Çıkarılabilir/ayrılabilir aygıtlar için satır sonunda `media-eject-symbolic` ikonlu flat buton (tooltip: "Unmount / Eject").
+  - **Sağ-tık menüsü** (`bookmark_row`'daki per-row `SimpleActionGroup` desenini izliyor, `"device.*"` eylemleri): "Open in New Tab" / "Mount" / "Unmount" / "Safe Removal / Eject" / "Properties" — her biri `DeviceEntry::can_*`'a göre etkin/pasif; Properties, aygıtı arka planda `stat` edip mevcut Faz 12 Properties diyaloğunu (`dialogs::properties_dialog::show`) açıyor.
+  - **Asenkron Mount/Unmount/Eject:** `Volume::mount_future` / `Mount::unmount_with_operation_future` / `{Mount,Volume,Drive}::eject_with_operation_future` (gtk-rs'in GIO async future sarmalayıcıları, `glib::spawn_future_local` ile) — UI thread hiçbir noktada bloklanmıyor (Kural #11). Mount, olası şifre/decrypt istemleri için varsayılan bir `GMountOperation` geçiyor. Hata (aygıt meşgul, yetki reddi) `AdwAlertDialog` ile zarifçe gösteriliyor, çökme yok (Kural #15/#18).
+  - **Canlı hotplug:** önceki sadece üç `mount_*` sinyaline ek olarak `volume_added`/`volume_removed`/`drive_connected`/`drive_disconnected` de dinleniyor — tamamı Devices bölümünü baştan yeniden çiziyor.
+- **`window.rs`:** `sidebar::build` artık Properties diyaloğu için `ThumbnailService`'i de alıyor (pencere zaten sidebar'dan önce oluşturuluyordu, `thumbnails` de ondan önce — sıralama değişmedi, sadece bir parametre eklendi).
+
+### Testler
+- `devices.rs`'e 11 yeni birim testi: `classify`'ın kök/optik/ağ/çıkarılabilir/varsayılan önceliklendirmesi, `icon_name`'in her `DeviceKind` için doğru simgeyi döndürmesi, `usage_fraction`'ın normal/sıfır-toplam/toplam-üstü-kullanım durumları, `format_usage`'ın dosya sistemi türü var/yok iki biçimi.
+- Toplam: 190/190 test (workspace genelinde, önceki 179'dan +11).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 190/190 geçti.
+- `cargo fmt --all`: temiz.
+- `cargo run` gerçek Wayland oturumunda kısa süre çalıştırıldı: pencere ve sidebar (Devices dahil) panik atmadan açıldı, gerçek `GVolumeMonitor` taraması hatasız tamamlandı.
+- **Not:** bu sandbox'ta Wayland girdi otomasyonu ve ekran görüntüsü alma yeteneği bulunmadığından, sağ-tık menüsü / mount / unmount / eject akışlarının uçtan uca tıklama testi otomatik sürülemedi; bu yollar birim testleri, statik inceleme ve yukarıdaki canlı başlatma doğrulamasıyla sınırlı kaldı (Faz 13-16'daki aynı sınırlama).
+
+### Sıradaki Faz
+Faz 18. Onay bekleniyor.
+
 ## Faz 16 — Favorites / Bookmarks (Yer İmleri & Sürükle-Bırak) (`veyra-ui`)
 
 ### Eklenenler
