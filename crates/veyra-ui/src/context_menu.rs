@@ -30,7 +30,14 @@ use gtk4::{gdk, gio};
 
 use veyra_filesystem::{ArchiveFormat, FileItem};
 
+use crate::open_with;
 use crate::views::selected_item;
+
+/// How many `open_with::recommended_apps` entries surface directly in the
+/// right-click "Open With" submenu before the "Other Application…" entry —
+/// keeps the submenu from growing unbounded on content types with a long
+/// MIME-database association list.
+const MAX_RECOMMENDED_IN_MENU: usize = 5;
 
 /// Attaches a secondary-click (right-click) popover context menu to `view`
 /// (the actual `GtkGridView`/`GtkColumnView`, not an enclosing
@@ -133,7 +140,7 @@ fn build_item_menu(item: &FileItem, is_split_active: bool) -> gio::Menu {
 
     let open_section = gio::Menu::new();
     open_section.append(Some("Open"), Some("win.open-selected"));
-    open_section.append(Some("Open With…"), Some("win.open-with-selected"));
+    open_section.append_submenu(Some("Open With"), &build_open_with_submenu(item));
     if is_dir {
         open_section.append(
             Some("Open in New Tab"),
@@ -246,6 +253,37 @@ fn build_background_menu(has_clipboard: bool) -> gio::Menu {
     menu.append_section(None, &properties_section);
 
     menu
+}
+
+/// Builds the "Open With" submenu for `item`: up to
+/// `MAX_RECOMMENDED_IN_MENU` applications GIO recommends for the item's
+/// content type, each bound to `win.open-with-app` with its desktop id as
+/// the action's string target (see `window.rs`'s `action_open_with_app`),
+/// followed by "Other Application…" which opens the full Faz 22 dialog via
+/// `win.open-with-selected`.
+fn build_open_with_submenu(item: &FileItem) -> gio::Menu {
+    let submenu = gio::Menu::new();
+
+    let recommended = open_with::recommended_apps(&item.metadata.mime_type);
+    if !recommended.is_empty() {
+        let apps_section = gio::Menu::new();
+        for app in recommended.iter().take(MAX_RECOMMENDED_IN_MENU) {
+            let Some(id) = app.id() else { continue };
+            let menu_item = gio::MenuItem::new(Some(&app.name()), None);
+            menu_item.set_action_and_target_value(
+                Some("win.open-with-app"),
+                Some(&id.as_str().to_variant()),
+            );
+            apps_section.append_item(&menu_item);
+        }
+        submenu.append_section(None, &apps_section);
+    }
+
+    let other_section = gio::Menu::new();
+    other_section.append(Some("Other Application…"), Some("win.open-with-selected"));
+    submenu.append_section(None, &other_section);
+
+    submenu
 }
 
 /// Recognized archive extensions for the "Extract Here"/"Extract to…"

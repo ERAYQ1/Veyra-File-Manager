@@ -20,8 +20,8 @@ use crate::tab_page::{active_tab, TabPage, TabRegistry, ViewSelections};
 use crate::views::ViewMode;
 use crate::widgets::progress_toast::ProgressToastHandles;
 use crate::{
-    archive_ops, breadcrumbs, dialogs, fs_async, headerbar, operations, recent, sidebar, trash,
-    widgets,
+    archive_ops, breadcrumbs, dialogs, fs_async, headerbar, open_with, operations, recent, sidebar,
+    trash, widgets,
 };
 
 /// A single Copy/Cut clipboard slot, shared across both panels and all their
@@ -1193,11 +1193,49 @@ fn setup_context_menu_actions(
                 return;
             };
             if let Some(item) = tab.selections.selected(&tab.view_stack) {
-                show_open_with_dialog(&window, &item.path);
+                show_open_with_dialog(&window, &item);
             }
         });
     }
     window.add_action(&action_open_with);
+
+    // Faz 22: activated from the right-click "Open With" submenu's
+    // recommended-app entries (`context_menu::build_item_menu`), each bound
+    // to this one action with the chosen app's desktop id as its string
+    // parameter — cheaper than registering a `SimpleAction` per app per
+    // menu build.
+    let action_open_with_app =
+        gio::SimpleAction::new("open-with-app", Some(&String::static_variant_type()));
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_open_with_app.connect_activate(move |_, parameter| {
+            let Some(app_id) = parameter.and_then(glib::Variant::str).map(str::to_string) else {
+                return;
+            };
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            let Some(app) = gio::DesktopAppInfo::new(&app_id) else {
+                show_error_dialog(
+                    &window,
+                    "Unable to Open File",
+                    "The selected application is no longer available.",
+                );
+                return;
+            };
+            let file = item.path.to_gio_file();
+            if let Err(err) = open_with::launch(&app.upcast(), &file, &window) {
+                show_error_dialog(&window, "Unable to Open File", &err.to_string());
+            }
+        });
+    }
+    window.add_action(&action_open_with_app);
 
     let action_open_new_window = gio::SimpleAction::new("open-in-new-window-selected", None);
     {
@@ -1956,30 +1994,19 @@ fn parent_display(path: &VeyraPath) -> String {
     }
 }
 
-/// Shows the system application-chooser dialog for `path` and launches the
-/// chosen application on confirmation. A single `GAppInfo` launch (a fork +
-/// D-Bus activation, not filesystem I/O) is fast enough to run directly on
-/// the GTK main thread, unlike the bulk Copy/Move/Trash/Delete operations.
-// `AppChooserDialog` was deprecated in GTK 4.10 in favor of
-// `GtkFileLauncher`-adjacent APIs that don't yet cover this dialog's exact
-// "pick an app for this file" use case in gtk4-rs; revisit in a later phase.
-#[allow(deprecated)]
-fn show_open_with_dialog(window: &adw::ApplicationWindow, path: &VeyraPath) {
-    let file = path.to_gio_file();
-    let dialog = gtk4::AppChooserDialog::new(Some(window), gtk4::DialogFlags::MODAL, &file);
-    dialog.connect_response(move |dialog, response| {
-        if response == gtk4::ResponseType::Ok {
-            if let Some(app_info) = dialog.app_info() {
-                if let Err(err) =
-                    app_info.launch(std::slice::from_ref(&file), gio::AppLaunchContext::NONE)
-                {
-                    tracing::warn!(error = %err, "failed to launch chosen application");
-                }
-            }
-        }
-        dialog.close();
-    });
-    dialog.present();
+/// Shows the Faz 22 Open With dialog for `item` (search/recommend/launch via
+/// `open_with`/`dialogs::open_with_dialog`), replacing the previous
+/// deprecated-`AppChooserDialog` placeholder.
+fn show_open_with_dialog(window: &adw::ApplicationWindow, item: &FileItem) {
+    let window_err = window.clone();
+    dialogs::open_with_dialog::show(
+        window,
+        &item.path,
+        &item.metadata.mime_type,
+        move |heading, body| {
+            show_error_dialog(&window_err, heading, body);
+        },
+    );
 }
 
 /// Relaunches the Veyra binary pointed at `path`, standing in for "Open in

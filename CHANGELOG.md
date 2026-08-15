@@ -1,5 +1,34 @@
 # Changelog
 
+## Faz 22 — Open With (Birlikte Aç & Varsayılan Uygulama Yönetimi) (`veyra-ui`)
+
+### Eklenenler
+- **`open_with` (yeni modül, `veyra-ui`):** İçerik türüne göre uygulama keşfi ve güvenli başlatma motoru — tamamen `gio::AppInfo` üzerinden, hiçbir kabuk komutu çalıştırmaz (Kural #19).
+  - **`recommended_apps` / `default_app` / `all_apps`:** sırasıyla `gio::AppInfo::all_for_type`, `default_for_type`, `all()` (gizli/`NoDisplay` girdiler elenmiş, isme göre sıralı) üzerine ince sarmalayıcılar.
+  - **`matches_query` (saf, birim testli):** uygulama adı/açıklamasına karşı büyük/küçük harf duyarsız alt dizi eşleşmesi — diyaloğun canlı arama filtresi bunu kullanır.
+  - **`launch`:** `GtkWidget::display().app_launch_context()` ile başlatılan uygulamayı doğru ekrana/çalışma alanına bağlar; tek bir `GAppInfo::launch` çağrısı (fork + D-Bus aktivasyonu, dosya sistemi G/Ç'si değil) GTK ana thread'inde çalıştırılacak kadar hızlıdır (Kural #11 toplu Copy/Move/Trash gibi işlemleri hedefler, bunu değil).
+  - **`set_default`:** `set_as_default_for_type` ile XDG `~/.config/mimeapps.list` varsayılan uygulama kaydını günceller.
+- **`dialogs::open_with_dialog` (yeni):** Eski `AdwDialog` + `GtkSearchEntry` tabanlı modern "Open With" diyaloğu; deprecated `GtkAppChooserDialog` yer tutucusunun yerini alır.
+  - **Recommended Applications / All Applications** olarak iki `GtkListBox` bölümü, arama kutusuna göre canlı yeniden filtrelenir; her liste kendi filtrelenmiş `AppInfo` sırasını `Rc<RefCell<Vec<_>>>` içinde tutar (satır indeksi → `AppInfo` eşlemesi için).
+  - Tek tık seçer (Open butonunu etkinleştirir, diğer listenin seçimini temizler), çift tık/Enter doğrudan açar. Varsayılan uygulama "Default" rozetiyle işaretlenir.
+  - **"Always use this application for `<content-type>` files"** onay kutusu işaretliyse açmadan önce `open_with::set_default` çağrılır.
+  - Başlatma hatası, çağıranın sağladığı `on_error` geri çağrısı üzerinden `AdwAlertDialog`'a taşınır (Kural #15/#18) — panik yok.
+- **`context_menu.rs`:** Sağ-tık öğe menüsündeki düz "Open With…" girdisi, dinamik bir alt menüye (`build_open_with_submenu`) dönüştürüldü — üstte içerik türü için önerilen ilk 5 uygulama (`win.open-with-app`, uygulamanın masaüstü kimliği string hedef parametresi olarak), altında "Other Application…" (`win.open-with-selected`, tam diyaloğu açar).
+- **`window.rs`:** `win.open-with-app` (string parametreli, submenu'den tek uygulama başlatır) ve güncellenmiş `win.open-with-selected` (yeni diyaloğu açar) aksiyonları; ikisi de hatayı mevcut paylaşılan `show_error_dialog`'a yönlendirir.
+
+### Testler
+- `veyra-ui::open_with`: 4 yeni birim testi (`matches_query`: boş sorgu, isme göre büyük/küçük harf duyarsız eşleşme, açıklamaya göre eşleşme, eşleşmeyen sorgunun reddi).
+- Toplam: 240/240 test (workspace genelinde, önceki 236'dan +4).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 240/240 geçti.
+- `cargo fmt --all`: temiz.
+
+### Sıradaki Faz
+Faz 23 — Open Terminal Here (Onay bekleniyor.)
+
 ## Faz 21 — Network (Ağ Dosya Sistemleri & Tarayıcısı) (`veyra-ui`)
 
 ### Eklenenler

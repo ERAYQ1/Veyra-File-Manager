@@ -18,6 +18,7 @@ mod fs_async;
 mod headerbar;
 mod history;
 mod network;
+mod open_with;
 mod operations;
 mod preview;
 mod recent;
