@@ -1022,6 +1022,7 @@ fn setup_archive_actions(
             let chrome = panel.chrome.clone();
             let progress = progress.clone();
             let source = item.path;
+            let window_for_confirm = window.clone();
             dialogs::compress_dialog::show(
                 &window,
                 &default_stem,
@@ -1031,6 +1032,7 @@ fn setup_archive_actions(
                     let (control, receiver) =
                         archive_ops::spawn_compress(output_path, vec![source], format);
                     run_archive_operation(
+                        &window_for_confirm,
                         vec![(state, chrome)],
                         &progress,
                         "Compressing",
@@ -1045,6 +1047,7 @@ fn setup_archive_actions(
 
     let action_extract_here = gio::SimpleAction::new("extract-here-selected", None);
     {
+        let window = window.clone();
         let panels = panels.clone();
         let focused = focused.clone();
         let progress = progress.clone();
@@ -1071,6 +1074,7 @@ fn setup_archive_actions(
 
             let (control, receiver) = archive_ops::spawn_extract(item.path, destination);
             run_archive_operation(
+                &window,
                 vec![(tab.state.clone(), panel.chrome.clone())],
                 &progress,
                 "Extracting",
@@ -1102,6 +1106,7 @@ fn setup_archive_actions(
 
             let file_dialog = gtk4::FileDialog::builder().title("Extract to…").build();
             let window_for_dialog = window.clone();
+            let window_for_result = window.clone();
             file_dialog.select_folder(
                 Some(&window_for_dialog),
                 gio::Cancellable::NONE,
@@ -1115,6 +1120,7 @@ fn setup_archive_actions(
                     let destination = VeyraPath::from_local(path);
                     let (control, receiver) = archive_ops::spawn_extract(archive_path, destination);
                     run_archive_operation(
+                        &window_for_result,
                         vec![(state, chrome)],
                         &progress,
                         "Extracting",
@@ -1560,7 +1566,7 @@ fn setup_trash_actions(
                 fs_async::run_blocking(veyra_filesystem::empty_trash, move |result| {
                     if let Err(err) = result {
                         tracing::warn!(error = %err, "failed to empty trash");
-                        show_trash_error(
+                        show_error_dialog(
                             &window_for_confirm,
                             "Unable to Empty Trash",
                             &err.to_string(),
@@ -1602,7 +1608,7 @@ fn setup_trash_actions(
                     Ok(_) => refresh(&state, &chrome),
                     Err(err) => {
                         tracing::warn!(error = %err, "failed to restore item from trash");
-                        show_trash_error(&window, "Unable to Restore Item", &err.to_string());
+                        show_error_dialog(&window, "Unable to Restore Item", &err.to_string());
                     }
                 },
             );
@@ -1624,10 +1630,11 @@ fn refresh_trash_panels(panels: &Panels) {
     }
 }
 
-/// Surfaces a Trash operation failure (disk full, permission denied, a
-/// restore destination conflict, ...) as an `AdwAlertDialog` rather than a
-/// silent no-op or a panic (Rule #15/#18).
-fn show_trash_error(parent: &adw::ApplicationWindow, heading: &str, body: &str) {
+/// Surfaces a hard operation failure (disk full, permission denied, a
+/// restore destination conflict, a corrupt/unrecognized archive, ...) as an
+/// `AdwAlertDialog` rather than a silent no-op or a panic (Rule #15/#18).
+/// Shared by Trash and Faz 19 archive (compress/extract) operations.
+fn show_error_dialog(parent: &adw::ApplicationWindow, heading: &str, body: &str) {
     let dialog = adw::AlertDialog::builder()
         .heading(heading)
         .body(body)
@@ -1987,6 +1994,7 @@ fn run_bulk_operation(
 /// `extract_archive` never prompts, it just skips unsafe/symlink entries
 /// (Rule #21/#22) and reports them in `ArchiveOutcome::skipped`.
 fn run_archive_operation(
+    window: &adw::ApplicationWindow,
     refresh_targets: Vec<(SharedState, Chrome)>,
     progress: &ProgressToastHandles,
     verb: &'static str,
@@ -1995,6 +2003,7 @@ fn run_archive_operation(
 ) {
     widgets::progress_toast::begin_with_verb(progress, &control, verb);
 
+    let window = window.clone();
     let progress = progress.clone();
     glib::spawn_future_local(async move {
         while let Ok(event) = receiver.recv().await {
@@ -2037,9 +2046,8 @@ fn run_archive_operation(
                         }
                         Err(err) => {
                             tracing::warn!(error = %err, "archive operation failed");
-                            chrome
-                                .status_left
-                                .set_label(&format!("Archive failed: {err}"));
+                            chrome.status_left.set_label("Archive failed");
+                            show_error_dialog(&window, &format!("{verb} Failed"), &err.to_string());
                         }
                     }
                     break;

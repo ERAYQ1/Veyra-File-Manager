@@ -28,6 +28,11 @@
 - `cargo test --workspace`: 211/211 geçti.
 - `cargo fmt --all --check`: temiz.
 
+### Denetim Düzeltmeleri (2026-08-15)
+- **`context_menu.rs::is_archive_name` format uyumsuzluğu giderildi:** fonksiyon kendi sabit uzantı listesini tutuyordu — `ArchiveFormat`'ın gerçekten desteklediği `.tar.zst` eksikti (menüde "Extract Here"/"Extract to…" hiç görünmüyordu), buna karşın motor tarafından desteklenmeyen `.tar.bz2`/`.tbz2`/`.xz`/`.rar` için gösteriliyordu (tıklanınca `extract_archive` "unrecognized archive format" hatasıyla başarısız oluyordu). Artık doğrudan `ArchiveFormat::from_name(name).is_some()` kullanıyor, tek doğruluk kaynağı `format.rs` oldu. Yeni test: `rejects_unsupported_archive_like_extensions`.
+- **Sert arşiv hataları artık `AdwAlertDialog` ile gösteriliyor (Kural #15/#18):** `run_archive_operation`'daki üst seviye `Result::Err` (bozuk/tanınmayan arşiv, izin hatası, disk dolu) önceden yalnızca durum çubuğuna yazılıyordu — panik yoktu ama kullanıcıya görünür bir uyarı da yoktu. `show_trash_error` genelleştirilip `show_error_dialog` olarak Trash ve arşiv işlemleri arasında paylaşıldı; artık her iki akış da aynı `AdwAlertDialog` düzenini kullanıyor.
+- Doğrulama: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` — hepsi temiz (217/217 test).
+
 ### Sıradaki Faz
 Faz 20 — Disk Analyzer (Etkileşimli disk kullanım analizi & ağaç haritası). Onay bekleniyor.
 

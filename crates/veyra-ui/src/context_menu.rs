@@ -28,7 +28,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{gdk, gio};
 
-use veyra_filesystem::FileItem;
+use veyra_filesystem::{ArchiveFormat, FileItem};
 
 use crate::views::selected_item;
 
@@ -237,16 +237,12 @@ fn build_background_menu(has_clipboard: bool) -> gio::Menu {
     menu
 }
 
-/// Recognized archive extensions for the "Extract Here" entry's visibility.
-/// The actual extraction engine is Faz 19 — this only decides whether the
-/// (disabled) entry appears.
+/// Recognized archive extensions for the "Extract Here"/"Extract to…"
+/// entries' visibility. Delegates to `ArchiveFormat::from_name` so the menu
+/// never offers extraction for a name the Faz 19 engine can't actually
+/// dispatch (and never omits one it can).
 fn is_archive_name(name: &str) -> bool {
-    const ARCHIVE_SUFFIXES: &[&str] = &[
-        ".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".7z", ".xz",
-        ".rar",
-    ];
-    let lower = name.to_lowercase();
-    ARCHIVE_SUFFIXES.iter().any(|ext| lower.ends_with(ext))
+    ArchiveFormat::from_name(name).is_some()
 }
 
 #[cfg(test)]
@@ -259,6 +255,7 @@ mod tests {
         assert!(is_archive_name("Backup.TAR.GZ"));
         assert!(is_archive_name("data.7z"));
         assert!(is_archive_name("data.tar.xz"));
+        assert!(is_archive_name("data.tar.zst"));
     }
 
     #[test]
@@ -266,5 +263,16 @@ mod tests {
         assert!(!is_archive_name("notes.txt"));
         assert!(!is_archive_name("archive-of-photos"));
         assert!(!is_archive_name("gzip-notes.md"));
+    }
+
+    #[test]
+    fn rejects_unsupported_archive_like_extensions() {
+        // Recognized by common file managers but not by the Faz 19 engine
+        // (`ArchiveFormat` has no variant for these) — the menu must not
+        // offer "Extract Here" for a format that can't actually extract.
+        assert!(!is_archive_name("data.tar.bz2"));
+        assert!(!is_archive_name("data.tbz2"));
+        assert!(!is_archive_name("data.rar"));
+        assert!(!is_archive_name("data.xz"));
     }
 }
