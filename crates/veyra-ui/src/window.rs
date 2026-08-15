@@ -1267,7 +1267,11 @@ fn open_tab(
 ) -> TabPage {
     let state = AppState::new(start_dir.clone());
     let search_query = Rc::new(RefCell::new(String::new()));
-    let filter = build_search_filter(search_query.clone());
+    let quick_filter = Rc::new(RefCell::new(crate::sorting::QuickFilter::default()));
+    let filter = build_combined_filter(search_query.clone(), quick_filter.clone());
+    let sort_config = Rc::new(RefCell::new(crate::sorting::SortConfig::default()));
+    let sorter = crate::sorting::build_sorter(sort_config.clone());
+    let sort_sync_guard = Rc::new(std::cell::Cell::new(false));
     let view_stack = gtk4::Stack::new();
 
     // `on_open` is wired into the views before this tab's own `TabPage`
@@ -1286,6 +1290,8 @@ fn open_tab(
     };
 
     let selections;
+    let details_column_view_slot;
+    let details_sort_columns_slot;
     {
         let model = state.borrow().model.clone();
         let filter = filter.clone();
@@ -1294,6 +1300,7 @@ fn open_tab(
         let (icon_widget, icon_selection) = crate::views::build_icon_view(
             &model,
             &filter,
+            &sorter,
             {
                 let on_open = on_open.clone();
                 move |item| on_open(item)
@@ -1307,6 +1314,7 @@ fn open_tab(
         let (compact_widget, compact_selection) = crate::views::build_compact_view(
             &model,
             &filter,
+            &sorter,
             {
                 let on_open = on_open.clone();
                 move |item| on_open(item)
@@ -1317,15 +1325,23 @@ fn open_tab(
         );
         view_stack.add_named(&compact_widget, Some(ViewMode::Compact.stack_name()));
 
-        let (details_widget, details_selection) = crate::views::build_details_view(
+        let details = crate::views::build_details_view(
             &model,
             &filter,
+            crate::views::DetailsSortWiring {
+                sort_config: sort_config.clone(),
+                sorter: sorter.clone(),
+                sync_guard: sort_sync_guard.clone(),
+            },
             move |item| on_open(item),
             has_clipboard,
             split_active,
             thumbnails,
         );
-        view_stack.add_named(&details_widget, Some(ViewMode::Details.stack_name()));
+        let details_selection = details.selection;
+        view_stack.add_named(&details.widget, Some(ViewMode::Details.stack_name()));
+        details_column_view_slot = details.column_view;
+        details_sort_columns_slot = details.sort_columns;
 
         view_stack.set_visible_child_name(ViewMode::Icon.stack_name());
 
@@ -1349,6 +1365,12 @@ fn open_tab(
         selections,
         filter,
         search_query,
+        sort_config,
+        quick_filter,
+        sorter,
+        details_column_view: details_column_view_slot,
+        details_sort_columns: details_sort_columns_slot,
+        sort_sync_guard,
         adw_page: adw_page.clone(),
     };
     *self_slot.borrow_mut() = Some(tab.clone());
@@ -1450,6 +1472,10 @@ fn parent_display(path: &VeyraPath) -> String {
 /// chosen application on confirmation. A single `GAppInfo` launch (a fork +
 /// D-Bus activation, not filesystem I/O) is fast enough to run directly on
 /// the GTK main thread, unlike the bulk Copy/Move/Trash/Delete operations.
+// `AppChooserDialog` was deprecated in GTK 4.10 in favor of
+// `GtkFileLauncher`-adjacent APIs that don't yet cover this dialog's exact
+// "pick an app for this file" use case in gtk4-rs; revisit in a later phase.
+#[allow(deprecated)]
 fn show_open_with_dialog(window: &adw::ApplicationWindow, path: &VeyraPath) {
     let file = path.to_gio_file();
     let dialog = gtk4::AppChooserDialog::new(Some(window), gtk4::DialogFlags::MODAL, &file);
@@ -1566,17 +1592,24 @@ fn refresh(state: &SharedState, chrome: &Chrome) {
     load_directory(state, chrome, path);
 }
 
-fn build_search_filter(query: Rc<RefCell<String>>) -> gtk4::CustomFilter {
+/// ANDs the free-text search query with the tab's active `QuickFilter`
+/// (Faz 13): an item must match both to remain visible.
+fn build_combined_filter(
+    query: Rc<RefCell<String>>,
+    quick_filter: Rc<RefCell<crate::sorting::QuickFilter>>,
+) -> gtk4::CustomFilter {
     gtk4::CustomFilter::new(move |object| {
-        let needle = query.borrow();
-        if needle.is_empty() {
-            return true;
-        }
         let Some(boxed) = object.downcast_ref::<gtk4::glib::BoxedAnyObject>() else {
             return true;
         };
         let item = boxed.borrow::<FileItem>();
-        item.name().to_lowercase().contains(&needle.to_lowercase())
+
+        let needle = query.borrow();
+        if !needle.is_empty() && !item.name().to_lowercase().contains(&needle.to_lowercase()) {
+            return false;
+        }
+
+        crate::sorting::quick_filter_matches(&item, *quick_filter.borrow(), chrono::Utc::now())
     })
 }
 

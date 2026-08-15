@@ -2,22 +2,21 @@ mod compact_view;
 mod details_view;
 mod icon_view;
 
-use std::cmp::Ordering as StdOrdering;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{gio, glib};
 
 pub(crate) use compact_view::build_compact_view;
-pub(crate) use details_view::build_details_view;
+pub(crate) use details_view::{build_details_view, DetailsSortWiring};
 pub(crate) use icon_view::build_icon_view;
 
 use veyra_filesystem::{FileItem, FileKind};
 
 use crate::thumbnails::ThumbnailService;
 
-/// The three directory presentation modes Faz 3 ships. Details Sorting &
-/// Filtering polish (multi-column, folders-first override) is Faz 13.
+/// The three directory presentation modes, all sharing one `SortConfig`-
+/// driven sorter and `QuickFilter` (Faz 13, see `crate::sorting`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewMode {
     Icon,
@@ -50,32 +49,6 @@ pub(crate) fn selected_item(selection: &gtk4::SingleSelection) -> Option<FileIte
     item_at(selection, selection.selected())
 }
 
-/// Default ordering for the Icon and Compact views: directories before
-/// files, then case-insensitive name comparison. The Details view instead
-/// uses its own column-header-driven `ColumnViewSorter`.
-pub(crate) fn default_sorter() -> gtk4::CustomSorter {
-    gtk4::CustomSorter::new(|a, b| {
-        let a = a
-            .downcast_ref::<glib::BoxedAnyObject>()
-            .expect("model item must be BoxedAnyObject<FileItem>")
-            .borrow::<FileItem>();
-        let b = b
-            .downcast_ref::<glib::BoxedAnyObject>()
-            .expect("model item must be BoxedAnyObject<FileItem>")
-            .borrow::<FileItem>();
-        compare_items(&a, &b).into()
-    })
-}
-
-fn compare_items(a: &FileItem, b: &FileItem) -> StdOrdering {
-    let a_dir = a.kind().is_directory();
-    let b_dir = b.kind().is_directory();
-    match b_dir.cmp(&a_dir) {
-        StdOrdering::Equal => a.name().to_lowercase().cmp(&b.name().to_lowercase()),
-        other => other,
-    }
-}
-
 /// Builds the shared filter → sort → selection chain every view wraps the
 /// raw item `model` with. All three views observe the same underlying
 /// `ListStore`, so a single directory load or search-filter change updates
@@ -103,6 +76,9 @@ pub(crate) fn build_grid_view(
     let factory = gtk4::SignalListItemFactory::new();
 
     factory.connect_setup(move |_, list_item| {
+        let list_item = list_item
+            .downcast_ref::<gtk4::ListItem>()
+            .expect("factory item must be ListItem");
         let orientation = if horizontal_item {
             gtk4::Orientation::Horizontal
         } else {
@@ -133,6 +109,9 @@ pub(crate) fn build_grid_view(
     });
 
     factory.connect_bind(move |_, list_item| {
+        let list_item = list_item
+            .downcast_ref::<gtk4::ListItem>()
+            .expect("factory item must be ListItem");
         let Some(item) = list_item
             .item()
             .and_then(|o| o.downcast::<glib::BoxedAnyObject>().ok())

@@ -4,20 +4,22 @@ use gtk4::gio;
 use gtk4::prelude::*;
 
 use crate::thumbnails::ThumbnailService;
-use crate::views::{build_grid_view, build_selection, default_sorter, item_at};
+use crate::views::{build_grid_view, build_selection, item_at};
 
 const ICON_SIZE: i32 = 48;
 
-/// Large scalable-icon grid, folders first then case-insensitive name order.
+/// Large scalable-icon grid, ordered by the tab's shared `SortConfig`
+/// (`sorter`, see `crate::sorting`) — identical ordering to Compact/Details.
 pub(crate) fn build_icon_view(
     model: &gio::ListStore,
     filter: &gtk4::CustomFilter,
+    sorter: &gtk4::CustomSorter,
     on_open: impl Fn(veyra_filesystem::FileItem) + 'static,
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
     thumbnails: Rc<ThumbnailService>,
 ) -> (gtk4::Widget, gtk4::SingleSelection) {
-    let selection = build_selection(model, filter, Some(default_sorter()));
+    let selection = build_selection(model, filter, Some(sorter.clone()));
     let selection_for_activate = selection.clone();
 
     let grid_view = build_grid_view(&selection, ICON_SIZE, false, thumbnails, move |position| {

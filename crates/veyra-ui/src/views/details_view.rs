@@ -1,3 +1,4 @@
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering as StdOrdering;
 use std::rc::Rc;
 
@@ -7,33 +8,65 @@ use gtk4::prelude::*;
 
 use veyra_filesystem::FileItem;
 
+use crate::sorting::{SortConfig, SortKey, SortOrder};
 use crate::thumbnails::ThumbnailService;
 use crate::views::{icon_name_for, item_at};
 
-/// Tabular view: Name, Size, Type, Modified, Permissions — each column
-/// sortable by clicking its header (`GtkColumnViewSorter`).
+/// The tab-level sort state Details needs on top of its own columns: the
+/// shared `SortConfig` and `CustomSorter` every view sorts by, and the
+/// reentrancy guard shared with `TabPage::resort` (see `tab_page.rs`).
+pub(crate) struct DetailsSortWiring {
+    pub sort_config: Rc<RefCell<SortConfig>>,
+    pub sorter: gtk4::CustomSorter,
+    pub sync_guard: Rc<Cell<bool>>,
+}
+
+/// Everything a caller needs back from a built Details view: the widget to
+/// place, its selection, and the pieces `TabPage` keeps to mirror
+/// `SortConfig` onto the column headers (see `TabPage::resort`).
+pub(crate) struct DetailsViewHandles {
+    pub widget: gtk4::Widget,
+    pub selection: gtk4::SingleSelection,
+    pub column_view: gtk4::ColumnView,
+    pub sort_columns: Rc<Vec<(SortKey, gtk4::ColumnViewColumn)>>,
+}
+
+/// Tabular view: Name, Size, Type, Modified, Permissions. Each sortable
+/// column header drives the tab's shared `SortConfig` (Faz 13) — clicking a
+/// header updates `sort_config` and re-sorts Icon/Compact to match, and
+/// picking a criterion from the header bar's Sort & Filter menu likewise
+/// updates this view's header indicator via `sort_by_column`.
 pub(crate) fn build_details_view(
     model: &gio::ListStore,
     filter: &gtk4::CustomFilter,
+    sort: DetailsSortWiring,
     on_open: impl Fn(FileItem) + 'static,
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
     thumbnails: Rc<ThumbnailService>,
-) -> (gtk4::Widget, gtk4::SingleSelection) {
+) -> DetailsViewHandles {
+    let DetailsSortWiring {
+        sort_config,
+        sorter,
+        sync_guard,
+    } = sort;
     let column_view = gtk4::ColumnView::new(None::<gtk4::SingleSelection>);
     column_view.set_show_row_separators(true);
 
     let name_col = name_column(thumbnails);
     column_view.append_column(&name_col);
-    column_view.append_column(&text_column("Size", 100, size_label, |a, b| {
+    let size_col = text_column("Size", 100, size_label, |a, b| {
         a.metadata.size_bytes.cmp(&b.metadata.size_bytes)
-    }));
-    column_view.append_column(&text_column("Type", 140, type_label, |a, b| {
+    });
+    column_view.append_column(&size_col);
+    let type_col = text_column("Type", 140, type_label, |a, b| {
         type_label(a).cmp(&type_label(b))
-    }));
-    column_view.append_column(&text_column("Modified", 170, modified_label, |a, b| {
+    });
+    column_view.append_column(&type_col);
+    let modified_col = text_column("Modified", 170, modified_label, |a, b| {
         a.metadata.modified.cmp(&b.metadata.modified)
-    }));
+    });
+    column_view.append_column(&modified_col);
     column_view.append_column(&text_column(
         "Permissions",
         110,
@@ -41,15 +74,55 @@ pub(crate) fn build_details_view(
         |a, b| permissions_label(a).cmp(&permissions_label(b)),
     ));
 
+    // Only columns with a direct `SortKey` counterpart participate in
+    // header-click <-> menu synchronization; Permissions has none.
+    let sort_columns = Rc::new(vec![
+        (SortKey::Name, name_col.clone()),
+        (SortKey::Size, size_col),
+        (SortKey::Type, type_col),
+        (SortKey::Modified, modified_col),
+    ]);
+
     let filtered = gtk4::FilterListModel::new(Some(model.clone()), Some(filter.clone()));
-    let sort_model = gtk4::SortListModel::new(Some(filtered), None::<gtk4::Sorter>);
-    let selection = gtk4::SingleSelection::new(Some(sort_model.clone()));
+    let sort_model = gtk4::SortListModel::new(Some(filtered), Some(sorter.clone()));
+    let selection = gtk4::SingleSelection::new(Some(sort_model));
     column_view.set_model(Some(&selection));
 
-    // GtkColumnView builds its live, header-driven sorter once it has a
-    // model; wire it into the model chain so clicking a header re-sorts.
-    sort_model.set_sorter(column_view.sorter().as_ref());
-    column_view.sort_by_column(Some(&name_col), gtk4::SortType::Ascending);
+    // GtkColumnView's own header-click sorter (`ColumnViewSorter`) is kept
+    // separate from the model's sorter above: we only use it to get native
+    // header-click handling and sort-indicator arrows, then mirror its
+    // result into the tab's shared `SortConfig` so Icon/Compact follow.
+    column_view.sort_by_column(Some(&name_col), sort_config.borrow().order.to_gtk());
+    if let Some(native) = column_view.sorter() {
+        let sort_columns = sort_columns.clone();
+        let sort_config = sort_config.clone();
+        let sync_guard = sync_guard.clone();
+        let sorter = sorter.clone();
+        native.connect_changed(move |native, _change| {
+            if sync_guard.get() {
+                return;
+            }
+            let Some(cv_sorter) = native.downcast_ref::<gtk4::ColumnViewSorter>() else {
+                return;
+            };
+            let Some(primary_col) = cv_sorter.primary_sort_column() else {
+                return;
+            };
+            let Some((key, _)) = sort_columns.iter().find(|(_, col)| *col == primary_col) else {
+                return;
+            };
+            let order = SortOrder::from_gtk(cv_sorter.primary_sort_order());
+            {
+                let mut config = sort_config.borrow_mut();
+                if config.key == *key && config.order == order {
+                    return;
+                }
+                config.key = *key;
+                config.order = order;
+            }
+            sorter.changed(gtk4::SorterChange::Different);
+        });
+    }
 
     let selection_for_activate = selection.clone();
     column_view.connect_activate(move |_, position| {
@@ -64,13 +137,21 @@ pub(crate) fn build_details_view(
         .child(&column_view)
         .build();
 
-    (scrolled.upcast(), selection)
+    DetailsViewHandles {
+        widget: scrolled.upcast(),
+        selection,
+        column_view,
+        sort_columns,
+    }
 }
 
 fn name_column(thumbnails: Rc<ThumbnailService>) -> gtk4::ColumnViewColumn {
     let factory = gtk4::SignalListItemFactory::new();
 
     factory.connect_setup(|_, list_item| {
+        let list_item = list_item
+            .downcast_ref::<gtk4::ListItem>()
+            .expect("factory item must be ListItem");
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         row.set_margin_top(4);
         row.set_margin_bottom(4);
@@ -90,6 +171,9 @@ fn name_column(thumbnails: Rc<ThumbnailService>) -> gtk4::ColumnViewColumn {
     });
 
     factory.connect_bind(move |_, list_item| {
+        let list_item = list_item
+            .downcast_ref::<gtk4::ListItem>()
+            .expect("factory item must be ListItem");
         let Some(item) = list_item
             .item()
             .and_then(|o| o.downcast::<glib::BoxedAnyObject>().ok())
@@ -135,6 +219,9 @@ fn text_column(
     let factory = gtk4::SignalListItemFactory::new();
 
     factory.connect_setup(|_, list_item| {
+        let list_item = list_item
+            .downcast_ref::<gtk4::ListItem>()
+            .expect("factory item must be ListItem");
         let label = gtk4::Label::new(None);
         label.set_xalign(0.0);
         label.set_margin_start(6);
@@ -143,6 +230,9 @@ fn text_column(
     });
 
     factory.connect_bind(move |_, list_item| {
+        let list_item = list_item
+            .downcast_ref::<gtk4::ListItem>()
+            .expect("factory item must be ListItem");
         let Some(item) = list_item
             .item()
             .and_then(|o| o.downcast::<glib::BoxedAnyObject>().ok())

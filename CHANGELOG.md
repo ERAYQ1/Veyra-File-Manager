@@ -1,5 +1,35 @@
 # Changelog
 
+## Faz 13 — Sorting & Filtering / Sıralama ve Filtreleme (`veyra-ui`)
+
+### Eklenenler
+- **Yeni modül `sorting.rs`:**
+  - `SortKey` (Name/Size/Type/Modified/Created/Accessed/Owner), `SortOrder` (Ascending/Descending), `SortConfig { key, order, folders_first }` — bir sekmenin tüm sıralama tercihini kapsayan tek kaynak.
+  - `compare_items(a, b, &SortConfig)`: her üç görünümün (Icon/Compact/Details) paylaştığı tek karşılaştırıcı; `folders_first` her zaman diğer kriterlerden önce uygulanır. `Name` anahtarı büyük/küçük harf duyarsız **doğal sıralama** kullanır (`"file2" < "file10"`).
+  - `build_sorter(Rc<RefCell<SortConfig>>) -> gtk4::CustomSorter`: `SortConfig` değiştiğinde `Sorter::changed` ile tüm görünümleri aynı anda yeniden sıralayan paylaşılan sorter.
+  - `QuickFilter` (All/Images/Videos/Documents/Archives/Executables/LargeFiles/RecentlyModified) ve `quick_filter_matches(item, filter, now)`: MIME türü ve/veya uzantı bazlı eşleştirme; dizinler her filtrede her zaman geçer (gezinme engellenmesin diye).
+- **Birleşik filtre zinciri:** `window.rs`'teki `build_combined_filter` artık serbest metin aramasını (`search_query`) `QuickFilter` ile `AND` mantığıyla birleştiriyor.
+- **Details view senkronizasyonu:** `ColumnView`'in kendi başlık-tıklama sorter'ı (`GtkColumnViewSorter`, `gtk4` `v4_10` özelliği) artık modeli değil yalnızca başlık oku göstergelerini sürüyor; `primary_sort_column`/`primary_sort_order` değişince paylaşılan `SortConfig`'e yansıtılıp `TabPage::resort()` tetikleniyor — böylece Icon/Compact/Details her zaman aynı sırada.
+- **`TabPage` (Faz 7 izolasyonu korunarak) yeni alanlar:** `sort_config`, `quick_filter`, `sorter`, `details_column_view`, `details_sort_columns`, `sort_sync_guard`; `resort()`/`refresh_filter()` yardımcı metodları.
+- **HeaderBar'da Sort & Filter menü düğmesi:** `view-sort-ascending-symbolic` ikonlu `GtkMenuButton`, açıldığında odaklı panelin aktif sekmesinin güncel `SortConfig`/`QuickFilter` durumunu senkronize eden bir `GtkPopover`; Sort By / Direction / Folders First / Filter By bölümleri, radio-stil `GtkCheckButton` gruplarıyla.
+
+### Testler
+- `sorting.rs` içinde 17 birim testi: her `SortKey` için sıralama doğruluğu, `SortOrder` tersine çevirme, `folders_first` aktif/pasif kombinasyonları, doğal sıralama, ve her `QuickFilter` türü için eşleşme/eşleşmeme senaryoları (dizin her zaman geçer dahil).
+- Toplam: 159/159 test (workspace genelinde, `veyra-ui` 53, `veyra-search` 35, `veyra-filesystem` ve diğer crate'ler 71).
+
+### Bağımlılık Değişiklikleri
+- `veyra-ui`: `gtk4` bağımlılığına `v4_10` özelliği eklendi (`GtkColumnViewSorter::primary_sort_column`/`primary_sort_order` için gerekli). Bu, `GtkSignalListItemFactory::connect_setup`/`connect_bind`'in Faz 3'ten beri kullanılan tip-çıkarımlı (`&ListItem`) kısayolunu devre dışı bıraktığından, tüm `factory.connect_setup`/`connect_bind` çağrıları artık kapanış içinde `list_item.downcast_ref::<gtk4::ListItem>()` ile açıkça indiriliyor (davranış değişikliği yok, yalnızca tip belirtimi).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 159/159 geçti.
+- `cargo fmt --check`: temiz.
+- Uygulama gerçek bir Wayland (KDE Plasma) oturumunda çalıştırıldı; HeaderBar'da yeni Sort & Filter düğmesi doğrulandı (ekran görüntüsü ile), panik/çökme gözlenmedi. **Not:** bu sandbox'ta Wayland girdi otomasyon aracı (wtype/ydotool/xdotool) bulunmadığından popover'ın tıklama-tabanlı tam etkileşimi (radyo seçimi, sütun başlığı tıklaması) otomatik olarak sürülemedi; bu yol birim testleri ve statik inceleme ile doğrulandı.
+
+### Sıradaki Faz
+Faz 14. Onay bekleniyor.
+
 ## Faz 12 — Properties Window / Özellikler Penceresi (`veyra-filesystem`, `veyra-ui`)
 
 ### Eklenenler

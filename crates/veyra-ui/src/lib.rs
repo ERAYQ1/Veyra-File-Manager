@@ -18,6 +18,7 @@ mod operations;
 mod preview;
 mod search_results;
 mod sidebar;
+mod sorting;
 mod split_view;
 mod state;
 mod statusbar;

@@ -14,14 +14,16 @@
 //! keyed on `adw::TabPage` is enough — no unsafe qdata needed (this crate
 //! forbids `unsafe`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use gtk4::prelude::*;
 use libadwaita as adw;
 
 use veyra_filesystem::FileItem;
 
+use crate::sorting::{QuickFilter, SortConfig, SortKey};
 use crate::state::SharedState;
 use crate::views::ViewMode;
 
@@ -55,7 +57,54 @@ pub(crate) struct TabPage {
     pub selections: ViewSelections,
     pub filter: gtk4::CustomFilter,
     pub search_query: Rc<RefCell<String>>,
+    /// Faz 13: this tab's sort criterion/direction/folders-first, shared by
+    /// all three views' sorters (`crate::sorting::build_sorter`) and by the
+    /// Details view's per-column header click handling.
+    pub sort_config: Rc<RefCell<SortConfig>>,
+    /// Faz 13: the active quick file-type/attribute filter, ANDed with
+    /// `search_query` in `filter`.
+    pub quick_filter: Rc<RefCell<QuickFilter>>,
+    /// The `GtkCustomSorter` all three views' `GtkSortListModel`s share;
+    /// `resort()` is the only thing that needs to touch it directly.
+    pub sorter: gtk4::CustomSorter,
+    /// The Details view's `GtkColumnView`, needed to mirror `sort_config`
+    /// into its header sort-indicator arrows (see `resort`).
+    pub details_column_view: gtk4::ColumnView,
+    /// Maps each `SortKey` that has a Details column to that column, so
+    /// `resort` can find which header to mark as the active sort column.
+    pub details_sort_columns: Rc<Vec<(SortKey, gtk4::ColumnViewColumn)>>,
+    /// Reentrancy guard shared with the Details view's header-click
+    /// listener: set while `resort` programmatically calls
+    /// `sort_by_column`, so that call's own `changed` signal doesn't loop
+    /// back into updating `sort_config` again.
+    pub sort_sync_guard: Rc<Cell<bool>>,
     pub adw_page: adw::TabPage,
+}
+
+impl TabPage {
+    /// Re-sorts every view after `sort_config` changes (menu selection or a
+    /// Details column header click) and mirrors the new criterion/direction
+    /// onto the Details view's header indicator.
+    pub(crate) fn resort(&self) {
+        self.sorter.changed(gtk4::SorterChange::Different);
+
+        let config = *self.sort_config.borrow();
+        let column = self
+            .details_sort_columns
+            .iter()
+            .find(|(key, _)| *key == config.key)
+            .map(|(_, col)| col.clone());
+
+        self.sort_sync_guard.set(true);
+        self.details_column_view
+            .sort_by_column(column.as_ref(), config.order.to_gtk());
+        self.sort_sync_guard.set(false);
+    }
+
+    /// Re-evaluates the combined search/quick-filter after either changes.
+    pub(crate) fn refresh_filter(&self) {
+        self.filter.changed(gtk4::FilterChange::Different);
+    }
 }
 
 /// Maps each `AdwTabPage` GTK owns to the `TabPage` state Veyra owns for it.
