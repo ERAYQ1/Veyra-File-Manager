@@ -90,6 +90,10 @@ pub(crate) struct TabPage {
     /// back into updating `sort_config` again.
     pub sort_sync_guard: Rc<Cell<bool>>,
     pub adw_page: adw::TabPage,
+    /// Faz 26: the shared Copy/Move/Link executor this tab's views were
+    /// built with, reused by `window::update_chrome` to wire the
+    /// breadcrumbs' per-segment drop targets on every navigation.
+    pub dnd_execute: crate::dnd::DropExecutor,
 }
 
 impl TabPage {

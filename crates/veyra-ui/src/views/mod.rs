@@ -5,7 +5,7 @@ mod icon_view;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{gio, glib};
+use gtk4::{gdk, gio, glib};
 
 pub(crate) use compact_view::build_compact_view;
 pub(crate) use details_view::{build_details_view, DetailsSortWiring};
@@ -13,6 +13,7 @@ pub(crate) use icon_view::build_icon_view;
 
 use veyra_filesystem::{FileItem, FileKind};
 
+use crate::dnd::{self, DndWiring};
 use crate::thumbnails::ThumbnailService;
 
 /// The three directory presentation modes, all sharing one `SortConfig`-
@@ -71,42 +72,48 @@ pub(crate) fn build_grid_view(
     icon_size: i32,
     horizontal_item: bool,
     thumbnails: Rc<ThumbnailService>,
+    dnd_wiring: DndWiring,
     on_activate: impl Fn(u32) + 'static,
 ) -> gtk4::GridView {
     let factory = gtk4::SignalListItemFactory::new();
 
-    factory.connect_setup(move |_, list_item| {
-        let list_item = list_item
-            .downcast_ref::<gtk4::ListItem>()
-            .expect("factory item must be ListItem");
-        let orientation = if horizontal_item {
-            gtk4::Orientation::Horizontal
-        } else {
-            gtk4::Orientation::Vertical
-        };
-        let item_box = gtk4::Box::new(orientation, 6);
-        item_box.set_margin_top(6);
-        item_box.set_margin_bottom(6);
-        item_box.set_margin_start(6);
-        item_box.set_margin_end(6);
+    {
+        let dnd_wiring = dnd_wiring.clone();
+        factory.connect_setup(move |_, list_item| {
+            let list_item = list_item
+                .downcast_ref::<gtk4::ListItem>()
+                .expect("factory item must be ListItem");
+            let orientation = if horizontal_item {
+                gtk4::Orientation::Horizontal
+            } else {
+                gtk4::Orientation::Vertical
+            };
+            let item_box = gtk4::Box::new(orientation, 6);
+            item_box.set_margin_top(6);
+            item_box.set_margin_bottom(6);
+            item_box.set_margin_start(6);
+            item_box.set_margin_end(6);
 
-        let icon = gtk4::Image::new();
-        icon.set_pixel_size(icon_size);
-        item_box.append(&icon);
+            let icon = gtk4::Image::new();
+            icon.set_pixel_size(icon_size);
+            item_box.append(&icon);
 
-        let label = gtk4::Label::new(None);
-        label.set_single_line_mode(true);
-        label.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
-        if horizontal_item {
-            label.set_xalign(0.0);
-        } else {
-            label.set_max_width_chars(16);
-            label.set_justify(gtk4::Justification::Center);
-        }
-        item_box.append(&label);
+            let label = gtk4::Label::new(None);
+            label.set_single_line_mode(true);
+            label.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
+            if horizontal_item {
+                label.set_xalign(0.0);
+            } else {
+                label.set_max_width_chars(16);
+                label.set_justify(gtk4::Justification::Center);
+            }
+            item_box.append(&label);
 
-        list_item.set_child(Some(&item_box));
-    });
+            list_item.set_child(Some(&item_box));
+
+            attach_row_dnd(&item_box, list_item, &dnd_wiring);
+        });
+    }
 
     factory.connect_bind(move |_, list_item| {
         let list_item = list_item
@@ -149,7 +156,75 @@ pub(crate) fn build_grid_view(
 
     let grid_view = gtk4::GridView::new(Some(selection.clone()), Some(factory));
     grid_view.connect_activate(move |_, position| on_activate(position));
+    attach_background_drop(&grid_view, &dnd_wiring);
     grid_view
+}
+
+/// Attaches a drag source (so `row` can be dragged out, single-file, since
+/// selection app-wide is `GtkSingleSelection`) and a folder-only drop target
+/// to a recycled list-item row. Both callbacks re-resolve "the item this row
+/// currently shows" live via `list_item.item()` rather than capturing the
+/// `FileItem` at setup time, since `connect_bind` swaps it out from under
+/// the same row as the list scrolls.
+pub(crate) fn attach_row_dnd(
+    row: &impl IsA<gtk4::Widget>,
+    list_item: &gtk4::ListItem,
+    dnd_wiring: &DndWiring,
+) {
+    let current_item = {
+        let weak = list_item.downgrade();
+        move || -> Option<FileItem> {
+            let list_item = weak.upgrade()?;
+            let boxed = list_item.item()?.downcast::<glib::BoxedAnyObject>().ok()?;
+            let item = boxed.borrow::<FileItem>().clone();
+            Some(item)
+        }
+    };
+
+    {
+        let current_item = current_item.clone();
+        dnd::attach_drag_source(row, gdk::BUTTON_PRIMARY, move || {
+            let item = current_item()?;
+            let icon = icon_name_for(&item);
+            Some((item.path, icon))
+        });
+    }
+    {
+        let current_item = current_item.clone();
+        dnd::attach_drag_source(row, gdk::BUTTON_SECONDARY, move || {
+            let item = current_item()?;
+            let icon = icon_name_for(&item);
+            Some((item.path, icon))
+        });
+    }
+
+    let accept = {
+        let current_item = current_item.clone();
+        move || current_item().is_some_and(|item| item.kind().is_directory())
+    };
+    let destination = {
+        let current_item = current_item.clone();
+        move || {
+            current_item()
+                .filter(|item| item.kind().is_directory())
+                .map(|item| item.path)
+        }
+    };
+    dnd::attach_drop_target(row, accept, destination, dnd_wiring.execute.clone());
+}
+
+/// Attaches the whole-view background drop target: any drop GTK doesn't
+/// deliver to a specific folder row (empty space, or a non-directory row's
+/// `accept` returning `false`) bubbles up to this one, targeting the tab's
+/// current directory.
+pub(crate) fn attach_background_drop(view: &impl IsA<gtk4::Widget>, dnd_wiring: &DndWiring) {
+    let current_dir = dnd_wiring.current_dir.clone();
+    dnd::attach_drop_target(
+        view,
+        || true,
+        move || Some(current_dir()),
+        dnd_wiring.execute.clone(),
+    );
 }
 
 /// Standard Adwaita/GNOME symbolic icon name for `item`.

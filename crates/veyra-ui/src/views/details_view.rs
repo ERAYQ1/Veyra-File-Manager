@@ -8,6 +8,7 @@ use gtk4::prelude::*;
 
 use veyra_filesystem::FileItem;
 
+use crate::dnd::DndWiring;
 use crate::sorting::{SortConfig, SortKey, SortOrder};
 use crate::thumbnails::ThumbnailService;
 use crate::views::{icon_name_for, item_at};
@@ -46,6 +47,7 @@ pub(crate) fn build_details_view(
     split_active: Rc<dyn Fn() -> bool>,
     is_trash: Rc<dyn Fn() -> bool>,
     thumbnails: Rc<ThumbnailService>,
+    dnd_wiring: DndWiring,
 ) -> DetailsViewHandles {
     let DetailsSortWiring {
         sort_config,
@@ -55,7 +57,7 @@ pub(crate) fn build_details_view(
     let column_view = gtk4::ColumnView::new(None::<gtk4::SingleSelection>);
     column_view.set_show_row_separators(true);
 
-    let name_col = name_column(thumbnails);
+    let name_col = name_column(thumbnails, dnd_wiring.clone());
     column_view.append_column(&name_col);
     let size_col = text_column("Size", 100, size_label, |a, b| {
         a.metadata.size_bytes.cmp(&b.metadata.size_bytes)
@@ -139,6 +141,7 @@ pub(crate) fn build_details_view(
         split_active,
         is_trash,
     );
+    crate::views::attach_background_drop(&column_view, &dnd_wiring);
 
     let scrolled = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Automatic)
@@ -153,10 +156,10 @@ pub(crate) fn build_details_view(
     }
 }
 
-fn name_column(thumbnails: Rc<ThumbnailService>) -> gtk4::ColumnViewColumn {
+fn name_column(thumbnails: Rc<ThumbnailService>, dnd_wiring: DndWiring) -> gtk4::ColumnViewColumn {
     let factory = gtk4::SignalListItemFactory::new();
 
-    factory.connect_setup(|_, list_item| {
+    factory.connect_setup(move |_, list_item| {
         let list_item = list_item
             .downcast_ref::<gtk4::ListItem>()
             .expect("factory item must be ListItem");
@@ -176,6 +179,8 @@ fn name_column(thumbnails: Rc<ThumbnailService>) -> gtk4::ColumnViewColumn {
         row.append(&label);
 
         list_item.set_child(Some(&row));
+
+        crate::views::attach_row_dnd(&row, list_item, &dnd_wiring);
     });
 
     factory.connect_bind(move |_, list_item| {

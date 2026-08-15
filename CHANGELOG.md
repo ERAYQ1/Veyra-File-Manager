@@ -1,5 +1,33 @@
 # Changelog
 
+## Faz 26 — Drag & Drop / Sürükle ve Bırak (`veyra-ui`)
+
+### Eklenenler
+- **`dnd` (yeni modül, `veyra-ui`):** Merkezi sürükle-bırak altyapısı:
+  - **`attach_drag_source` / `attach_drop_target`:** Geri dönüştürülen (recycled) `GtkListItem` satırlarında canlı `list_item.item()` takibi ile `IconView`, `CompactView` ve `DetailsView` üzerinde çift yönlü sürükle-bırak desteği.
+  - **`resolve_action`:** Klavye modifikatörlerini (`Ctrl` ➔ Copy, `Shift` ➔ Move) ve aksi hâlde aynı dosya sistemi heuristiğini (aynı FS ➔ Move, farklı FS ➔ Copy) uygulayan deterministik eylem çözümleyici.
+  - **Ask Popover (`Copy Here`, `Move Here`, `Create Link Here`, `Cancel`):** `Alt` basılıyken veya sağ tıkla sürükleyip bırakıldığında (`gdk::BUTTON_SECONDARY` / `DragAction::ASK`) açılan etkileşimli seçim menüsü.
+  - **`create_links`:** Sembolik bağlantı oluşturma (`gio::File::make_symbolic_link`) işlemi `fs_async::run_blocking` ile arka planda çalıştırılır, UI thread'ini asla bloklamaz.
+  - **Entegre Edilen Bileşenler:**
+    - **Görünümler (Icon, Compact, Details):** Her satır drag source + (klasörse) drop target; görünüm arka planı açık dizine bırakma hedefi.
+    - **Breadcrumbs:** Her yol kırıntısı butonu o üst klasöre bırakma hedefi.
+    - **Sidebar Yer İmleri:** Dosya bırakılırsa ilgili yer imi klasörünün içine aktarma.
+    - **Paneller Arası (Split View):** Sol panelden sağ panele veya tam tersine sürükle-bırak.
+    - **Pencere Entegrasyonu (`window.rs`):** `build_dnd_executor` ile Copy/Move işlemleri mevcut `OperationQueue` altyapısına bağlanır; aktarım sonrası tüm açık sekmeler tazelenir.
+
+### Testler
+- `veyra-ui::dnd`: 5 yeni birim testi (Ctrl Copy, Shift Move, Alt Ask, aynı/farklı dosya sistemi çözümlemesi).
+- Toplam: 287/287 test (workspace genelinde, önceki 282'den +5).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 287/287 geçti.
+- `cargo fmt --all -- --check`: temiz.
+
+### Sıradaki Faz
+Faz 27 — File Associations (Dosya Türü & Varsayılan Uygulama Yöneticisi).
+
 ## Faz 25 — Keyboard-First & Configurable Shortcuts (Klavye Odaklı Kullanım & Özelleştirilebilir Kısayollar) (`veyra-ui`)
 
 ### Eklenenler

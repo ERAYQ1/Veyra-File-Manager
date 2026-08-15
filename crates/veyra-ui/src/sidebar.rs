@@ -11,6 +11,7 @@ use veyra_filesystem::VeyraPath;
 use crate::bookmarks::{self, Bookmark};
 use crate::devices::{self, DeviceEntry};
 use crate::dialogs;
+use crate::dnd::{self, DropExecutor};
 use crate::fs_async;
 use crate::network;
 use crate::thumbnails::ThumbnailService;
@@ -27,6 +28,7 @@ pub(crate) fn build(
     navigate: Rc<dyn Fn(VeyraPath)>,
     open_in_new_tab: Rc<dyn Fn(VeyraPath)>,
     thumbnails: Rc<ThumbnailService>,
+    dnd_execute: DropExecutor,
 ) -> gtk4::Widget {
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
     root.set_margin_top(12);
@@ -50,7 +52,16 @@ pub(crate) fn build(
         let window = window.clone();
         let navigate = navigate.clone();
         let open_in_new_tab = open_in_new_tab.clone();
-        Rc::new(move || refresh_bookmarks_box(&bookmarks_box, &window, &navigate, &open_in_new_tab))
+        let dnd_execute = dnd_execute.clone();
+        Rc::new(move || {
+            refresh_bookmarks_box(
+                &bookmarks_box,
+                &window,
+                &navigate,
+                &open_in_new_tab,
+                &dnd_execute,
+            )
+        })
     };
     refresh_bookmarks();
 
@@ -758,6 +769,7 @@ fn refresh_bookmarks_box(
     window: &adw::ApplicationWindow,
     navigate: &Rc<dyn Fn(VeyraPath)>,
     open_in_new_tab: &Rc<dyn Fn(VeyraPath)>,
+    dnd_execute: &DropExecutor,
 ) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
@@ -768,7 +780,16 @@ fn refresh_bookmarks_box(
         let window = window.clone();
         let navigate = navigate.clone();
         let open_in_new_tab = open_in_new_tab.clone();
-        Rc::new(move || refresh_bookmarks_box(&container, &window, &navigate, &open_in_new_tab))
+        let dnd_execute = dnd_execute.clone();
+        Rc::new(move || {
+            refresh_bookmarks_box(
+                &container,
+                &window,
+                &navigate,
+                &open_in_new_tab,
+                &dnd_execute,
+            )
+        })
     };
 
     for bookmark in bookmarks::load() {
@@ -778,21 +799,26 @@ fn refresh_bookmarks_box(
             navigate,
             open_in_new_tab,
             &refresh_self,
+            dnd_execute,
         ));
     }
 }
 
-/// Builds one Bookmarks row: click navigates, and a right-click opens a
-/// context menu (Open in New Tab / Rename Bookmark… / Remove from
-/// Bookmarks) scoped to *this* bookmark via a per-row `SimpleActionGroup` —
-/// unlike `context_menu.rs`'s window-wide `win.*` actions, each row needs a
-/// different target, so the action group is local instead.
+/// Builds one Bookmarks row: click navigates, a right-click opens a context
+/// menu (Open in New Tab / Rename Bookmark… / Remove from Bookmarks) scoped
+/// to *this* bookmark via a per-row `SimpleActionGroup` — unlike
+/// `context_menu.rs`'s window-wide `win.*` actions, each row needs a
+/// different target, so the action group is local instead — and (Faz 26) a
+/// file (not folder) dropped on the row is moved/copied/linked into that
+/// bookmark's directory; a dropped folder instead falls through to the
+/// section-level "add bookmark" drop zone (`build`, above).
 fn bookmark_row(
     bookmark: &Bookmark,
     window: &adw::ApplicationWindow,
     navigate: &Rc<dyn Fn(VeyraPath)>,
     open_in_new_tab: &Rc<dyn Fn(VeyraPath)>,
     on_changed: &Rc<dyn Fn()>,
+    dnd_execute: &DropExecutor,
 ) -> gtk4::Widget {
     let label = bookmark.display_label();
     let button = gtk4::Button::builder().css_classes(["flat"]).build();
@@ -813,6 +839,50 @@ fn bookmark_row(
         let navigate = navigate.clone();
         let target = bookmark.path.clone();
         button.connect_clicked(move |_| navigate(target.clone()));
+    }
+
+    {
+        let drop_target = gtk4::DropTarget::new(
+            gdk::FileList::static_type(),
+            gdk::DragAction::COPY
+                | gdk::DragAction::MOVE
+                | gdk::DragAction::LINK
+                | gdk::DragAction::ASK,
+        );
+        let dest = bookmark.path.clone();
+        let button_for_popover: gtk4::Widget = button.clone().upcast();
+        let dnd_execute = dnd_execute.clone();
+        drop_target.connect_drop(move |target, value, x, y| {
+            let Ok(file_list) = value.get::<gdk::FileList>() else {
+                return false;
+            };
+            let files: Vec<gio::File> = file_list.files().into_iter().collect();
+            // A dropped folder is left for the section-level drop zone
+            // (`build`, above) to bookmark instead of being moved/copied
+            // into this bookmark's own directory.
+            let non_directory_sources: Vec<VeyraPath> = files
+                .into_iter()
+                .filter(|f| {
+                    f.query_file_type(gio::FileQueryInfoFlags::NONE, gio::Cancellable::NONE)
+                        != gio::FileType::Directory
+                })
+                .map(|f| VeyraPath::from_gio_file(&f))
+                .collect();
+            if non_directory_sources.is_empty() {
+                return false;
+            }
+            dnd::resolve_and_execute(
+                target,
+                &button_for_popover,
+                x,
+                y,
+                non_directory_sources,
+                dest.clone(),
+                dnd_execute.clone(),
+            );
+            true
+        });
+        button.add_controller(drop_target);
     }
 
     let actions = gio::SimpleActionGroup::new();

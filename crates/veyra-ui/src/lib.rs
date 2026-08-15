@@ -15,6 +15,7 @@ mod command_palette;
 mod context_menu;
 mod devices;
 mod dialogs;
+mod dnd;
 mod fs_async;
 mod headerbar;
 mod history;

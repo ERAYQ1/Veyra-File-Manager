@@ -5,16 +5,25 @@ use gtk4::prelude::*;
 
 use veyra_filesystem::VeyraPath;
 
+use crate::dnd::{self, DropExecutor};
+
 /// Rebuilds `container` into a row of clickable path-segment buttons for
 /// `path`, e.g. `Home > Projects > Veyra`. Segments under the user's home
-/// directory are rendered relative to `Home`, matching the HIG mockup.
-pub(crate) fn rebuild(container: &gtk4::Box, path: &VeyraPath, navigate: Rc<dyn Fn(VeyraPath)>) {
+/// directory are rendered relative to `Home`, matching the HIG mockup. Every
+/// segment button (Faz 26) is also a drop target: dropping files onto an
+/// ancestor crumb moves/copies them into that ancestor directory.
+pub(crate) fn rebuild(
+    container: &gtk4::Box,
+    path: &VeyraPath,
+    navigate: Rc<dyn Fn(VeyraPath)>,
+    execute: DropExecutor,
+) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
 
     match path {
-        VeyraPath::Local(local_path) => build_local(container, local_path, navigate),
+        VeyraPath::Local(local_path) => build_local(container, local_path, navigate, execute),
         VeyraPath::Uri(uri) => {
             let label = gtk4::Label::new(Some(uri));
             label.add_css_class("dim-label");
@@ -23,7 +32,12 @@ pub(crate) fn rebuild(container: &gtk4::Box, path: &VeyraPath, navigate: Rc<dyn 
     }
 }
 
-fn build_local(container: &gtk4::Box, path: &std::path::Path, navigate: Rc<dyn Fn(VeyraPath)>) {
+fn build_local(
+    container: &gtk4::Box,
+    path: &std::path::Path,
+    navigate: Rc<dyn Fn(VeyraPath)>,
+    execute: DropExecutor,
+) {
     let home = gtk4::glib::home_dir();
     let (root_label, root_path, remainder): (&str, PathBuf, &std::path::Path) =
         match path.strip_prefix(&home) {
@@ -40,6 +54,7 @@ fn build_local(container: &gtk4::Box, path: &std::path::Path, navigate: Rc<dyn F
         root_label,
         VeyraPath::from_local(root_path.clone()),
         &navigate,
+        &execute,
     );
 
     let mut accumulated = root_path;
@@ -59,6 +74,7 @@ fn build_local(container: &gtk4::Box, path: &std::path::Path, navigate: Rc<dyn F
                 &label,
                 VeyraPath::from_local(accumulated.clone()),
                 &navigate,
+                &execute,
             );
         }
     }
@@ -69,6 +85,7 @@ fn append_segment(
     label: &str,
     target: VeyraPath,
     navigate: &Rc<dyn Fn(VeyraPath)>,
+    execute: &DropExecutor,
 ) {
     let button = gtk4::Button::builder()
         .label(label)
@@ -76,7 +93,16 @@ fn append_segment(
         .build();
     button.set_tooltip_text(Some(&target.to_string()));
     let navigate = navigate.clone();
-    button.connect_clicked(move |_| navigate(target.clone()));
+    {
+        let target = target.clone();
+        button.connect_clicked(move |_| navigate(target.clone()));
+    }
+    dnd::attach_drop_target(
+        &button,
+        || true,
+        move || Some(target.clone()),
+        execute.clone(),
+    );
     container.append(&button);
 }
 

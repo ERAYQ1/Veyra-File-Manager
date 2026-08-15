@@ -12,6 +12,7 @@ use libadwaita::prelude::*;
 use veyra_filesystem::{FileItem, OperationKind, OperationRequest, VeyraPath};
 use veyra_search::SearchIndex;
 
+use crate::dnd;
 use crate::operations::OperationEvent;
 use crate::preview::{self, PreviewPanelHandles};
 use crate::split_view::{self, Chrome, Panel, PanelId, Panels};
@@ -89,6 +90,20 @@ pub(crate) fn build_window(
     );
     let progress = widgets::progress_toast::build();
 
+    // Faz 26: the window is built here (ahead of the sidebar/content that
+    // normally motivate constructing it) purely so `dnd_execute` — and
+    // therefore the very first tab's `DndWiring` — has a parented window to
+    // drive `run_bulk_operation`/`create_links`/error dialogs with. It is
+    // filled in with `.content()` further below, once the sidebar (which
+    // itself needs this same `window` reference) is built.
+    let window = adw::ApplicationWindow::builder()
+        .application(app)
+        .title("Veyra - Modern Linux File Manager")
+        .default_width(1200)
+        .default_height(720)
+        .build();
+    let dnd_execute = build_dnd_executor(&window, &panels, &progress);
+
     wire_panel(&panels.left, &focused, &header, &refresh_preview);
     wire_panel(&panels.right, &focused, &header, &refresh_preview);
     attach_focus_gesture(&panels.left, &panels, &focused, &header, &refresh_preview);
@@ -104,6 +119,7 @@ pub(crate) fn build_window(
         split_active.clone(),
         refresh_preview.clone(),
         thumbnails.clone(),
+        dnd_execute.clone(),
         start_dir,
     );
     if let Some(tab) = active_tab(&panels.left.tab_view, &panels.left.registry) {
@@ -130,17 +146,11 @@ pub(crate) fn build_window(
     content_paned.set_shrink_end_child(true);
     content_paned.set_position(880);
 
-    // Built without `.content()` yet: Faz 16's Bookmarks sidebar section
-    // needs a window reference (to parent its Rename Bookmark dialog), so
-    // the window is created before the sidebar and content are wired up,
-    // then `set_content` fills it in below.
-    let window = adw::ApplicationWindow::builder()
-        .application(app)
-        .title("Veyra - Modern Linux File Manager")
-        .default_width(1200)
-        .default_height(720)
-        .build();
-
+    // `window` was already built above (see the Faz 26 note by
+    // `dnd_execute`), without `.content()` yet: Faz 16's Bookmarks sidebar
+    // section needs a window reference (to parent its Rename Bookmark
+    // dialog) just like `dnd_execute` does, so `set_content` only fills it
+    // in below, once the sidebar and content panes exist.
     let open_in_new_tab: Rc<dyn Fn(VeyraPath)> = {
         let panels = panels.clone();
         let focused = focused.clone();
@@ -148,6 +158,7 @@ pub(crate) fn build_window(
         let split_active = split_active.clone();
         let refresh_preview = refresh_preview.clone();
         let thumbnails = thumbnails.clone();
+        let dnd_execute = dnd_execute.clone();
         Rc::new(move |path: VeyraPath| {
             let panel = panels.get(*focused.borrow()).clone();
             open_tab(
@@ -158,6 +169,7 @@ pub(crate) fn build_window(
                 split_active.clone(),
                 refresh_preview.clone(),
                 thumbnails.clone(),
+                dnd_execute.clone(),
                 path,
             );
         })
@@ -169,6 +181,7 @@ pub(crate) fn build_window(
         navigate.clone(),
         open_in_new_tab,
         thumbnails.clone(),
+        dnd_execute.clone(),
     );
     let sidebar_page = adw::NavigationPage::new(&sidebar_widget, "Sidebar");
 
@@ -201,6 +214,7 @@ pub(crate) fn build_window(
         split_active.clone(),
         refresh_preview.clone(),
         thumbnails.clone(),
+        dnd_execute.clone(),
     );
     setup_split_view_actions(
         app,
@@ -212,6 +226,7 @@ pub(crate) fn build_window(
         has_clipboard.clone(),
         refresh_preview.clone(),
         thumbnails.clone(),
+        dnd_execute.clone(),
     );
     setup_operation_actions(app, &window, &panels, &focused, &progress, &clipboard);
     setup_archive_actions(&window, &panels, &focused, &progress);
@@ -224,6 +239,7 @@ pub(crate) fn build_window(
         split_active,
         refresh_preview.clone(),
         thumbnails.clone(),
+        dnd_execute.clone(),
     );
     setup_properties_actions(app, &window, &panels, &focused, thumbnails);
     setup_preview_actions(app, &window, &preview, &header, refresh_preview.clone());
@@ -723,6 +739,7 @@ fn setup_tab_actions(
     split_active: Rc<dyn Fn() -> bool>,
     refresh_preview: Rc<dyn Fn()>,
     thumbnails: Rc<crate::thumbnails::ThumbnailService>,
+    dnd_execute: dnd::DropExecutor,
 ) {
     let action_new_tab = gio::SimpleAction::new("new-tab", None);
     {
@@ -730,6 +747,7 @@ fn setup_tab_actions(
         let focused = focused.clone();
         let refresh_preview = refresh_preview.clone();
         let thumbnails = thumbnails.clone();
+        let dnd_execute = dnd_execute.clone();
         action_new_tab.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let start_dir = active_tab(&panel.tab_view, &panel.registry)
@@ -743,6 +761,7 @@ fn setup_tab_actions(
                 split_active.clone(),
                 refresh_preview.clone(),
                 thumbnails.clone(),
+                dnd_execute.clone(),
                 start_dir,
             );
         });
@@ -806,6 +825,7 @@ fn setup_split_view_actions(
     has_clipboard: Rc<dyn Fn() -> bool>,
     refresh_preview: Rc<dyn Fn()>,
     thumbnails: Rc<crate::thumbnails::ThumbnailService>,
+    dnd_execute: dnd::DropExecutor,
 ) {
     let action_toggle_split = gio::SimpleAction::new("toggle-split-view", None);
     {
@@ -814,6 +834,7 @@ fn setup_split_view_actions(
         let header = header.clone();
         let refresh_preview = refresh_preview.clone();
         let thumbnails = thumbnails.clone();
+        let dnd_execute = dnd_execute.clone();
         action_toggle_split.connect_activate(move |_, _| {
             let showing = !panels.right.frame.is_visible();
             if showing && panels.right.tab_view.n_pages() == 0 {
@@ -830,6 +851,7 @@ fn setup_split_view_actions(
                     split_active,
                     refresh_preview.clone(),
                     thumbnails.clone(),
+                    dnd_execute.clone(),
                     start_dir,
                 );
             }
@@ -1236,6 +1258,7 @@ fn setup_context_menu_actions(
     split_active: Rc<dyn Fn() -> bool>,
     refresh_preview: Rc<dyn Fn()>,
     thumbnails: Rc<crate::thumbnails::ThumbnailService>,
+    dnd_execute: dnd::DropExecutor,
 ) {
     let action_not_implemented = gio::SimpleAction::new("not-implemented", None);
     action_not_implemented.set_enabled(false);
@@ -1338,6 +1361,7 @@ fn setup_context_menu_actions(
         let split_active = split_active.clone();
         let refresh_preview = refresh_preview.clone();
         let thumbnails = thumbnails.clone();
+        let dnd_execute = dnd_execute.clone();
         action_open_new_tab.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
@@ -1355,6 +1379,7 @@ fn setup_context_menu_actions(
                     split_active.clone(),
                     refresh_preview.clone(),
                     thumbnails.clone(),
+                    dnd_execute.clone(),
                     item.path,
                 );
             }
@@ -1981,9 +2006,22 @@ fn open_tab(
     split_active: Rc<dyn Fn() -> bool>,
     refresh_preview: Rc<dyn Fn()>,
     thumbnails: Rc<crate::thumbnails::ThumbnailService>,
+    dnd_execute: dnd::DropExecutor,
     start_dir: VeyraPath,
 ) -> TabPage {
     let state = AppState::new(start_dir.clone());
+    // Faz 26: every view this tab builds shares this wiring — `current_dir`
+    // is polled live (not captured once) so a background drop always lands
+    // in whichever directory the tab has navigated to by the time the drop
+    // happens, not the directory it started at.
+    let dnd_wiring = {
+        let state = state.clone();
+        dnd::DndWiring {
+            current_dir: Rc::new(move || state.borrow().current_dir.clone()),
+            execute: dnd_execute,
+        }
+    };
+    let dnd_execute_for_tab = dnd_wiring.execute.clone();
     let search_query = Rc::new(RefCell::new(String::new()));
     let quick_filter = Rc::new(RefCell::new(crate::sorting::QuickFilter::default()));
     let show_hidden = Rc::new(RefCell::new(false));
@@ -2037,6 +2075,7 @@ fn open_tab(
             split_active.clone(),
             is_trash.clone(),
             thumbnails.clone(),
+            dnd_wiring.clone(),
         );
         view_stack.add_named(&icon_widget, Some(ViewMode::Icon.stack_name()));
 
@@ -2052,6 +2091,7 @@ fn open_tab(
             split_active.clone(),
             is_trash.clone(),
             thumbnails.clone(),
+            dnd_wiring.clone(),
         );
         view_stack.add_named(&compact_widget, Some(ViewMode::Compact.stack_name()));
 
@@ -2068,6 +2108,7 @@ fn open_tab(
             split_active,
             is_trash,
             thumbnails,
+            dnd_wiring,
         );
         let details_selection = details.selection;
         view_stack.add_named(&details.widget, Some(ViewMode::Details.stack_name()));
@@ -2104,6 +2145,7 @@ fn open_tab(
         details_sort_columns: details_sort_columns_slot,
         sort_sync_guard,
         adw_page: adw_page.clone(),
+        dnd_execute: dnd_execute_for_tab,
     };
     *self_slot.borrow_mut() = Some(tab.clone());
     registry.borrow_mut().insert(adw_page.clone(), tab.clone());
@@ -2295,6 +2337,67 @@ fn run_bulk_operation(
             }
         }
     });
+}
+
+/// Builds the Faz 26 DND execution closure shared by every drag-and-drop
+/// target in the window (view backgrounds, folder rows, breadcrumbs,
+/// sidebar bookmarks): resolves a Copy/Move through the same
+/// `run_bulk_operation` bridge every clipboard/context-menu action already
+/// uses (Faz 5 `OperationQueue`, progress toast, conflict dialog included),
+/// and a Create-Link through the simpler synchronous `dnd::create_links`.
+/// Refreshes every open tab in both panels afterwards, since a drop's
+/// source and destination directories can each be in either panel or tab.
+fn build_dnd_executor(
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    progress: &ProgressToastHandles,
+) -> dnd::DropExecutor {
+    let window = window.clone();
+    let panels = panels.clone();
+    let progress = progress.clone();
+    Rc::new(
+        move |sources: Vec<VeyraPath>, destination: VeyraPath, action: dnd::DndAction| match action
+        {
+            dnd::DndAction::Move => run_bulk_operation(
+                &window,
+                all_tab_refresh_targets(&panels),
+                &progress,
+                OperationKind::Move,
+                sources,
+                Some(destination),
+            ),
+            dnd::DndAction::Copy => run_bulk_operation(
+                &window,
+                all_tab_refresh_targets(&panels),
+                &progress,
+                OperationKind::Copy,
+                sources,
+                Some(destination),
+            ),
+            dnd::DndAction::Link => {
+                let panels = panels.clone();
+                dnd::create_links(&window, sources, destination, move || {
+                    for (state, chrome) in all_tab_refresh_targets(&panels) {
+                        refresh(&state, &chrome);
+                    }
+                });
+            }
+        },
+    )
+}
+
+/// Every currently open tab across both panels, paired with the panel
+/// `Chrome` `refresh` needs to update it — the DND executor's refresh
+/// target list, since a drop's source and destination tabs may each be in
+/// either panel, or in a tab other than the one currently visible.
+fn all_tab_refresh_targets(panels: &Panels) -> Vec<(SharedState, Chrome)> {
+    let mut targets = Vec::new();
+    for panel in [&panels.left, &panels.right] {
+        for tab in panel.registry.borrow().values() {
+            targets.push((tab.state.clone(), panel.chrome.clone()));
+        }
+    }
+    targets
 }
 
 /// Drives a Faz 19 compress/extract event stream, the archive-ops
@@ -2499,7 +2602,12 @@ fn update_chrome(tab: &TabPage, chrome: &Chrome) {
         let chrome = chrome.clone();
         Rc::new(move |path: VeyraPath| navigate_to(&tab, &chrome, path, true))
     };
-    breadcrumbs::rebuild(&chrome.breadcrumbs_box, &current_dir, navigate);
+    breadcrumbs::rebuild(
+        &chrome.breadcrumbs_box,
+        &current_dir,
+        navigate,
+        tab.dnd_execute.clone(),
+    );
 
     let is_recent = recent::is_recent_location(&current_dir);
     chrome.recent_banner.revealer.set_reveal_child(is_recent);
