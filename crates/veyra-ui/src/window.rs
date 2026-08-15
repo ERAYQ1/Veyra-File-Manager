@@ -21,7 +21,7 @@ use crate::views::ViewMode;
 use crate::widgets::progress_toast::ProgressToastHandles;
 use crate::{
     archive_ops, breadcrumbs, dialogs, fs_async, headerbar, open_with, operations, recent, sidebar,
-    trash, widgets,
+    terminal, trash, widgets,
 };
 
 /// A single Copy/Cut clipboard slot, shared across both panels and all their
@@ -230,6 +230,7 @@ pub(crate) fn build_window(
     setup_recent_actions(&window, &panels, privacy_mode);
     setup_trash_actions(app, &window, &panels, &focused);
     setup_disk_analyzer_actions(app, &window, &panels, &focused, navigate.clone());
+    setup_terminal_actions(app, &window, &panels, &focused);
     setup_network_actions(&window, navigate);
 
     window
@@ -1573,6 +1574,58 @@ fn setup_disk_analyzer_actions(
     }
     window.add_action(&action_analyze_current);
     app.set_accels_for_action("win.analyze-disk-current", &["<Primary><Shift>u"]);
+}
+
+/// Registers the Faz 23 `win.open-terminal-here-selected` (context menu
+/// entry for a selected item) and `win.open-terminal-here-current` (context
+/// menu on empty space, plus `F4` and `Ctrl+Alt+T`, both the Dolphin/GNOME
+/// standard shortcuts) actions. Both resolve the focused panel's terminal
+/// via `terminal::open_terminal`, which never runs a shell string (Rule
+/// #19) and never hardcodes a single emulator (Rule #25).
+fn setup_terminal_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    focused: &Rc<RefCell<PanelId>>,
+) {
+    let action_terminal_selected = gio::SimpleAction::new("open-terminal-here-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_terminal_selected.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            if let Err(err) = terminal::open_terminal(&item.path) {
+                show_error_dialog(&window, "Unable to Open Terminal", &err.to_string());
+            }
+        });
+    }
+    window.add_action(&action_terminal_selected);
+
+    let action_terminal_current = gio::SimpleAction::new("open-terminal-here-current", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_terminal_current.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let path = tab.state.borrow().current_dir.clone();
+            if let Err(err) = terminal::open_terminal(&path) {
+                show_error_dialog(&window, "Unable to Open Terminal", &err.to_string());
+            }
+        });
+    }
+    window.add_action(&action_terminal_current);
+    app.set_accels_for_action("win.open-terminal-here-current", &["F4", "<Primary><Alt>t"]);
 }
 
 /// Registers Faz 21's `win.connect-to-server`, activated by the sidebar's

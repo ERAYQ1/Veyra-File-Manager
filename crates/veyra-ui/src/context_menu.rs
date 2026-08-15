@@ -11,11 +11,10 @@
 //! returning the view widget itself rather than a row descendant, and opens
 //! the background menu instead.
 //!
-//! Menu entries for actions not yet implemented in later phases (Compress/
-//! Extract: Faz 19, Open Terminal Here: Faz 23) are shown insensitive, bound
-//! to the shared `win.not-implemented` action, with the owning phase noted
-//! in the label — per Rule #2 (no monolithic leaps across the roadmap).
-//! "Open in New Tab" is real as of Faz 7. "Copy/Move to Other Panel" (Faz 8)
+//! Menu entries for actions not yet implemented in later phases are shown
+//! insensitive, bound to the shared `win.not-implemented` action, with the
+//! owning phase noted in the label — per Rule #2 (no monolithic leaps across
+//! the roadmap). "Open in New Tab" is real as of Faz 7. "Copy/Move to Other Panel" (Faz 8)
 //! are real too, but only appear at all when the split view is currently
 //! showing a second panel to act as the destination — there is nothing to
 //! disable-and-label when the concept doesn't apply yet. "Properties" (Faz
@@ -203,8 +202,8 @@ fn build_item_menu(item: &FileItem, is_split_active: bool) -> gio::Menu {
 
     let path_section = gio::Menu::new();
     path_section.append(
-        Some("Open Terminal Here (Faz 23)"),
-        Some("win.not-implemented"),
+        Some("Open Terminal Here"),
+        Some("win.open-terminal-here-selected"),
     );
     path_section.append(Some("Copy Path"), Some("win.copy-path-selected"));
     path_section.append(Some("Copy Location"), Some("win.copy-location-selected"));
@@ -239,8 +238,8 @@ fn build_background_menu(has_clipboard: bool) -> gio::Menu {
 
     let misc_section = gio::Menu::new();
     misc_section.append(
-        Some("Open Terminal Here (Faz 23)"),
-        Some("win.not-implemented"),
+        Some("Open Terminal Here"),
+        Some("win.open-terminal-here-current"),
     );
     misc_section.append(
         Some("Analyze Disk Usage…"),

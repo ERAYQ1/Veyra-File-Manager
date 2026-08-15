@@ -1,5 +1,28 @@
 # Changelog
 
+## Faz 23 — Terminal Integration (Burada Terminal Aç) (`veyra-ui`)
+
+### Eklenenler
+- **`terminal` (yeni modül, `veyra-ui`):** Kabuk enjeksiyonuna kapalı Terminal Başlatma Motoru — hiçbir yerde `sh -c "..."` çalışmaz, her aday `Command::new(binary).current_dir(hedef).spawn()` ile başlatılır (Kural #19); hedef dizin argüman olarak asla iletilmez, yalnızca alt sürecin çalışma dizini olarak aktarılır.
+  - **Sistem Tercihleri Çözümleme Hiyerarşisi (Kural #25):** tek bir terminal hardcode edilmez, sırasıyla denenir: (1) `xdg-terminal-exec` (`$PATH` üzerinde bulunursa), (2) `$TERMINAL` ortam değişkeni (ilk boşlukla ayrılmış jeton ikili olarak çözülür, kalan jetonlar argüman olarak aktarılır), (3) `TerminalEmulator` kategorisi taşıyan GIO/XDG varsayılan masaüstü uygulaması (`AppInfo::executable`, `.desktop` yer tutucuları GIO tarafından zaten ayıklanmış halde), (4) sabit bilinen terminal listesi (`ptyxis`, `gnome-terminal`, `konsole`, `kitty`, `alacritty`, `wezterm`, `foot`, `ghostty`, `xfce4-terminal`, `mate-terminal`, `terminator`, `tilix`, `urxvt`, `xterm`) `$PATH` üzerinde bulunanlar filtrelenerek.
+  - Her katman yalnızca gerçekten diskte var olup çalıştırılabilir olduğu doğrulanmış (`find_in_path`/`is_executable_file`) adaylar üretir; ilk katman spawn sırasında başarısız olursa (örn. bayat bir `$TERMINAL`), motor bir sonraki adaya otomatik geçer.
+  - **Hedef dizin çözümü:** seçilen öge bir klasörse doğrudan o klasör, bir dosyaysa üst klasörü (`parent()`) açılır. Konum yerel değilse (`VeyraPath::as_local_path() == None`, örn. `sftp://`/`smb://`) `TerminalError::NotLocal` ile net biçimde reddedilir.
+- **`context_menu.rs`:** Öge sağ-tık menüsündeki ve boş alan sağ-tık menüsündeki `"Open Terminal Here (Faz 23)"` / `win.not-implemented` yer tutucuları kaldırıldı; sırasıyla `win.open-terminal-here-selected` ve `win.open-terminal-here-current` gerçek aksiyonlarına bağlandı.
+- **`window.rs`:** `setup_terminal_actions` — `win.open-terminal-here-selected` (seçili ögenin dizininde), `win.open-terminal-here-current` (aktif panelin güncel dizininde; `F4` ve `Ctrl+Alt+T` kısayolları — Dolphin/GNOME standartları). Başlatma hatası veya sistemde hiçbir terminal bulunamaması mevcut paylaşılan `show_error_dialog` ile `AdwAlertDialog` olarak kullanıcıya bildirilir (Kural #15/#18).
+
+### Testler
+- `veyra-ui::terminal`: 9 yeni birim testi — hedef dizin çözümü (klasör/dosya/uzak konum reddi), `find_in_path`/`find_in_dirs` (mutlak yol, `$PATH` sırasına saygı, eksik ikili), bilinen terminal listesinde yinelenme yokluğu, uzak konumda `open_terminal`'ın spawn denemeden önce reddi.
+- Toplam: 249/249 test (workspace genelinde, önceki 240'tan +9).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 249/249 geçti.
+- `cargo fmt --all -- --check`: temiz.
+
+### Sıradaki Faz
+Faz 24 (Onay bekleniyor.)
+
 ## Faz 22 — Open With (Birlikte Aç & Varsayılan Uygulama Yönetimi) (`veyra-ui`)
 
 ### Eklenenler

@@ -1617,6 +1617,8 @@ dependencies = [
  "libadwaita",
  "lru",
  "md-5",
+ "tempfile",
+ "thiserror",
  "tracing",
  "veyra-core",
  "veyra-filesystem",

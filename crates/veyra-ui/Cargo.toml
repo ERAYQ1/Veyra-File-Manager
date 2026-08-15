@@ -12,6 +12,7 @@ description = "Veyra GTK4 + Libadwaita user interface: windows, views, widgets."
 veyra-core = { path = "../veyra-core" }
 veyra-filesystem = { path = "../veyra-filesystem" }
 veyra-search = { path = "../veyra-search" }
+thiserror.workspace = true
 tracing.workspace = true
 chrono.workspace = true
 gtk4 = { version = "0.9", package = "gtk4", features = ["v4_10"] }
@@ -21,3 +22,6 @@ glib = "0.20"
 async-channel = "2"
 lru = "0.12"
 md-5 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
