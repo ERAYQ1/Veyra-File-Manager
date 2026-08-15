@@ -180,9 +180,10 @@ fn build_item_menu(item: &FileItem, is_split_active: bool) -> gio::Menu {
     menu.append_section(None, &mutate_section);
 
     let archive_section = gio::Menu::new();
-    archive_section.append(Some("Compress… (Faz 19)"), Some("win.not-implemented"));
+    archive_section.append(Some("Compress…"), Some("win.compress-selected"));
     if is_archive {
-        archive_section.append(Some("Extract Here (Faz 19)"), Some("win.not-implemented"));
+        archive_section.append(Some("Extract Here"), Some("win.extract-here-selected"));
+        archive_section.append(Some("Extract to…"), Some("win.extract-to-selected"));
     }
     menu.append_section(None, &archive_section);
 
