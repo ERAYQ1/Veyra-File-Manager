@@ -9,6 +9,7 @@ use gio::FileType;
 use crate::error::{map_gio_error, FsError};
 use crate::metadata::{build_file_item, FileItem, FULL_ATTRIBUTES};
 use crate::path::VeyraPath;
+use crate::permissions::FilePermissions;
 
 /// Lists the direct children of `dir`. Symlinks are reported as themselves
 /// (never followed) so callers can distinguish a directory from a symlink
@@ -37,6 +38,37 @@ pub fn read_dir(dir: &VeyraPath) -> Result<Vec<FileItem>, FsError> {
     }
 
     Ok(items)
+}
+
+/// Queries the metadata of `path` itself (as opposed to `read_dir`, which
+/// only reports the *children* of a directory). Used by the Faz 12
+/// Properties dialog to inspect a directory itself — e.g. the current tab's
+/// open location, which never appears as an entry in its own listing.
+pub fn stat(path: &VeyraPath) -> Result<FileItem, FsError> {
+    let file = path.to_gio_file();
+    let info = file
+        .query_info(
+            FULL_ATTRIBUTES,
+            gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+            gio::Cancellable::NONE,
+        )
+        .map_err(|e| map_gio_error(path, e))?;
+    Ok(build_file_item(&info, &file))
+}
+
+/// Changes `path`'s POSIX permission bits (`chmod`). Only meaningful on
+/// backends that expose `unix::mode` in the first place (see
+/// `FileMetadata::permissions`); GVfs backends without POSIX semantics
+/// return whatever `FsError` GIO surfaces for an unsupported attribute.
+pub fn set_permissions(path: &VeyraPath, permissions: FilePermissions) -> Result<(), FsError> {
+    path.to_gio_file()
+        .set_attribute_uint32(
+            "unix::mode",
+            permissions.mode(),
+            gio::FileQueryInfoFlags::NONE,
+            gio::Cancellable::NONE,
+        )
+        .map_err(|e| map_gio_error(path, e))
 }
 
 /// Creates a new, empty regular file. Fails with `FsError::AlreadyExists` if

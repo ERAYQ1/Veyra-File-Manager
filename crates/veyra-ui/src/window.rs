@@ -182,8 +182,9 @@ pub(crate) fn build_window(
         has_clipboard,
         split_active,
         refresh_preview.clone(),
-        thumbnails,
+        thumbnails.clone(),
     );
+    setup_properties_actions(app, &window, &panels, &focused, thumbnails);
     setup_preview_actions(app, &window, &preview, &header, refresh_preview);
 
     window
@@ -1138,6 +1139,86 @@ fn setup_context_menu_actions(
         });
     }
     window.add_action(&action_create_document);
+}
+
+/// Registers the Faz 12 `win.properties-selected` (context menu item entry /
+/// `Alt+Enter`) and `win.properties-current` (background context menu)
+/// actions: they open the Properties dialog for the focused panel's
+/// selection or its current directory, respectively. The former needs no
+/// I/O (the `FileItem` is already loaded in the view's model); the latter
+/// does a quick background `stat` first since the open directory is never
+/// itself an entry in its own listing.
+fn setup_properties_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    focused: &Rc<RefCell<PanelId>>,
+    thumbnails: Rc<crate::thumbnails::ThumbnailService>,
+) {
+    let action_properties_selected = gio::SimpleAction::new("properties-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        let thumbnails = thumbnails.clone();
+        action_properties_selected.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            let state = tab.state.clone();
+            let chrome = panel.chrome.clone();
+            dialogs::properties_dialog::show(
+                &window,
+                item,
+                thumbnails.clone(),
+                Rc::new(move || refresh(&state, &chrome)),
+            );
+        });
+    }
+    window.add_action(&action_properties_selected);
+    app.set_accels_for_action("win.properties-selected", &["<Alt>Return"]);
+
+    let action_properties_current = gio::SimpleAction::new("properties-current", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_properties_current.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let path = tab.state.borrow().current_dir.clone();
+            let window = window.clone();
+            let thumbnails = thumbnails.clone();
+            let state = tab.state.clone();
+            let chrome = panel.chrome.clone();
+            fs_async::run_blocking(
+                move || veyra_filesystem::stat(&path),
+                move |result| match result {
+                    Ok(item) => {
+                        dialogs::properties_dialog::show(
+                            &window,
+                            item,
+                            thumbnails,
+                            Rc::new(move || refresh(&state, &chrome)),
+                        );
+                    }
+                    Err(err) => {
+                        tracing::warn!(error = %err, "failed to stat current directory for properties");
+                        chrome
+                            .status_left
+                            .set_label(&format!("Properties failed: {err}"));
+                    }
+                },
+            );
+        });
+    }
+    window.add_action(&action_properties_current);
 }
 
 /// Registers the Faz 10 `win.toggle-preview` action (`F9`): shows/hides the

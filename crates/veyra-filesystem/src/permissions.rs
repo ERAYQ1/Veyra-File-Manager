@@ -64,12 +64,36 @@ impl FilePermissions {
         out
     }
 
+    pub fn is_owner_readable(&self) -> bool {
+        self.mode & 0o400 != 0
+    }
+
+    pub fn is_owner_writable(&self) -> bool {
+        self.mode & 0o200 != 0
+    }
+
     pub fn is_owner_executable(&self) -> bool {
         self.mode & 0o100 != 0
     }
 
+    pub fn is_group_readable(&self) -> bool {
+        self.mode & 0o040 != 0
+    }
+
+    pub fn is_group_writable(&self) -> bool {
+        self.mode & 0o020 != 0
+    }
+
     pub fn is_group_executable(&self) -> bool {
         self.mode & 0o010 != 0
+    }
+
+    pub fn is_other_readable(&self) -> bool {
+        self.mode & 0o004 != 0
+    }
+
+    pub fn is_other_writable(&self) -> bool {
+        self.mode & 0o002 != 0
     }
 
     pub fn is_other_executable(&self) -> bool {
@@ -79,6 +103,55 @@ impl FilePermissions {
     /// `true` if any of owner/group/other has the executable bit set.
     pub fn is_executable(&self) -> bool {
         self.is_owner_executable() || self.is_group_executable() || self.is_other_executable()
+    }
+
+    /// Returns a copy with `bit` set or cleared according to `enabled`.
+    /// Special (setuid/setgid/sticky) bits are preserved untouched — callers
+    /// only ever pass one of the nine `rwx` triad bits here (the Faz 12
+    /// Permissions page UI doesn't expose the special bits).
+    fn with_bit(self, bit: u32, enabled: bool) -> Self {
+        let mode = if enabled {
+            self.mode | bit
+        } else {
+            self.mode & !bit
+        };
+        Self { mode }
+    }
+
+    pub fn with_owner_read(self, enabled: bool) -> Self {
+        self.with_bit(0o400, enabled)
+    }
+
+    pub fn with_owner_write(self, enabled: bool) -> Self {
+        self.with_bit(0o200, enabled)
+    }
+
+    pub fn with_owner_execute(self, enabled: bool) -> Self {
+        self.with_bit(0o100, enabled)
+    }
+
+    pub fn with_group_read(self, enabled: bool) -> Self {
+        self.with_bit(0o040, enabled)
+    }
+
+    pub fn with_group_write(self, enabled: bool) -> Self {
+        self.with_bit(0o020, enabled)
+    }
+
+    pub fn with_group_execute(self, enabled: bool) -> Self {
+        self.with_bit(0o010, enabled)
+    }
+
+    pub fn with_other_read(self, enabled: bool) -> Self {
+        self.with_bit(0o004, enabled)
+    }
+
+    pub fn with_other_write(self, enabled: bool) -> Self {
+        self.with_bit(0o002, enabled)
+    }
+
+    pub fn with_other_execute(self, enabled: bool) -> Self {
+        self.with_bit(0o001, enabled)
     }
 }
 
@@ -148,5 +221,27 @@ mod tests {
         // S_IFREG (0o100000) | 0o644 as raw st_mode input.
         let perms = FilePermissions::from_mode(0o100644);
         assert_eq!(perms.octal_string(), "0644");
+    }
+
+    #[test]
+    fn read_write_getters_match_octal_bits() {
+        let perms = FilePermissions::from_mode(0o640);
+        assert!(perms.is_owner_readable() && perms.is_owner_writable());
+        assert!(perms.is_group_readable() && !perms.is_group_writable());
+        assert!(!perms.is_other_readable() && !perms.is_other_writable());
+    }
+
+    #[test]
+    fn with_bit_setters_toggle_independently() {
+        let perms = FilePermissions::from_mode(0o644)
+            .with_owner_execute(true)
+            .with_other_read(false);
+        assert_eq!(perms.octal_string(), "0740");
+    }
+
+    #[test]
+    fn with_bit_setters_preserve_special_bits() {
+        let perms = FilePermissions::from_mode(0o4755).with_other_write(true);
+        assert_eq!(perms.octal_string(), "4757");
     }
 }

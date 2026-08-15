@@ -1,5 +1,30 @@
 # Changelog
 
+## Faz 12 — Properties Window / Özellikler Penceresi (`veyra-filesystem`, `veyra-ui`)
+
+### Eklenenler
+- **`veyra-filesystem`'de yeni sorgu/işlem yardımcıları:**
+  - `ops::stat(path)`: bir dizinin *kendisinin* meta verisini sorgular (`read_dir` yalnızca çocukları listeler — hâlihazırda açık olan sekmenin kendi Properties'ini açmak için gerekliydi, çünkü bir dizin kendi listelemesinde bir öge olarak görünmez).
+  - `ops::set_permissions(path, FilePermissions)`: GIO `g_file_set_attribute_uint32("unix::mode", ...)` üzerinden `chmod`.
+  - **Yeni modül `advanced.rs`:** `stat_advanced(path) -> AdvancedInfo { device_id, disk_usage_bytes, filesystem_type }` — aygıt ID'si (`unix::device`), gerçek ayrılmış disk kullanımı (`unix::blocks * 512`) ve `query_filesystem_info("filesystem::type")` ile dosya sistemi türü.
+  - **Yeni modül `dircount.rs`:** `count_dir_recursive(dir, &OperationControl) -> DirCount { file_count, dir_count, total_size }` — Faz 12'nin tek uzun sürebilecek hesaplaması olduğundan, Faz 5'in toplu işlem motorunun zaten kullandığı aynı `OperationControl` ile iş birlikçi iptal edilebilir (Kural #13); alt dizinlerden biri ortada okunamaz hale gelirse (izin hatası, eşzamanlı silme) tüm sayımı iptal etmek yerine o alt ağaç atlanır (Kural #18). Symlink'li dizinler `ops::delete`'in politikasıyla aynı şekilde asla içine girilmeden birer öge olarak sayılır (Kural #22).
+  - **`permissions.rs`:** eksik olan `is_owner/group/other_readable/writable` getter'ları ve dokuz adet `with_owner/group/other_read/write/execute(bool) -> Self` builder-tarzı setter'ı eklendi — özel bitleri (setuid/setgid/sticky) koruyarak yalnızca hedeflenen `rwx` bitini değiştiriyorlar.
+- **Yeni modül `veyra-ui/src/dialogs/properties_dialog.rs`:** `AdwPreferencesDialog` tabanlı, üç sayfalı Özellikler penceresi — sayfalar arası geçiş (dar genişlikte alt anahtara otomatik düşüş dahil) tamamen `AdwPreferencesDialog`'un kendi yerleşik davranışı, elle `AdwViewStack`/`AdwViewSwitcherTitle` kurulumu gerekmedi (ki bu zaten `libadwaita` 1.4'te kullanımdan kaldırılmış olurdu).
+  - **General:** büyük ikon (mevcut `ThumbnailService`/`icon_name_for` ile, görsel dosyalarda gerçek küçük resim) + ad, Type (`gio::content_type_get_description` ile insan tarafından okunabilir MIME açıklaması, dizinler/sembolik bağlantılar/özel dosyalar için sabit etiketler), Location ("Copy Path" düğmesiyle), Size (`insan-okunabilir (tam bayt)`), Disk Usage, klasörler için Contains, ve Created/Modified/Accessed (yerel saat, `chrono::Local`). Disk Usage ile klasörlerin Contains sayımı, pencere anında açıldıktan *sonra* arka planda dolduruluyor (Kural #11/#12) — Contains hesaplanırken bir `GtkSpinner` gösteriliyor, pencere kapanınca `OperationControl::cancel()` tetikleniyor.
+  - **Permissions:** salt-okunur Owner/Group satırları, Owner/Group/Others için üçer `AdwSwitchRow` (Read/Write/Execute) erişim matrisi, canlı `0755 · rwxr-xr-x` Mode göstergesi, düzenli dosyalar için ayrı bir "Allow executing file as program" kısayol anahtarı (üç `x` bitini birlikte değiştiriyor). Her anahtar değiştiğinde değişiklik hemen `set_permissions` ile diske uygulanıyor; yazma başarısız olursa anahtar (sinyal işleyicisi geçici olarak bloke edilerek — yeniden giriş/sonsuz döngü riski olmadan) eski durumuna döndürülüp bir `AdwAlertDialog` ile hata gösteriliyor (Kural #18/#20). GVfs arka uçlarında POSIX izinleri yoksa (`FileMetadata::permissions == None`) bu sayfa hiç eklenmiyor.
+  - **Advanced:** MIME Type, Inode, Device, Filesystem (ikisi de tek bir arka plan `stat_advanced` çağrısından), ve sembolik bağlantılar için ayrı bir Target/Status (kırık/geçerli) grubu.
+- **Bağlama (`context_menu.rs`, `window.rs`):** öge menüsündeki ve boş-alan menüsündeki "Properties" girdileri artık gerçek `win.properties-selected` / `win.properties-current` aksiyonlarına bağlı (ikisi de `setup_properties_actions`'ta kayıtlı). `win.properties-selected` seçili ögeyi hiçbir ek G/Ç olmadan doğrudan açar (`FileItem` zaten görünüm modelinde yüklü); `win.properties-current` önce mevcut dizini arka planda `stat` eder (o dizin kendi listelemesinde bir öge olarak yer almadığından), sonucu pencereyi açmak için kullanır. `Alt+Enter` kısayolu `win.properties-selected`'a bağlandı.
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: tümü geçti (yeni birim testler: `FilePermissions` read/write getter'ları ve `with_*` setter'larının özel bitleri koruduğu, `count_dir_recursive`'in iç içe dizinleri doğru saydığı + iptal öncesi çağrıldığında boş sonuç döndürdüğü + var olmayan dizinde sert hata verdiği, `properties_dialog`'daki bayt gruplama biçimlendiricisi ve `parent_display` yardımcı fonksiyonu).
+- **Manuel duman testi:** `./target/debug/veyra` gerçek Wayland oturumunda başlatıldı, pencere hatasız açıldı (log'da panik/hata yok). Bu ortamda ekran görüntüsü/giriş otomasyonu araçları (`grim`/`wtype`/`xdotool`) kurulu olmadığından sağ-tık → Properties → sayfa geçişi → izin anahtarı değiştirme akışı görsel olarak doğrulanamadı; bu adım kullanıcı tarafından gerçek bir masaüstünde tekrar edilmeli.
+
+### Sıradaki Faz
+Faz 13. Onay bekleniyor.
+
 ## Faz 11 — Thumbnail Engine / Küçük Resim Motoru & Önbellek (`veyra-ui`)
 
 ### Eklenenler

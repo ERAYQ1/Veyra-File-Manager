@@ -12,13 +12,16 @@
 //! the background menu instead.
 //!
 //! Menu entries for actions not yet implemented in later phases (Compress/
-//! Extract: Faz 19, Open Terminal Here: Faz 23, Properties: Faz 12) are shown
-//! insensitive, bound to the shared `win.not-implemented` action, with the
-//! owning phase noted in the label — per Rule #2 (no monolithic leaps across
-//! the roadmap). "Open in New Tab" is real as of Faz 7. "Copy/Move to Other
-//! Panel" (Faz 8) are real too, but only appear at all when the split view
-//! is currently showing a second panel to act as the destination — there is
-//! nothing to disable-and-label when the concept doesn't apply yet.
+//! Extract: Faz 19, Open Terminal Here: Faz 23) are shown insensitive, bound
+//! to the shared `win.not-implemented` action, with the owning phase noted
+//! in the label — per Rule #2 (no monolithic leaps across the roadmap).
+//! "Open in New Tab" is real as of Faz 7. "Copy/Move to Other Panel" (Faz 8)
+//! are real too, but only appear at all when the split view is currently
+//! showing a second panel to act as the destination — there is nothing to
+//! disable-and-label when the concept doesn't apply yet. "Properties" (Faz
+//! 12) is real too: the item menu binds it to `win.properties-selected`,
+//! the background menu to `win.properties-current` (the currently open
+//! directory, since there's no selected item to act on there).
 
 use std::rc::Rc;
 
@@ -141,7 +144,7 @@ fn build_item_menu(item: &FileItem, is_split_active: bool) -> gio::Menu {
     menu.append_section(None, &path_section);
 
     let properties_section = gio::Menu::new();
-    properties_section.append(Some("Properties (Faz 12)"), Some("win.not-implemented"));
+    properties_section.append(Some("Properties"), Some("win.properties-selected"));
     menu.append_section(None, &properties_section);
 
     menu
@@ -175,7 +178,7 @@ fn build_background_menu(has_clipboard: bool) -> gio::Menu {
     menu.append_section(None, &misc_section);
 
     let properties_section = gio::Menu::new();
-    properties_section.append(Some("Properties (Faz 12)"), Some("win.not-implemented"));
+    properties_section.append(Some("Properties"), Some("win.properties-current"));
     menu.append_section(None, &properties_section);
 
     menu
