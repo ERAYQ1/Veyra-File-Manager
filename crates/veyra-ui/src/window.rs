@@ -20,8 +20,8 @@ use crate::tab_page::{active_tab, TabPage, TabRegistry, ViewSelections};
 use crate::views::ViewMode;
 use crate::widgets::progress_toast::ProgressToastHandles;
 use crate::{
-    archive_ops, breadcrumbs, dialogs, fs_async, headerbar, open_with, operations, recent, sidebar,
-    terminal, trash, widgets,
+    archive_ops, breadcrumbs, dialogs, fs_async, headerbar, open_with, operations, recent,
+    shortcuts, sidebar, terminal, trash, widgets,
 };
 
 /// A single Copy/Cut clipboard slot, shared across both panels and all their
@@ -234,7 +234,54 @@ pub(crate) fn build_window(
     setup_network_actions(&window, navigate);
     setup_command_palette_actions(app, &window, &panels, &focused, &header, refresh_preview);
 
+    // Faz 25: loaded/applied last so a user's `~/.config/veyra/shortcuts.json`
+    // customization (or, absent one, `default_shortcuts()`, which mirrors
+    // every `set_accels_for_action` call above) is the final word on every
+    // action's accelerator.
+    let shortcut_map: Rc<RefCell<shortcuts::ShortcutMap>> =
+        Rc::new(RefCell::new(shortcuts::ShortcutMap::load()));
+    shortcut_map.borrow().apply_to_application(app);
+    setup_shortcuts_actions(app, &window, shortcut_map);
+
     window
+}
+
+/// Registers the Faz 25 `win.show-shortcuts-help` (`Ctrl+?`) and
+/// `win.reset-shortcuts` actions. Resetting writes `default_shortcuts()`
+/// back to `~/.config/veyra/shortcuts.json`, re-applies it to `app`, and
+/// updates the shared `shortcut_map` so any UI reading it afterwards (the
+/// help window, a future shortcut editor) sees the reset immediately.
+fn setup_shortcuts_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    shortcut_map: Rc<RefCell<shortcuts::ShortcutMap>>,
+) {
+    let action_show_help = gio::SimpleAction::new("show-shortcuts-help", None);
+    {
+        let window = window.clone();
+        action_show_help.connect_activate(move |_, _| {
+            dialogs::shortcuts_help_dialog::show(&window);
+        });
+    }
+    // Its accelerator comes from `shortcut_map.apply_to_application`
+    // (called just before this function), not a hardcoded call here — it's
+    // already in `default_shortcuts()`, and a second hardcoded call here
+    // would silently clobber a user's customization for this one action.
+    window.add_action(&action_show_help);
+
+    let action_reset = gio::SimpleAction::new("reset-shortcuts", None);
+    {
+        let app = app.clone();
+        action_reset.connect_activate(move |_, _| {
+            let defaults = shortcuts::default_shortcuts();
+            if let Err(err) = defaults.save() {
+                tracing::warn!(error = %err, "failed to persist reset shortcuts.json");
+            }
+            defaults.apply_to_application(&app);
+            *shortcut_map.borrow_mut() = defaults;
+        });
+    }
+    window.add_action(&action_reset);
 }
 
 /// Wires a panel's own close/detach/tab-switch bookkeeping and its five
@@ -635,6 +682,32 @@ fn setup_navigation_shortcuts(
     }
     window.add_action(&action_toggle_hidden);
     app.set_accels_for_action("win.toggle-hidden-files", &["<Primary>h"]);
+
+    // Faz 25: every view's selection model is a `GtkSingleSelection`
+    // (Faz 5 note above `ClipboardEntry` — Veyra operates on one selected
+    // item at a time, not a marquee), so "Select All" has nothing to
+    // extend into; it falls back to selecting and focusing the first item,
+    // which is still useful as a keyboard-only way to jump into an empty
+    // selection.
+    let action_select_all = gio::SimpleAction::new("select-all", None);
+    {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_select_all.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            if let Some(tab) = active_tab(&panel.tab_view, &panel.registry) {
+                let selection = tab.selections.active(&tab.view_stack);
+                if selection.n_items() > 0 {
+                    selection.set_selected(0);
+                }
+                if let Some(widget) = tab.view_stack.visible_child() {
+                    widget.grab_focus();
+                }
+            }
+        });
+    }
+    window.add_action(&action_select_all);
+    app.set_accels_for_action("win.select-all", &["<Primary>a"]);
 }
 
 /// Registers the Faz 7 tab-management `win.*` actions and their

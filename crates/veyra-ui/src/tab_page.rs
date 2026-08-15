@@ -38,13 +38,18 @@ pub(crate) struct ViewSelections {
 }
 
 impl ViewSelections {
-    pub fn selected(&self, view_stack: &gtk4::Stack) -> Option<FileItem> {
-        let selection = match view_stack.visible_child_name().as_deref() {
+    /// The `GtkSingleSelection` backing whichever of the three views is
+    /// currently visible in `view_stack`.
+    pub fn active(&self, view_stack: &gtk4::Stack) -> &gtk4::SingleSelection {
+        match view_stack.visible_child_name().as_deref() {
             Some(name) if name == ViewMode::Compact.stack_name() => &self.compact,
             Some(name) if name == ViewMode::Details.stack_name() => &self.details,
             _ => &self.icon,
-        };
-        crate::views::selected_item(selection)
+        }
+    }
+
+    pub fn selected(&self, view_stack: &gtk4::Stack) -> Option<FileItem> {
+        crate::views::selected_item(self.active(view_stack))
     }
 }
 

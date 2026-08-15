@@ -20,6 +20,7 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use crate::command_palette::{self, CommandItem};
+use crate::shortcuts;
 
 /// Shows the Command Palette over `window`. Selecting a command (click,
 /// Enter, or double-click) closes the palette and activates that command's
@@ -91,11 +92,14 @@ pub(crate) fn show(window: &adw::ApplicationWindow) {
         });
     }
 
+    let app = window.application();
+
     let populate = {
         let list = list.clone();
         let all_commands = all_commands.clone();
         let current = current.clone();
         let selected_index = selected_index.clone();
+        let app = app.clone();
         move |query: &str| {
             while let Some(child) = list.first_child() {
                 list.remove(&child);
@@ -106,7 +110,7 @@ pub(crate) fn show(window: &adw::ApplicationWindow) {
                 .cloned()
                 .collect();
             for item in &filtered {
-                list.append(&build_row(item));
+                list.append(&build_row(item, app.as_ref()));
             }
             list.invalidate_headers();
 
@@ -236,8 +240,11 @@ fn category_label(category: &str) -> gtk4::Label {
 }
 
 /// Builds one command row: action icon + title on the left, category and
-/// (when the command has one) keyboard-shortcut badges on the right.
-fn build_row(item: &CommandItem) -> adw::ActionRow {
+/// (when the command has one) a keyboard-shortcut badge on the right — read
+/// live from `app`'s accel table (`Faz 25 ShortcutMap`) rather than a copy
+/// baked into `CommandItem`, so a customized or reset shortcut is reflected
+/// here immediately.
+fn build_row(item: &CommandItem, app: Option<&gtk4::Application>) -> adw::ActionRow {
     let row = adw::ActionRow::builder().title(item.title).build();
     row.set_use_markup(false);
     row.set_activatable(true);
@@ -246,8 +253,16 @@ fn build_row(item: &CommandItem) -> adw::ActionRow {
     let icon = gtk4::Image::from_icon_name(item.icon_name);
     row.add_prefix(&icon);
 
-    if let Some(shortcut) = item.shortcut {
-        let shortcut_label = gtk4::Label::new(Some(shortcut));
+    let detailed_action_name = match item.action_target.as_ref().and_then(glib::Variant::str) {
+        Some(target) => format!("{}::{target}", item.action_name),
+        None => item.action_name.to_string(),
+    };
+    let accel = app
+        .map(|app| app.accels_for_action(&detailed_action_name))
+        .and_then(|accels| accels.first().map(|accel| shortcuts::format_accel(accel)));
+
+    if let Some(accel) = accel {
+        let shortcut_label = gtk4::Label::new(Some(&accel));
         shortcut_label.add_css_class("dim-label");
         shortcut_label.add_css_class("caption");
         row.add_suffix(&shortcut_label);

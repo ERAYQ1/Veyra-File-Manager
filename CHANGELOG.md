@@ -1,5 +1,34 @@
 # Changelog
 
+## Faz 25 — Keyboard-First & Configurable Shortcuts (Klavye Odaklı Kullanım & Özelleştirilebilir Kısayollar) (`veyra-ui`)
+
+### Eklenenler
+- **`shortcuts` (yeni modül, `veyra-ui`):** GTK widget'larından bağımsız, saf ve birim testli kısayol veri modeli.
+  - **`ShortcutMap`:** aksiyon adı (`win.copy-selection`, parametreli aksiyonlar için `win.set-view-mode::icon` gibi hedefli biçimde) → `Vec<String>` (GTK'nın `<Primary>c` sözdizimiyle) eşlemesi. `default_shortcuts()` 32 aksiyonun tamamı için (mevcut 29 `set_accels_for_action` çağrısının birebir aynısı + yeni `win.select-all`/`win.show-shortcuts-help`/`win.reset-shortcuts`) tek doğruluk kaynağı.
+  - **XDG kalıcılığı:** `~/.config/veyra/shortcuts.json`, `network.rs`'nin geçmiş dosyasıyla aynı atomik yazma deseni (`.json.tmp` → `rename`). Dosya yoksa, okunamıyorsa veya geçersiz JSON'sa sessizce `default_shortcuts()`'a düşer (Kural #4); geçersiz tek tek ivme dizeleri (`is_valid_accel` — saf dize doğrulaması, `gtk4::accelerator_parse`'a bilerek bağımlı değil çünkü o çağrı GTK'nın başlatılmasını (`gtk::init`/ekran bağlantısı) gerektirir ve bu modül `command_palette` gibi ekransız birim testli kalmalı) elenip o aksiyon için hiç kısayol yokmuş gibi davranılır.
+  - **`apply_to_application(app)`:** haritadaki her aksiyonu `Application::set_accels_for_action` ile uygular; `window.rs`'te tüm `setup_*_actions` çağrılarından **sonra** çalıştırılarak kullanıcının `shortcuts.json`'u (veya hiç yoksa derlenmiş varsayılanlar) son sözü söyler.
+  - **`format_accel`:** `<Primary><Shift>n` → `Ctrl+Shift+N` gibi görüntüleme dizesine çevirir — Komut Paleti rozetleri ve Kısayollar yardım penceresi bunu, `Application::accels_for_action`'dan okunan canlı değerle birlikte kullanır; ikinci bir statik kopya tutulmaz, böylece asla senkron dışı kalamaz.
+  - **`catalog()`:** yardım penceresi için 32 girişlik kategorili liste (Navigation, File Operations, View, Tabs, Tools) — testler her katalog girişinin bir varsayılana, her varsayılanın bir katalog girişine sahip olduğunu doğrular.
+- **`win.select-all` (`Ctrl+A`, `window.rs`):** her üç görünüm de tek seçimli `GtkSingleSelection` kullandığından (Faz 5 notu) gerçek çoklu seçime genişletilemez; belirtim gereği ilk ögeyi seçip görünüme odaklanmaya düşer (`ViewSelections::active`, `selected()` ile paylaşılan yeni yardımcı).
+- **`win.show-shortcuts-help` (`Ctrl+?`) / `dialogs::shortcuts_help_dialog` (yeni):** `AdwDialog` tabanlı, kategorilere ayrılmış salt-okunur kısayol listesi (Komut Paleti'yle aynı görsel dil); her satırın rozeti `Application::accels_for_action`'dan canlı okunur.
+- **`win.reset-shortcuts` (kısayolsuz — Kural #38/#39'un ruhu: yanlışlıkla tetiklenmemeli, Kısayollar penceresi/Komut Paleti üzerinden erişilir):** `default_shortcuts()`'ı `shortcuts.json`'a geri yazar ve `app`'e yeniden uygular.
+- **`command_palette.rs`:** `CommandItem.shortcut` statik alanı tamamen kaldırıldı (24 elle yazılmış dize sildi) — rozetler artık `dialogs/command_palette_dialog.rs`'te `Application::accels_for_action` ile canlı okunuyor, tek doğruluk kaynağı `ShortcutMap`. Ayrıca "Go to Location" (`win.focus-address`), "Select All" (`win.select-all`), "Keyboard Shortcuts" (`win.show-shortcuts-help`) ve "Reset Shortcuts to Default" (`win.reset-shortcuts`) komutları eklendi.
+- **`win.focus-address` (`Ctrl+L`):** zaten mevcuttu (Faz 9); yeni `ShortcutMap`'e ve kısayollar yardım penceresine/Komut Paleti'ne dahil edildi, ayrı bir uygulama gerekmedi.
+
+### Testler
+- `veyra-ui::shortcuts`: 19 yeni birim testi — katalog/varsayılan tutarlılığı, JSON round-trip, eksik/bozuk dosyada varsayılana düşme, geçerli dosyanın yalnızca belirtilen aksiyonları geçersiz kılması, geçersiz ivme dizelerinin elenmesi, atomik kaydet/yükle (`.tmp` kalıntısı kalmaması), `is_valid_accel` kabul/red, `format_accel`'in önceki Komut Paleti dizeleriyle birebir eşleşmesi.
+- Toplam: 282/282 test (workspace genelinde, önceki 263'ten +19).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 282/282 geçti.
+- `cargo fmt --all -- --check`: temiz.
+- **Not:** Bu ortamda görüntü sunucusu (display server) yok; Kısayollar yardım penceresinin ve Komut Paleti rozetlerinin görsel doğrulaması gerçek bir GTK oturumunda elle test edilmedi — yalnızca derleme + birim testleri doğrulandı. `is_valid_accel`'in `gtk4::accelerator_parse`'a değil saf dize ayrıştırmasına dayanması bilerek bu kısıtı hesaba katıyor.
+
+### Sıradaki Faz
+Faz 26 (Onay bekleniyor.)
+
 ## Faz 24 — Command Palette (Komut Paleti & Hızlı Eylem Yöneticisi) (`veyra-ui`)
 
 ### Eklenenler

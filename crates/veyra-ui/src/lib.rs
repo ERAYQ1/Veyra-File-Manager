@@ -24,6 +24,7 @@ mod operations;
 mod preview;
 mod recent;
 mod search_results;
+mod shortcuts;
 mod sidebar;
 mod sorting;
 mod split_view;
