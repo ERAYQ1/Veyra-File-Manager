@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+mod bookmarks;
 mod breadcrumbs;
 mod context_menu;
 mod dialogs;

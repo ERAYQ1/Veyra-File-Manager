@@ -103,6 +103,15 @@ fn build_item_menu(item: &FileItem, is_split_active: bool) -> gio::Menu {
     }
     menu.append_section(None, &open_section);
 
+    if is_dir {
+        let bookmark_section = gio::Menu::new();
+        bookmark_section.append(
+            Some("Add to Bookmarks"),
+            Some("win.add-to-bookmarks-selected"),
+        );
+        menu.append_section(None, &bookmark_section);
+    }
+
     let clipboard_section = gio::Menu::new();
     clipboard_section.append(Some("Copy"), Some("win.copy-selection"));
     clipboard_section.append(Some("Cut"), Some("win.cut-selection"));

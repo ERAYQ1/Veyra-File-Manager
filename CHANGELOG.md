@@ -1,5 +1,34 @@
 # Changelog
 
+## Faz 16 — Favorites / Bookmarks (Yer İmleri & Sürükle-Bırak) (`veyra-ui`)
+
+### Eklenenler
+- **Yeni modül `bookmarks.rs`:** Linux masaüstü standardı `~/.config/gtk-3.0/bookmarks` dosyasını okuyup yazıyor (GTK3/GTK4 dosya seçicileri ve Nautilus ile aynı dosya — Veyra'nın yer imleri masaüstünün geri kalanıyla senkron kalıyor). Format satır başına `<uri>[ <özel etiket>]`.
+  - `load()` / `add(target, label)` / `remove(uri)` / `rename(uri, new_label)`: her biri gerçek XDG dosya yoluna sabit ince sarmalayıcı; asıl mantık `*_at(path, ...)` iç fonksiyonlarında yaşıyor, böylece birim testleri kullanıcının gerçek yer imlerine hiç dokunmadan geçici dosyalarla çalışıyor.
+  - **Atomik yazma:** her `save_to` çağrısı `<path>.tmp`'e yazıp `rename` ile üzerine alıyor — yarıda kesilen bir yazma asla bozuk dosya bırakmıyor (Kural #16/#17).
+  - `add` aynı URI için idempotent (zaten yer imliyse sessizce no-op, hata değil).
+  - **Canlı izleme (`watch`):** `gio::File::monitor_file` ile bookmarks dosyasını izliyor; Veyra içinden veya harici bir uygulamadan (ör. Nautilus) yapılan her değişiklikte callback'i tetikliyor. Monitor oluşturma başarısız olursa panik atmak yerine uyarı loglayıp `None` dönüyor (Kural #15/#18/#20) — sidebar başlangıçta yüklenen listeyi göstermeye devam ediyor, sadece canlı yenilenmiyor.
+- **`sidebar.rs` — Bookmarks bölümü:** "Places" ile "Devices" arasına yerleştirildi. Her satır özel etiket (varsa) veya yer iminin son yol segmentini `starred-symbolic` ikonuyla gösteriyor, tıklamada ilgili konuma gidiyor.
+  - **Sağ-tık menüsü:** "Open in New Tab" / "Rename Bookmark…" / "Remove from Bookmarks" — `context_menu.rs`'in pencere-geneli `win.*` eylemlerinden farklı olarak her satır kendi hedefine sahip olduğundan, menü her satıra özel bir `gio::SimpleActionGroup` (`"bookmark.*"`) üzerinden bağlanıyor.
+  - **Sürükle-Bırak ile ekleme:** Bookmarks bölümüne (`gtk4::DropTarget`, `gdk::FileList` kabul eder) herhangi bir panelden bir klasör sürükleyip bırakmak onu otomatik yer imlerine ekliyor; dizin olmayan bırakmalar sessizce yok sayılıyor.
+  - **Canlı yenileme:** `bookmarks::watch` ile kurulan `GFileMonitor`, Veyra'nın kendi yazmalarında da harici değişikliklerde de sidebar'ı otomatik yeniden çiziyor; monitor'ün referansı, bölümün ömrü boyunca yaşayan drop-target kapanışında tutuluyor (widget ağacına gömülü bir GObject'in ömrünü Rust tarafında kapanış yakalaması üzerinden garanti eden, `unsafe` gerektirmeyen bir desen).
+- **`context_menu.rs`:** klasör ögelerinin sağ-tık menüsüne "Add to Bookmarks" (`win.add-to-bookmarks-selected`) eklendi.
+- **`window.rs`:** yeni `win.add-to-bookmarks-selected` eylemi (odaklı panelin seçili klasörünü `bookmarks::add`'e yönlendiriyor, hata olursa durum çubuğuna yazıyor) ve sidebar'ın "Open in New Tab" bağlamı için yeni bir `open_in_new_tab` kapanışı eklendi. `sidebar::build` artık Rename Bookmark diyaloğunu bağlayabilmek için pencere referansı alıyor — bu yüzden pencere artık içerik ayarlanmadan önce oluşturuluyor (`adw::ApplicationWindow::builder()` → `sidebar::build(&window, ...)` → `window.set_content(...)`).
+
+### Testler
+- `bookmarks.rs`'e 9 yeni birim testi: etiketli/etiketsiz satır ayrıştırma, boş satır atlama, serileştirme round-trip'i, `add`→`load` round-trip'i, aynı URI için `add`'in idempotentliği, `remove`, `rename` (özel etiket verme ve boş etiketle temizleme), var olmayan dosyadan `load`'ın boş liste döndürmesi. Tümü geçici dosyalarla çalışıyor, gerçek `~/.config/gtk-3.0/bookmarks`'a dokunmuyor.
+- Toplam: 179/179 test (workspace genelinde, önceki 170'ten +9).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 179/179 geçti.
+- `cargo fmt --all`: temiz.
+- **Not:** bu sandbox'ta Wayland girdi otomasyonu ve ekran görüntüsü alma yeteneği bulunmadığından, sürükle-bırak ile ekleme, sağ-tık menüsü tıklamaları ve Rename Bookmark diyaloğunun uçtan uca canlı etkileşimi otomatik sürülemedi; bu yollar birim testleri ve statik inceleme ile doğrulandı (Faz 13/14/15'teki aynı sınırlama).
+
+### Sıradaki Faz
+Faz 17. Onay bekleniyor.
+
 ## Faz 15 — Recent Files & Privacy / Son Kullanılanlar ve Gizlilik (`veyra-ui`)
 
 ### Eklenenler

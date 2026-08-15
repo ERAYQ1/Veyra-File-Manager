@@ -7,6 +7,7 @@ use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita as adw;
+use libadwaita::prelude::AdwApplicationWindowExt;
 
 use veyra_filesystem::{FileItem, OperationKind, OperationRequest, VeyraPath};
 use veyra_search::SearchIndex;
@@ -126,8 +127,41 @@ pub(crate) fn build_window(
     content_paned.set_shrink_end_child(true);
     content_paned.set_position(880);
 
+    // Built without `.content()` yet: Faz 16's Bookmarks sidebar section
+    // needs a window reference (to parent its Rename Bookmark dialog), so
+    // the window is created before the sidebar and content are wired up,
+    // then `set_content` fills it in below.
+    let window = adw::ApplicationWindow::builder()
+        .application(app)
+        .title("Veyra - Modern Linux File Manager")
+        .default_width(1200)
+        .default_height(720)
+        .build();
+
+    let open_in_new_tab: Rc<dyn Fn(VeyraPath)> = {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        let has_clipboard = has_clipboard.clone();
+        let split_active = split_active.clone();
+        let refresh_preview = refresh_preview.clone();
+        let thumbnails = thumbnails.clone();
+        Rc::new(move |path: VeyraPath| {
+            let panel = panels.get(*focused.borrow()).clone();
+            open_tab(
+                &panel.tab_view,
+                &panel.registry,
+                &panel.chrome,
+                has_clipboard.clone(),
+                split_active.clone(),
+                refresh_preview.clone(),
+                thumbnails.clone(),
+                path,
+            );
+        })
+    };
+
     let content_page = adw::NavigationPage::new(&content_paned, "Files");
-    let sidebar_widget = sidebar::build(navigate);
+    let sidebar_widget = sidebar::build(&window, navigate, open_in_new_tab);
     let sidebar_page = adw::NavigationPage::new(&sidebar_widget, "Sidebar");
 
     let sidebar_split = adw::NavigationSplitView::builder()
@@ -140,14 +174,7 @@ pub(crate) fn build_window(
     toolbar_view.add_top_bar(&header.widget);
     toolbar_view.add_bottom_bar(&progress.widget);
     toolbar_view.set_content(Some(&sidebar_split));
-
-    let window = adw::ApplicationWindow::builder()
-        .application(app)
-        .title("Veyra - Modern Linux File Manager")
-        .default_width(1200)
-        .default_height(720)
-        .content(&toolbar_view)
-        .build();
+    window.set_content(Some(&toolbar_view));
 
     add_dev_icon_search_path(&window);
     if let Some(app_id) = app.application_id() {
@@ -1105,6 +1132,31 @@ fn setup_context_menu_actions(
     }
     window.add_action(&action_rename);
     app.set_accels_for_action("win.rename-selected", &["F2"]);
+
+    let action_add_bookmark = gio::SimpleAction::new("add-to-bookmarks-selected", None);
+    {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_add_bookmark.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            if item.kind().is_directory() {
+                if let Err(err) = crate::bookmarks::add(&item.path, None) {
+                    tracing::warn!(error = %err, "failed to add bookmark");
+                    panel
+                        .chrome
+                        .status_left
+                        .set_label(&format!("Add to Bookmarks failed: {err}"));
+                }
+            }
+        });
+    }
+    window.add_action(&action_add_bookmark);
 
     let action_copy_path = gio::SimpleAction::new("copy-path-selected", None);
     {
