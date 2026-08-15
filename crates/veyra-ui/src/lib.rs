@@ -59,6 +59,7 @@ pub fn run(app_id: &str, start_dir: Option<VeyraPath>, cache_dir: &Path) -> glib
     let cache_dir = cache_dir.to_path_buf();
     app.connect_activate(move |app| {
         tracing::info!("activating primary window");
+        libadwaita::StyleManager::default().set_color_scheme(libadwaita::ColorScheme::Default);
         if let Some(display) = gtk4::gdk::Display::default() {
             let icon_theme = gtk4::IconTheme::for_display(&display);
             icon_theme.add_search_path("data/icons");

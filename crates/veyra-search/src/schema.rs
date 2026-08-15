@@ -8,6 +8,8 @@ pub(crate) fn init(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "
         PRAGMA journal_mode = WAL;
+        PRAGMA busy_timeout = 5000;
+        PRAGMA synchronous = NORMAL;
 
         CREATE TABLE IF NOT EXISTS directories (
             id   INTEGER PRIMARY KEY,

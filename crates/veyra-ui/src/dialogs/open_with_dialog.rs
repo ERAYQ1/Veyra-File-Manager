@@ -291,6 +291,13 @@ fn populate_list(
 /// desktop file provides one), and a "Default" badge when `is_default`.
 fn build_app_row(app: &gio::AppInfo, is_default: bool) -> adw::ActionRow {
     let row = adw::ActionRow::builder().title(app.name()).build();
+    // Titles/subtitles come straight from desktop files (app names,
+    // descriptions) and can contain unescaped `&`/`<`/`>` (e.g. "... &
+    // Management Console"); GtkLabel treats them as Pango markup by default,
+    // which throws a parse warning. These are plain strings, not markup.
+    row.set_use_markup(false);
+    row.set_title_lines(1);
+    row.set_subtitle_lines(2);
 
     if let Some(description) = app.description() {
         if !description.is_empty() {

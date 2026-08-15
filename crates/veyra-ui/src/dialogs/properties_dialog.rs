@@ -159,12 +159,16 @@ fn build_general_page(item: &FileItem, thumbnails: &Rc<ThumbnailService>) -> Gen
         &adw::ActionRow::builder()
             .title("Type")
             .subtitle(describe_type(item))
+            .title_lines(1)
+            .subtitle_lines(2)
             .build(),
     );
 
     let location_row = adw::ActionRow::builder()
         .title("Location")
         .subtitle(parent_display(&item.path))
+        .title_lines(1)
+        .subtitle_lines(2)
         .build();
     let copy_path_button = gtk4::Button::from_icon_name("edit-copy-symbolic");
     copy_path_button.set_valign(gtk4::Align::Center);
@@ -187,12 +191,16 @@ fn build_general_page(item: &FileItem, thumbnails: &Rc<ThumbnailService>) -> Gen
                 item.metadata.size_human(),
                 format_bytes_grouped(item.metadata.size_bytes)
             ))
+            .title_lines(1)
+            .subtitle_lines(2)
             .build(),
     );
 
     let disk_usage_row = adw::ActionRow::builder()
         .title("Disk Usage")
         .subtitle("Calculating…")
+        .title_lines(1)
+        .subtitle_lines(2)
         .build();
     info_group.add(&disk_usage_row);
 
@@ -200,6 +208,8 @@ fn build_general_page(item: &FileItem, thumbnails: &Rc<ThumbnailService>) -> Gen
         let row = adw::ActionRow::builder()
             .title("Contains")
             .subtitle("Calculating…")
+            .title_lines(1)
+            .subtitle_lines(2)
             .build();
         let spinner = gtk4::Spinner::new();
         spinner.set_spinning(true);
@@ -242,6 +252,8 @@ fn build_advanced_page(item: &FileItem) -> AdvancedPageHandles {
         &adw::ActionRow::builder()
             .title("MIME Type")
             .subtitle(item.metadata.mime_type.clone())
+            .title_lines(1)
+            .subtitle_lines(2)
             .build(),
     );
     group.add(
@@ -252,16 +264,22 @@ fn build_advanced_page(item: &FileItem) -> AdvancedPageHandles {
                     .inode
                     .map_or_else(|| "Unknown".to_string(), |i| i.to_string()),
             )
+            .title_lines(1)
+            .subtitle_lines(2)
             .build(),
     );
     let device_row = adw::ActionRow::builder()
         .title("Device")
         .subtitle("Calculating…")
+        .title_lines(1)
+        .subtitle_lines(2)
         .build();
     group.add(&device_row);
     let filesystem_row = adw::ActionRow::builder()
         .title("Filesystem")
         .subtitle("Calculating…")
+        .title_lines(1)
+        .subtitle_lines(2)
         .build();
     group.add(&filesystem_row);
     page.add(&group);
@@ -277,6 +295,8 @@ fn build_advanced_page(item: &FileItem) -> AdvancedPageHandles {
             &adw::ActionRow::builder()
                 .title("Target")
                 .subtitle(target_text)
+                .title_lines(1)
+                .subtitle_lines(2)
                 .build(),
         );
         let status = if *is_broken {
@@ -288,6 +308,8 @@ fn build_advanced_page(item: &FileItem) -> AdvancedPageHandles {
             &adw::ActionRow::builder()
                 .title("Status")
                 .subtitle(status)
+                .title_lines(1)
+                .subtitle_lines(2)
                 .build(),
         );
         page.add(&link_group);
@@ -334,6 +356,8 @@ fn build_permissions_page(
                     .clone()
                     .unwrap_or_else(|| "Unknown".to_string()),
             )
+            .title_lines(1)
+            .subtitle_lines(2)
             .build(),
     );
     ownership_group.add(
@@ -345,6 +369,8 @@ fn build_permissions_page(
                     .clone()
                     .unwrap_or_else(|| "Unknown".to_string()),
             )
+            .title_lines(1)
+            .subtitle_lines(2)
             .build(),
     );
     page.add(&ownership_group);
@@ -353,6 +379,8 @@ fn build_permissions_page(
     let mode_row = adw::ActionRow::builder()
         .title("Mode")
         .subtitle(mode_subtitle(permissions))
+        .title_lines(1)
+        .subtitle_lines(2)
         .build();
     mode_group.add(&mode_row);
     page.add(&mode_group);
@@ -604,6 +632,8 @@ fn timestamp_row(title: &str, value: Option<DateTime<Utc>>) -> adw::ActionRow {
     adw::ActionRow::builder()
         .title(title)
         .subtitle(subtitle)
+        .title_lines(1)
+        .subtitle_lines(2)
         .build()
 }
 

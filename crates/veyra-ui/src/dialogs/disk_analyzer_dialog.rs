@@ -387,6 +387,8 @@ fn render_breakdown(
                 child.size_bytes as f64 / total as f64 * 100.0
             ))
             .build();
+        row.set_title_lines(1);
+        row.set_subtitle_lines(2);
 
         if index < segment_count.min(PALETTE.len()) && child.is_dir {
             row.add_prefix(&color_swatch(PALETTE[index.min(PALETTE.len() - 1)]));
@@ -474,6 +476,8 @@ fn build_largest_files_page(
                 entry.path
             ))
             .build();
+        row.set_title_lines(1);
+        row.set_subtitle_lines(2);
         row.add_prefix(&gtk4::Image::from_icon_name("text-x-generic-symbolic"));
         row.add_suffix(&open_in_folder_button(
             entry.path.clone(),
@@ -520,6 +524,8 @@ fn build_duplicates_page(
                 format_size(group.size_bytes * group.paths.len() as u64)
             ))
             .build();
+        expander.set_title_lines(1);
+        expander.set_subtitle_lines(2);
         expander.add_prefix(&gtk4::Image::from_icon_name("edit-copy-symbolic"));
 
         for path in &group.paths {
@@ -527,6 +533,8 @@ fn build_duplicates_page(
                 .title(path.file_name().unwrap_or_else(|| path.to_string()))
                 .subtitle(path.to_string())
                 .build();
+            member_row.set_title_lines(1);
+            member_row.set_subtitle_lines(2);
             member_row.add_suffix(&open_in_folder_button(
                 path.clone(),
                 navigate.clone(),
