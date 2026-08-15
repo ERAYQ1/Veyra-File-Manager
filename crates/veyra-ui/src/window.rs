@@ -18,7 +18,7 @@ use crate::state::{AppState, SharedState};
 use crate::tab_page::{active_tab, TabPage, TabRegistry, ViewSelections};
 use crate::views::ViewMode;
 use crate::widgets::progress_toast::ProgressToastHandles;
-use crate::{breadcrumbs, dialogs, fs_async, headerbar, operations, sidebar, widgets};
+use crate::{breadcrumbs, dialogs, fs_async, headerbar, operations, recent, sidebar, widgets};
 
 /// A single Copy/Cut clipboard slot, shared across both panels and all their
 /// tabs (Faz 5 operates on the current selection, not a multi-item marquee —
@@ -35,8 +35,13 @@ pub(crate) fn build_window(
     start_dir: VeyraPath,
     cache_dir: &Path,
 ) -> adw::ApplicationWindow {
-    let left = split_view::build_panel(PanelId::Left);
-    let right = split_view::build_panel(PanelId::Right);
+    // Faz 15: app-wide privacy toggle, shared by both panels' Recent Files
+    // banners and by `open_item` (which reads it before deciding whether to
+    // record an opened file into the XDG recent-files registry).
+    let privacy_mode: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
+
+    let left = split_view::build_panel(PanelId::Left, privacy_mode.clone());
+    let right = split_view::build_panel(PanelId::Right, privacy_mode.clone());
     right.frame.set_visible(false);
     let panels = Panels { left, right };
 
@@ -186,6 +191,7 @@ pub(crate) fn build_window(
     );
     setup_properties_actions(app, &window, &panels, &focused, thumbnails);
     setup_preview_actions(app, &window, &preview, &header, refresh_preview);
+    setup_recent_actions(&window, &panels, privacy_mode);
 
     window
 }
@@ -1269,6 +1275,69 @@ fn setup_preview_actions(
     app.set_accels_for_action("win.toggle-preview", &["F9"]);
 }
 
+/// Registers the Faz 15 `win.clear-recent-history` (behind an `AdwAlertDialog`
+/// confirmation, per Rule #38/#39) and `win.toggle-privacy-mode` actions.
+/// Both act window-wide, not per-panel: the recent-files registry and the
+/// privacy toggle are process-global state, not per-tab.
+fn setup_recent_actions(
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    privacy_mode: Rc<RefCell<bool>>,
+) {
+    let action_clear_history = gio::SimpleAction::new("clear-recent-history", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        action_clear_history.connect_activate(move |_, _| {
+            let panels = panels.clone();
+            dialogs::clear_recent_confirm::show(&window, move || {
+                recent::clear_history();
+                refresh_recent_panels(&panels);
+            });
+        });
+    }
+    window.add_action(&action_clear_history);
+    for panel in [&panels.left, &panels.right] {
+        panel
+            .chrome
+            .recent_banner
+            .clear_button
+            .set_action_name(Some("win.clear-recent-history"));
+    }
+
+    let action_toggle_privacy = gio::SimpleAction::new("toggle-privacy-mode", None);
+    {
+        let panels = panels.clone();
+        action_toggle_privacy.connect_activate(move |_, _| {
+            let new_value = {
+                let mut mode = privacy_mode.borrow_mut();
+                *mode = !*mode;
+                *mode
+            };
+            for panel in [&panels.left, &panels.right] {
+                panel
+                    .chrome
+                    .recent_banner
+                    .privacy_switch
+                    .set_active(new_value);
+            }
+        });
+    }
+    window.add_action(&action_toggle_privacy);
+}
+
+/// Reloads every panel whose focused tab is currently showing `recent:///`,
+/// after `win.clear-recent-history` empties the registry.
+fn refresh_recent_panels(panels: &Panels) {
+    for panel in [&panels.left, &panels.right] {
+        if let Some(tab) = active_tab(&panel.tab_view, &panel.registry) {
+            if recent::is_recent_location(&tab.state.borrow().current_dir) {
+                refresh(&tab.state, &panel.chrome);
+            }
+        }
+    }
+}
+
 /// Builds a new tab rooted at `start_dir` inside the panel identified by
 /// `tab_view`/`registry`, registers it, and switches to it. Every tab owns
 /// an independent `AppState` (location, history, item model), its own
@@ -1415,6 +1484,11 @@ fn open_item(tab: &TabPage, chrome: &Chrome, item: FileItem) {
     if item.kind().is_directory() {
         navigate_to(tab, chrome, item.path.clone(), true);
     } else {
+        // Faz 15: record into the XDG recent-files registry before handing
+        // off to the background thread — `RecentManager` is GTK-main-thread
+        // only, so this must happen here, not inside the spawned thread.
+        let uri = item.path.to_gio_file().uri();
+        recent::record_opened(&uri, &chrome.privacy_mode);
         std::thread::spawn(move || {
             if let Err(err) = veyra_filesystem::open(&item.path) {
                 tracing::warn!(path = %item.path, error = %err, "failed to open item");
@@ -1662,6 +1736,15 @@ fn navigate_to(tab: &TabPage, chrome: &Chrome, path: VeyraPath, push_history: bo
         state_mut.current_dir = path.clone();
     }
 
+    if recent::is_recent_location(&path) {
+        *tab.sort_config.borrow_mut() = crate::sorting::SortConfig {
+            key: crate::sorting::SortKey::Accessed,
+            order: crate::sorting::SortOrder::Descending,
+            folders_first: false,
+        };
+        tab.resort();
+    }
+
     update_chrome(tab, chrome);
     load_directory(&tab.state, chrome, path);
 }
@@ -1721,6 +1804,15 @@ fn update_chrome(tab: &TabPage, chrome: &Chrome) {
     };
     breadcrumbs::rebuild(&chrome.breadcrumbs_box, &current_dir, navigate);
 
+    let is_recent = recent::is_recent_location(&current_dir);
+    chrome.recent_banner.revealer.set_reveal_child(is_recent);
+    if is_recent {
+        chrome
+            .recent_banner
+            .privacy_switch
+            .set_active(*chrome.privacy_mode.borrow());
+    }
+
     chrome.status_left.set_label(&count_label(item_count));
     update_free_space(&tab.state, chrome);
 }
@@ -1754,6 +1846,22 @@ fn load_directory(state: &SharedState, chrome: &Chrome, path: VeyraPath) {
 
     let state_for_done = state.clone();
     let chrome_for_done = chrome.clone();
+
+    // `recent:///` isn't a real GVfs mount, so it can't go through the
+    // generic `read_dir` below — it's built from the XDG recent-files
+    // registry instead (Faz 15). `snapshot_entries` must run here, on the
+    // GTK main thread (`RecentManager` requirement); the actual per-entry
+    // `stat`s happen off-thread in `list_recent_items`, same as every other
+    // location's listing.
+    if recent::is_recent_location(&path) {
+        let entries = recent::snapshot_entries();
+        fs_async::run_blocking(
+            move || Ok(recent::list_recent_items(entries)),
+            move |result| on_directory_loaded(&state_for_done, &chrome_for_done, result),
+        );
+        return;
+    }
+
     fs_async::run_blocking(
         move || veyra_filesystem::read_dir(&path),
         move |result| on_directory_loaded(&state_for_done, &chrome_for_done, result),
@@ -1768,6 +1876,12 @@ fn on_directory_loaded(
     match result {
         Ok(items) => {
             let count = items.len() as u32;
+            if recent::is_recent_location(&state.borrow().current_dir) {
+                chrome
+                    .recent_banner
+                    .title_label
+                    .set_label(&recent::format_group_summary(&items, chrono::Utc::now()));
+            }
             let model = state.borrow().model.clone();
             model.remove_all();
             for item in items {

@@ -13,6 +13,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use libadwaita as adw;
 
+use crate::recent::{self, RecentBannerHandles};
 use crate::tab_page::{active_tab, TabPage, TabRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +51,13 @@ pub(crate) struct Chrome {
     pub address_entry: gtk4::Entry,
     pub status_left: gtk4::Label,
     pub status_right: gtk4::Label,
+    /// Faz 15: the `recent:///`-only info row (Clear History / Privacy
+    /// Mode), revealed by `window::update_chrome` whenever this panel's
+    /// active tab is showing Recent Files.
+    pub recent_banner: RecentBannerHandles,
+    /// Faz 15: app-wide privacy toggle, shared by both panels — `true`
+    /// means opening a file never adds it to the XDG recent-files registry.
+    pub privacy_mode: Rc<RefCell<bool>>,
 }
 
 /// One independent panel: its own navigation chrome, its own `AdwTabView`
@@ -104,7 +112,7 @@ pub(crate) fn focused_tab(panels: &Panels, focused: &Rc<RefCell<PanelId>>) -> Op
 /// `AdwTabView`, and a status row (item count / free space). Mirrors the
 /// single-panel header bar Faz 3-7 built, just scoped to one panel instead
 /// of the whole window.
-pub(crate) fn build_panel(id: PanelId) -> Panel {
+pub(crate) fn build_panel(id: PanelId, privacy_mode: Rc<RefCell<bool>>) -> Panel {
     let back_button = nav_button("go-previous-symbolic", "Go Back");
     let forward_button = nav_button("go-next-symbolic", "Go Forward");
     let up_button = nav_button("go-up-symbolic", "Go Up");
@@ -182,6 +190,8 @@ pub(crate) fn build_panel(id: PanelId) -> Panel {
     toolbar_row.append(&nav_box);
     toolbar_row.append(&title_stack);
 
+    let recent_banner = recent::build_banner(privacy_mode.clone());
+
     let tab_view = adw::TabView::new();
     let tab_bar = adw::TabBar::new();
     tab_bar.set_view(Some(&tab_view));
@@ -192,6 +202,7 @@ pub(crate) fn build_panel(id: PanelId) -> Panel {
     let frame = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     frame.add_css_class("veyra-panel");
     frame.append(&toolbar_row);
+    frame.append(&recent_banner.revealer);
     frame.append(&tab_bar);
     frame.append(&tab_view);
     frame.append(&status.widget);
@@ -207,6 +218,8 @@ pub(crate) fn build_panel(id: PanelId) -> Panel {
         address_entry,
         status_left: status.left_label,
         status_right: status.right_label,
+        recent_banner,
+        privacy_mode,
     };
 
     Panel {

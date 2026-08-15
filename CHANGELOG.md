@@ -1,5 +1,35 @@
 # Changelog
 
+## Faz 15 — Recent Files & Privacy / Son Kullanılanlar ve Gizlilik (`veyra-ui`)
+
+### Eklenenler
+- **Yeni modül `recent.rs`:** `recent:///` normal bir GVfs bağlama noktası olmadığından (`veyra_filesystem::read_dir` genel amaçlı `enumerate_children` çağrısıyla güvenilir biçimde desteklenmiyor), bu konum artık doğrudan XDG `recently-used.xbel` kaydından (`gtk4::RecentManager`) besleniyor:
+  - `snapshot_entries()`: GTK ana thread'inde (`RecentManager` gereksinimi), zaten bellekte ayrıştırılmış URI + son-ziyaret zaman damgası listesini I/O yapmadan okur.
+  - `list_recent_items(entries)`: her URI'yi arka planda `veyra_filesystem::stat` ile doğrular; artık var olmayan ögeleri panik atmadan zarifçe atlar (Kural #18/#20), her `FileItem`'ın `accessed` alanını dosya sistemi atime'ı yerine kayıttaki gerçek "son ziyaret" zaman damgasıyla damgalar (birçok bağlama noktası atime izlemediğinden daha güvenilir), sonucu azalan sırada döndürür.
+  - `TimeGroup` (`Today`/`Yesterday`/`ThisWeek`/`Older`) + `classify(accessed, now)`: takvim gününe göre Bugün/Dün, kalan 7 günlük pencereye göre Bu Hafta, ötesi Daha Eski.
+  - `format_group_summary(items, now)`: `TimeGroup::classify`'ı gerçek bir UI çıktısına bağlar — banner başlığını `"Recent Files — 3 Today, 12 This Week"` gibi bir döküme çevirir (boş gruplar atlanır).
+  - `record_opened(uri, privacy_mode)` / `clear_history()`: sırasıyla kayda ekleme (Gizlilik Modu açıksa atlanır) ve `purge_items()` ile tam temizleme.
+- **`window.rs::load_directory`:** `recent::is_recent_location` doğruysa genel `read_dir` yerine iki adımlı `snapshot_entries` (ana thread) + `list_recent_items` (arka plan, `fs_async::run_blocking`) akışına dallanıyor — UI thread hâlâ hiç engellenmiyor (Kural #11/#12).
+- **Varsayılan sıralama:** `navigate_to`, `recent:///`'a girildiğinde sekmenin `sort_config`'ini otomatik olarak `SortKey::Accessed` + `SortOrder::Descending`'e ayarlayıp `resort()` çağırıyor (mevcut `SortKey::Accessed`/`metadata.accessed` altyapısı yeniden kullanıldı, yeni alan eklenmedi).
+- **Gizlilik Modu & Clear History banner'ı (`recent::build_banner`, `split_view::Chrome.recent_banner`):** her panelin araç çubuğu ile sekme şeridi arasına yerleştirilen, yalnızca `recent:///`'da görünür olan bir `GtkRevealer`; başlık etiketi (`TimeGroup` dökümü), `Privacy Mode` anahtarı ve `destructive-action` stilli `Clear History` düğmesi içeriyor. `update_chrome` her navigasyon/sekme değişiminde görünürlüğü ve anahtarın durumunu senkronize ediyor.
+- **`win.clear-recent-history`:** `dialogs::clear_recent_confirm` (Kural #38/#39'a uygun `AdwAlertDialog` onayı, `delete_confirm.rs` ile aynı desen) üzerinden onaylandığında `recent::clear_history()` çağırıp `recent:///`'ı gösteren her paneli yeniden yüklüyor.
+- **`win.toggle-privacy-mode`:** app-genelinde paylaşılan `Rc<RefCell<bool>> privacy_mode`'u (her iki panelin banner'ı ve `open_item` tarafından paylaşılır) değiştirip her iki panelin anahtarını senkronize ediyor.
+- **`window.rs::open_item`:** bir dosya açılırken (dizinler hariç), arka plan thread'i başlatılmadan *önce*, ana thread'de `recent::record_opened(uri, &chrome.privacy_mode)` çağrılıyor — `RecentManager` ana-thread-only olduğundan sıralama önemli.
+
+### Testler
+- `recent.rs`'e 8 yeni birim testi: `is_recent_location` tam URI eşleşmesi, `TimeGroup::classify`'ın dört dalı (bugün/dün/bu hafta/daha eski, 7 günlük sınır dahil), ve `list_recent_items`'ın gerçek geçici dosyalarla artık var olmayan bir URI'yi atlayıp kalanları son-ziyaret zamanına göre azalan sıraladığını doğrulayan bir entegrasyon testi.
+- Toplam: 170/170 test (workspace genelinde).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 170/170 geçti.
+- `cargo fmt --check`: temiz.
+- Uygulama gerçek Wayland (KDE Plasma) oturumunda birkaç saniye çalıştırıldı; başlangıçta panik/çökme gözlenmedi. **Not:** bu sandbox'ta Wayland girdi otomasyon aracı (wtype/ydotool/xdotool) ve ekran görüntüsü alma yeteneği bulunmadığından, Sidebar'daki "Recent" ögesine tıklama, Privacy Mode anahtarının canlı etkileşimi ve Clear History onay diyaloğunun tıklama-tabanlı doğrulaması otomatik sürülemedi; bu yollar birim testleri ve statik inceleme ile doğrulandı (Faz 13/14'teki aynı sınırlama).
+
+### Sıradaki Faz
+Faz 16. Onay bekleniyor.
+
 ## Faz 14 — Hidden Files / Gizli Dosyalar (`veyra-ui`)
 
 ### Eklenenler

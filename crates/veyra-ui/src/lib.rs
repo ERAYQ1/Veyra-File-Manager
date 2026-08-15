@@ -16,6 +16,7 @@ mod headerbar;
 mod history;
 mod operations;
 mod preview;
+mod recent;
 mod search_results;
 mod sidebar;
 mod sorting;
