@@ -12,6 +12,7 @@ use veyra_filesystem::{FileItem, OperationKind, OperationRequest, VeyraPath};
 use veyra_search::SearchIndex;
 
 use crate::operations::OperationEvent;
+use crate::preview::{self, PreviewPanelHandles};
 use crate::split_view::{self, Chrome, Panel, PanelId, Panels};
 use crate::state::{AppState, SharedState};
 use crate::tab_page::{active_tab, TabPage, TabRegistry, ViewSelections};
@@ -57,18 +58,32 @@ pub(crate) fn build_window(
         Rc::new(move |path: VeyraPath| navigate_focused(&panels, &focused, path))
     };
 
+    let preview = preview::build();
+    let refresh_preview: Rc<dyn Fn()> = {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        let preview = preview.clone();
+        Rc::new(move || sync_preview(&panels, &focused, &preview))
+    };
+
     let search_index = Arc::new(open_search_index(cache_dir));
     veyra_search::spawn_background_index(search_index.clone(), glib::home_dir());
 
-    let header = headerbar::build(&panels, focused.clone(), search_index, navigate.clone());
+    let header = headerbar::build(
+        &panels,
+        focused.clone(),
+        search_index,
+        navigate.clone(),
+        refresh_preview.clone(),
+    );
     let progress = widgets::progress_toast::build();
 
-    wire_panel(&panels.left, &focused, &header);
-    wire_panel(&panels.right, &focused, &header);
-    attach_focus_gesture(&panels.left, &panels, &focused, &header);
-    attach_focus_gesture(&panels.right, &panels, &focused, &header);
-    attach_panel_focus_key(&panels.left, &panels, &focused, &header);
-    attach_panel_focus_key(&panels.right, &panels, &focused, &header);
+    wire_panel(&panels.left, &focused, &header, &refresh_preview);
+    wire_panel(&panels.right, &focused, &header, &refresh_preview);
+    attach_focus_gesture(&panels.left, &panels, &focused, &header, &refresh_preview);
+    attach_focus_gesture(&panels.right, &panels, &focused, &header, &refresh_preview);
+    attach_panel_focus_key(&panels.left, &panels, &focused, &header, &refresh_preview);
+    attach_panel_focus_key(&panels.right, &panels, &focused, &header, &refresh_preview);
 
     open_tab(
         &panels.left.tab_view,
@@ -76,6 +91,7 @@ pub(crate) fn build_window(
         &panels.left.chrome,
         has_clipboard.clone(),
         split_active.clone(),
+        refresh_preview.clone(),
         start_dir,
     );
     if let Some(tab) = active_tab(&panels.left.tab_view, &panels.left.registry) {
@@ -92,7 +108,17 @@ pub(crate) fn build_window(
     paned.set_shrink_end_child(false);
     paned.set_position(640);
 
-    let content_page = adw::NavigationPage::new(&paned, "Files");
+    preview.widget.set_visible(false);
+    let content_paned = gtk4::Paned::new(gtk4::Orientation::Horizontal);
+    content_paned.set_start_child(Some(&paned));
+    content_paned.set_end_child(Some(&preview.widget));
+    content_paned.set_resize_start_child(true);
+    content_paned.set_resize_end_child(false);
+    content_paned.set_shrink_start_child(false);
+    content_paned.set_shrink_end_child(true);
+    content_paned.set_position(880);
+
+    let content_page = adw::NavigationPage::new(&content_paned, "Files");
     let sidebar_widget = sidebar::build(navigate);
     let sidebar_page = adw::NavigationPage::new(&sidebar_widget, "Sidebar");
 
@@ -130,6 +156,7 @@ pub(crate) fn build_window(
         &focused,
         has_clipboard.clone(),
         split_active.clone(),
+        refresh_preview.clone(),
     );
     setup_split_view_actions(
         app,
@@ -139,9 +166,19 @@ pub(crate) fn build_window(
         &header,
         &progress,
         has_clipboard.clone(),
+        refresh_preview.clone(),
     );
     setup_operation_actions(app, &window, &panels, &focused, &progress, &clipboard);
-    setup_context_menu_actions(app, &window, &panels, &focused, has_clipboard, split_active);
+    setup_context_menu_actions(
+        app,
+        &window,
+        &panels,
+        &focused,
+        has_clipboard,
+        split_active,
+        refresh_preview.clone(),
+    );
+    setup_preview_actions(app, &window, &preview, &header, refresh_preview);
 
     window
 }
@@ -150,7 +187,12 @@ pub(crate) fn build_window(
 /// navigation buttons + address entry — all of it scoped to `panel` alone,
 /// since a panel's back/forward/up/home/refresh always act on that panel
 /// regardless of which one currently has focus.
-fn wire_panel(panel: &Panel, focused: &Rc<RefCell<PanelId>>, header: &headerbar::HeaderBarHandles) {
+fn wire_panel(
+    panel: &Panel,
+    focused: &Rc<RefCell<PanelId>>,
+    header: &headerbar::HeaderBarHandles,
+    refresh_preview: &Rc<dyn Fn()>,
+) {
     // Vetoes closing a panel's last remaining tab (Ctrl+W and the tab's own
     // "x" both route through this signal), so each panel always keeps at
     // least one tab open; closing any other tab proceeds immediately.
@@ -171,6 +213,7 @@ fn wire_panel(panel: &Panel, focused: &Rc<RefCell<PanelId>>, header: &headerbar:
         let panel = panel.clone();
         let focused = focused.clone();
         let header = header.clone();
+        let refresh_preview = refresh_preview.clone();
         panel.tab_view.connect_selected_page_notify(move |view| {
             if let Some(tab) = active_tab(view, &panel.registry) {
                 update_chrome(&tab, &panel.chrome);
@@ -178,6 +221,7 @@ fn wire_panel(panel: &Panel, focused: &Rc<RefCell<PanelId>>, header: &headerbar:
                     sync_view_switcher(&header.view_switcher_buttons, &tab);
                 }
             }
+            refresh_preview();
         });
     }
     {
@@ -269,6 +313,7 @@ fn attach_focus_gesture(
     panels: &Panels,
     focused: &Rc<RefCell<PanelId>>,
     header: &headerbar::HeaderBarHandles,
+    refresh_preview: &Rc<dyn Fn()>,
 ) {
     let gesture = gtk4::GestureClick::new();
     gesture.set_propagation_phase(gtk4::PropagationPhase::Capture);
@@ -276,8 +321,9 @@ fn attach_focus_gesture(
     let panels = panels.clone();
     let focused = focused.clone();
     let header = header.clone();
+    let refresh_preview = refresh_preview.clone();
     gesture.connect_pressed(move |_, _, _, _| {
-        focus_panel(panel_id, &panels, &focused, &header);
+        focus_panel(panel_id, &panels, &focused, &header, &refresh_preview);
     });
     panel.frame.add_controller(gesture);
 }
@@ -294,6 +340,7 @@ fn attach_panel_focus_key(
     panels: &Panels,
     focused: &Rc<RefCell<PanelId>>,
     header: &headerbar::HeaderBarHandles,
+    refresh_preview: &Rc<dyn Fn()>,
 ) {
     let key = gtk4::EventControllerKey::new();
     key.set_propagation_phase(gtk4::PropagationPhase::Bubble);
@@ -301,6 +348,7 @@ fn attach_panel_focus_key(
     let panels = panels.clone();
     let focused = focused.clone();
     let header = header.clone();
+    let refresh_preview = refresh_preview.clone();
     key.connect_key_pressed(move |controller, keyval, _, _| {
         if keyval != gtk4::gdk::Key::Tab || !panels.right.frame.is_visible() {
             return glib::Propagation::Proceed;
@@ -313,7 +361,13 @@ fn attach_panel_focus_key(
         if editing_text {
             return glib::Propagation::Proceed;
         }
-        focus_panel(panel_id.other(), &panels, &focused, &header);
+        focus_panel(
+            panel_id.other(),
+            &panels,
+            &focused,
+            &header,
+            &refresh_preview,
+        );
         glib::Propagation::Stop
     });
     panel.frame.add_controller(key);
@@ -327,6 +381,7 @@ fn focus_panel(
     panels: &Panels,
     focused: &Rc<RefCell<PanelId>>,
     header: &headerbar::HeaderBarHandles,
+    refresh_preview: &Rc<dyn Fn()>,
 ) {
     if *focused.borrow() == id {
         return;
@@ -336,6 +391,18 @@ fn focus_panel(
     if let Some(tab) = split_view::focused_tab(panels, focused) {
         sync_view_switcher(&header.view_switcher_buttons, &tab);
     }
+    refresh_preview();
+}
+
+/// Rebuilds the preview panel from whichever item is currently selected in
+/// the focused panel's active tab (`None` if nothing is selected, or no tab
+/// is open yet), showing its empty state. Called any time that answer could
+/// have changed: a selection changed, the active view/tab changed, panel
+/// focus changed, or the panel toggled visible.
+fn sync_preview(panels: &Panels, focused: &Rc<RefCell<PanelId>>, preview: &PreviewPanelHandles) {
+    let item = split_view::focused_tab(panels, focused)
+        .and_then(|tab| tab.selections.selected(&tab.view_stack));
+    preview::show(preview, item);
 }
 
 /// The active-panel highlight only makes sense once a second panel exists
@@ -506,11 +573,13 @@ fn setup_tab_actions(
     focused: &Rc<RefCell<PanelId>>,
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
+    refresh_preview: Rc<dyn Fn()>,
 ) {
     let action_new_tab = gio::SimpleAction::new("new-tab", None);
     {
         let panels = panels.clone();
         let focused = focused.clone();
+        let refresh_preview = refresh_preview.clone();
         action_new_tab.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let start_dir = active_tab(&panel.tab_view, &panel.registry)
@@ -522,6 +591,7 @@ fn setup_tab_actions(
                 &panel.chrome,
                 has_clipboard.clone(),
                 split_active.clone(),
+                refresh_preview.clone(),
                 start_dir,
             );
         });
@@ -583,12 +653,14 @@ fn setup_split_view_actions(
     header: &headerbar::HeaderBarHandles,
     progress: &ProgressToastHandles,
     has_clipboard: Rc<dyn Fn() -> bool>,
+    refresh_preview: Rc<dyn Fn()>,
 ) {
     let action_toggle_split = gio::SimpleAction::new("toggle-split-view", None);
     {
         let panels = panels.clone();
         let focused = focused.clone();
         let header = header.clone();
+        let refresh_preview = refresh_preview.clone();
         action_toggle_split.connect_activate(move |_, _| {
             let showing = !panels.right.frame.is_visible();
             if showing && panels.right.tab_view.n_pages() == 0 {
@@ -603,6 +675,7 @@ fn setup_split_view_actions(
                     &panels.right.chrome,
                     has_clipboard.clone(),
                     split_active,
+                    refresh_preview.clone(),
                     start_dir,
                 );
             }
@@ -615,6 +688,7 @@ fn setup_split_view_actions(
             if let Some(tab) = split_view::focused_tab(&panels, &focused) {
                 sync_view_switcher(&header.view_switcher_buttons, &tab);
             }
+            refresh_preview();
         });
     }
     window.add_action(&action_toggle_split);
@@ -859,6 +933,7 @@ fn setup_context_menu_actions(
     focused: &Rc<RefCell<PanelId>>,
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
+    refresh_preview: Rc<dyn Fn()>,
 ) {
     let action_not_implemented = gio::SimpleAction::new("not-implemented", None);
     action_not_implemented.set_enabled(false);
@@ -921,6 +996,7 @@ fn setup_context_menu_actions(
         let focused = focused.clone();
         let has_clipboard = has_clipboard.clone();
         let split_active = split_active.clone();
+        let refresh_preview = refresh_preview.clone();
         action_open_new_tab.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
@@ -936,6 +1012,7 @@ fn setup_context_menu_actions(
                     &panel.chrome,
                     has_clipboard.clone(),
                     split_active.clone(),
+                    refresh_preview.clone(),
                     item.path,
                 );
             }
@@ -1046,6 +1123,34 @@ fn setup_context_menu_actions(
     window.add_action(&action_create_document);
 }
 
+/// Registers the Faz 10 `win.toggle-preview` action (`F9`): shows/hides the
+/// preview sidebar and, when revealing it, immediately populates it from the
+/// focused panel's current selection (it may be stale from before the panel
+/// was hidden).
+fn setup_preview_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    preview: &PreviewPanelHandles,
+    header: &headerbar::HeaderBarHandles,
+    refresh_preview: Rc<dyn Fn()>,
+) {
+    let action_toggle_preview = gio::SimpleAction::new("toggle-preview", None);
+    {
+        let preview_widget = preview.widget.clone();
+        let preview_toggle_button = header.preview_toggle_button.clone();
+        action_toggle_preview.connect_activate(move |_, _| {
+            let showing = !preview_widget.is_visible();
+            preview_widget.set_visible(showing);
+            preview_toggle_button.set_active(showing);
+            if showing {
+                refresh_preview();
+            }
+        });
+    }
+    window.add_action(&action_toggle_preview);
+    app.set_accels_for_action("win.toggle-preview", &["F9"]);
+}
+
 /// Builds a new tab rooted at `start_dir` inside the panel identified by
 /// `tab_view`/`registry`, registers it, and switches to it. Every tab owns
 /// an independent `AppState` (location, history, item model), its own
@@ -1057,6 +1162,7 @@ fn open_tab(
     chrome: &Chrome,
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
+    refresh_preview: Rc<dyn Fn()>,
     start_dir: VeyraPath,
 ) -> TabPage {
     let state = AppState::new(start_dir.clone());
@@ -1119,6 +1225,11 @@ fn open_tab(
         view_stack.add_named(&details_widget, Some(ViewMode::Details.stack_name()));
 
         view_stack.set_visible_child_name(ViewMode::Icon.stack_name());
+
+        for selection in [&icon_selection, &compact_selection, &details_selection] {
+            let refresh_preview = refresh_preview.clone();
+            selection.connect_selection_changed(move |_, _, _| refresh_preview());
+        }
 
         selections = ViewSelections {
             icon: icon_selection,

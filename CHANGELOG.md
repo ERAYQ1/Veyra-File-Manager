@@ -1,5 +1,35 @@
 # Changelog
 
+## Faz 10 — File Preview / Dosya Önizleme Paneli (`veyra-ui`)
+
+### Eklenenler
+- **Yeni modül `veyra-ui/src/preview.rs`:** sağ tarafa gizlenebilir, `GtkStack` üzerine kurulu Önizleme Paneli — `empty`/`loading`/`image`/`text`/`info` sayfaları arasında `Crossfade` geçişiyle geçiyor. `PreviewPanelHandles` tek üst widget'ı (`.widget`) ve tüm dahili GTK tutamaçlarını taşıyan `Clone`'lanabilir bir handle grubu; `show(&handles, Option<FileItem>)` tek genel giriş noktası.
+- **Panel entegrasyonu (`window.rs`):** Faz 8'in sol/sağ dosya panellerini taşıyan `paned`'in sağına, ikinci bir `GtkPaned` (`content_paned`) ile eklendi — sağ panel `Panel::frame.set_visible(false)` deseninin aynısıyla (`preview.widget.set_visible(false)`) başlangıçta gizli, görünürlük değiştiğinde `GtkPaned` otomatik olarak ayırıcıyı gizliyor/gösteriyor (Faz 8'in split-view'i için zaten kullanılan davranış).
+- **Kısayol & aksiyon:** `win.toggle-preview` (`F9`) + headerbar'da `view-preview-symbolic` ikonlu, `win.toggle-preview`'a `action-name` ile bağlı bir `GtkToggleButton` (split-view düğmesinin yanına `pack_end`). Panel açılırken güncel seçim anında yükleniyor.
+- **Seçim senkronizasyonu:** Her tabın Icon/Compact/Details görünümünün üçü de kendi `GtkSingleSelection`'ında `SelectionModelExt::connect_selection_changed` ile paylaşılan bir `refresh_preview: Rc<dyn Fn()>` kapanışına bağlı; aynı kapanış panel odak değişiminde (`focus_panel`), sekme değişiminde (`connect_selected_page_notify`), görünüm modu değiştiğinde (headerbar view switcher) ve split-view aç/kapatıldığında da çağrılıyor. `refresh_preview` her zaman "şu an odaklı panelin aktif sekmesinin aktif görünümünde seçili öge ne" sorusunu yeniden hesaplıyor — hangi olay tetiklediğinden bağımsız olarak tek doğru kaynaktan okuyor, bu yüzden ayrı ayrı "bu olay önizlemeyi etkiler mi" mantığı gerekmiyor.
+- **Desteklenen kartlar:**
+  - **Görseller:** `gio::File::load_contents` ile arka planda okunan baytlar `gdk_pixbuf::Pixbuf::from_read` ile yine arka planda çözülüyor (bu çağrının GTK ana thread zorunluluğu yok); yalnızca ham piksel arabelleği (`glib::Bytes`, `Send`) + boyut/renk-uzayı bilgisi ana thread'e taşınıyor, orada `Pixbuf::from_bytes` + `gdk4::Texture::for_pixbuf` ile (main-thread-only) yeniden kuruluyor — `gdk4::Texture::from_bytes`'ın gerektirdiği `v4_6` derleme özelliğine hiç ihtiyaç duymadan tam asenkron okuma/çözme. Meta: çözünürlük, dosya boyutu, MIME, değiştirilme tarihi.
+  - **Düz metin/kod:** `gio::File::read` ile açılan akıştan en fazla 512 KB (`TEXT_PREVIEW_CAP_BYTES`) arka planda okunuyor, `GtkTextView` (`editable=false`, `cursor_visible=false`, monospace) içinde gösteriliyor. Meta: satır sayısı, karakter sayısı, dosya boyutu, MIME; kırpıldıysa not ekleniyor.
+  - **PDF/belgeler, ses/video, arşivler, bilinmeyen dosyalar:** zaten dizin listelemesinden gelen `FileMetadata`'dan senkron kurulan ortak "info kartı" (ikon + ad + tür + boyut/MIME/tarih + "Open in Default App" düğmesi) — ekstra I/O gerekmediği için asenkron değil.
+  - **Dizinler:** `veyra_filesystem::read_dir` ile arka planda sayılan alt öge sayısı + yol + değiştirilme tarihi.
+  - **Sembolik bağlantılar:** hedef yol gösteren info kartı; kırık bağlantılar ayrı bir hata kartına düşüyor (`FileKind::Symlink { is_broken: true, .. }`), FIFO/soket/blok-aygıt gibi özel dosya türleri de panikleme yerine kendi info kartını alıyor.
+  - **Boş durum:** `AdwStatusPage` ("Select a file to preview").
+- **Eşzamanlılık/iptal (Kural #11-#14):** `Rc<Cell<u64>>` nesil sayacı — her `show()` çağrısı sayaç değerini artırıp yakalıyor; arka plan işi bittiğinde sayaç hâlâ eşleşmiyorsa (kullanıcı ok tuşuyla hızla ilerlemiş, daha yeni bir `show()` zaten çalışıyor) sonuç sessizce atılıyor, eski önizleme asla yeninin üzerine yazamıyor.
+- **Hata yönetimi (Kural #15, #18, #20):** Okuma sırasında dosya silinir/izin biterse `glib::Error`/`FsError` `Permission denied`/`File not found`/`Unable to read file` gibi kullanıcı dostu bir hata kartına çevriliyor (`friendly_gio_error`, `friendly_fs_error`) — hiçbir hata `panic!`'e çıkmıyor.
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 123/123 (118 + yeni 5 birim test: `preview.rs`'te MIME sınıflandırma (görsel/metin/arşiv), öge-sayısı çoğullaştırma, özel dosya türü etiketleme).
+- `cargo fmt --check`: temiz.
+- Manuel duman testi: `./target/debug/veyra` panik olmadan açıldı, log'da önizlemeyle ilgili hata yok. Not: bu ortamda Wayland girdi-enjeksiyon/ekran görüntüsü aracı yok (önceki fazlarda da not edildi) — `F9`/görsel-metin-önizleme render'ı elle tıklanarak/görsel olarak doğrulanamadı; bu davranış kod incelemesi + build/clippy/test/fmt ile sınırlı doğrulandı.
+
+### Bağımlılık Değişiklikleri
+- Yeni harici bağımlılık eklenmedi: `gdk_pixbuf` zaten `gtk4` üzerinden geçişli olarak ağaçta olan `gtk4::gdk_pixbuf` yeniden ihracı üzerinden kullanılıyor.
+
+### Sıradaki Faz
+Faz 11. Onay bekleniyor.
+
 ## Faz 9 — Search / Arama Motoru (`veyra-search` yeni crate, `veyra-ui`)
 
 ### Eklenenler

@@ -15,6 +15,7 @@ mod fs_async;
 mod headerbar;
 mod history;
 mod operations;
+mod preview;
 mod search_results;
 mod sidebar;
 mod split_view;
