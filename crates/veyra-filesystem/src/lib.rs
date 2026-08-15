@@ -24,8 +24,8 @@ pub use error::FsError;
 pub use kind::FileKind;
 pub use metadata::{format_size, FileItem, FileMetadata};
 pub use ops::{
-    copy, create_dir, create_file, delete, move_entry, open, read_dir, rename, restore_from_trash,
-    set_permissions, stat, trash,
+    copy, create_dir, create_file, delete, empty_trash, list_trash, move_entry, open, read_dir,
+    rename, restore_from_trash, set_permissions, stat, trash,
 };
 pub use path::VeyraPath;
 pub use permissions::FilePermissions;

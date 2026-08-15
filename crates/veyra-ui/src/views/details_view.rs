@@ -36,6 +36,7 @@ pub(crate) struct DetailsViewHandles {
 /// header updates `sort_config` and re-sorts Icon/Compact to match, and
 /// picking a criterion from the header bar's Sort & Filter menu likewise
 /// updates this view's header indicator via `sort_by_column`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_details_view(
     model: &gio::ListStore,
     filter: &gtk4::CustomFilter,
@@ -43,6 +44,7 @@ pub(crate) fn build_details_view(
     on_open: impl Fn(FileItem) + 'static,
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
+    is_trash: Rc<dyn Fn() -> bool>,
     thumbnails: Rc<ThumbnailService>,
 ) -> DetailsViewHandles {
     let DetailsSortWiring {
@@ -130,7 +132,13 @@ pub(crate) fn build_details_view(
             on_open(item);
         }
     });
-    crate::context_menu::attach(&column_view, &selection, has_clipboard, split_active);
+    crate::context_menu::attach(
+        &column_view,
+        &selection,
+        has_clipboard,
+        split_active,
+        is_trash,
+    );
 
     let scrolled = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Automatic)

@@ -11,6 +11,7 @@ const ICON_SIZE: i32 = 20;
 /// Small icons with the name beside them, flowing in dense columns for
 /// quick visual scanning of large directories, ordered by the tab's shared
 /// `SortConfig` (`sorter`, see `crate::sorting`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_compact_view(
     model: &gio::ListStore,
     filter: &gtk4::CustomFilter,
@@ -18,6 +19,7 @@ pub(crate) fn build_compact_view(
     on_open: impl Fn(veyra_filesystem::FileItem) + 'static,
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
+    is_trash: Rc<dyn Fn() -> bool>,
     thumbnails: Rc<ThumbnailService>,
 ) -> (gtk4::Widget, gtk4::SingleSelection) {
     let selection = build_selection(model, filter, Some(sorter.clone()));
@@ -31,7 +33,13 @@ pub(crate) fn build_compact_view(
     // Narrow horizontal item boxes (icon + name) pack into many columns,
     // giving the dense "flowing columns" layout Compact View is meant for.
     grid_view.set_min_columns(3);
-    crate::context_menu::attach(&grid_view, &selection, has_clipboard, split_active);
+    crate::context_menu::attach(
+        &grid_view,
+        &selection,
+        has_clipboard,
+        split_active,
+        is_trash,
+    );
 
     let scrolled = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)

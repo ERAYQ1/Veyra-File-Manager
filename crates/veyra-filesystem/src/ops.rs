@@ -3,6 +3,8 @@
 //! `veyra-ui` wraps these in a background worker (Faz 5's operation queue),
 //! never on the main loop, per Rule #14.
 
+use std::path::{Path, PathBuf};
+
 use gio::prelude::*;
 use gio::FileType;
 
@@ -209,9 +211,14 @@ pub fn trash(path: &VeyraPath) -> Result<(), FsError> {
 /// backend (and its `gvfsd-trash` daemon) being available, only on the
 /// on-disk trash directory `trash()` itself already writes to.
 ///
-/// Scoped to the home trash (absolute `Path=` entries) for Faz 2; per-mount
-/// trash directories (topdir-relative paths) are deferred to Faz 18 (Trash
-/// Integration).
+/// If the entry's original parent directory no longer exists (e.g. it was
+/// itself deleted or renamed after the entry was trashed), it is recreated
+/// (`mkdir -p`-style) so the restore can proceed rather than failing —
+/// matching the behavior of other mainstream file managers.
+///
+/// Scoped to the home trash (absolute `Path=` entries) for Faz 2/18;
+/// per-mount trash directories (topdir-relative paths) remain a documented
+/// limitation (see the Faz 18 changelog entry).
 pub fn restore_from_trash(trashed_file: &VeyraPath) -> Result<VeyraPath, FsError> {
     let local = trashed_file.as_local_path().ok_or_else(|| {
         FsError::InvalidPath(format!(
@@ -248,7 +255,17 @@ pub fn restore_from_trash(trashed_file: &VeyraPath) -> Result<VeyraPath, FsError
             message: "trashinfo record has no Path= entry".to_string(),
         })?;
 
-    let destination = VeyraPath::from_local(percent_decode(encoded_path));
+    let destination_path = percent_decode(encoded_path);
+    let destination = VeyraPath::from_local(&destination_path);
+
+    if let Some(parent) = Path::new(&destination_path).parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|source| FsError::Io {
+                path: VeyraPath::from_local(parent.to_path_buf()),
+                source,
+            })?;
+        }
+    }
 
     trashed_file
         .to_gio_file()
@@ -265,6 +282,92 @@ pub fn restore_from_trash(trashed_file: &VeyraPath) -> Result<VeyraPath, FsError
     let _ = std::fs::remove_file(&trashinfo_path);
 
     Ok(destination)
+}
+
+/// Resolves the home trash root (`$XDG_DATA_HOME/Trash`, falling back to
+/// `~/.local/share/Trash` per the XDG Base Directory spec), matching the
+/// directory `trash()` (via GIO) and `restore_from_trash` already read from
+/// and write to.
+fn home_trash_root() -> Option<PathBuf> {
+    if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
+        if !data_home.is_empty() {
+            return Some(PathBuf::from(data_home).join("Trash"));
+        }
+    }
+    std::env::var("HOME")
+        .ok()
+        .map(|home| PathBuf::from(home).join(".local/share/Trash"))
+}
+
+/// Lists every entry currently in the home trash, as `FileItem`s whose
+/// `path` is the physical `Trash/files/...` entry — the same shape
+/// `read_dir` produces, so `trash:///` can reuse every existing listing
+/// view, and each item is already a valid `restore_from_trash`/`delete`
+/// argument with no further lookup. Reads `Trash/files` directly rather than
+/// through the `trash://` GVfs backend, for the same robustness reason
+/// `restore_from_trash` does (no dependency on `gvfsd-trash` running).
+///
+/// An entry that vanishes between being listed and stat'd (e.g. concurrently
+/// emptied) is silently skipped rather than failing the whole listing —
+/// consistent with `recent:///`'s handling of stale entries.
+pub fn list_trash() -> Result<Vec<FileItem>, FsError> {
+    let Some(root) = home_trash_root() else {
+        return Ok(Vec::new());
+    };
+    let files_dir = root.join("files");
+    if !files_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let entries = std::fs::read_dir(&files_dir).map_err(|source| FsError::Io {
+        path: VeyraPath::from_local(files_dir.clone()),
+        source,
+    })?;
+
+    let mut items = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        if let Ok(item) = stat(&VeyraPath::from_local(entry.path())) {
+            items.push(item);
+        }
+    }
+    Ok(items)
+}
+
+/// Permanently empties the home trash: every entry under `Trash/files` and
+/// every record under `Trash/info`. Best-effort per entry — a single
+/// permission-denied file doesn't abort the rest, but the first error
+/// encountered (if any) is still returned so the caller can surface it.
+pub fn empty_trash() -> Result<(), FsError> {
+    let Some(root) = home_trash_root() else {
+        return Ok(());
+    };
+
+    let mut first_error = None;
+    for sub in ["files", "info"] {
+        let dir = root.join(sub);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            let result = if path.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+            if let Err(source) = result {
+                first_error.get_or_insert(FsError::Io {
+                    path: VeyraPath::from_local(path),
+                    source,
+                });
+            }
+        }
+    }
+
+    match first_error {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
 }
 
 /// Decodes percent-encoded octets (`%XX`) in a Trash spec `Path=` value.

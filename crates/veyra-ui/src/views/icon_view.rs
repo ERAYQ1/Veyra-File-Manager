@@ -10,6 +10,7 @@ const ICON_SIZE: i32 = 48;
 
 /// Large scalable-icon grid, ordered by the tab's shared `SortConfig`
 /// (`sorter`, see `crate::sorting`) — identical ordering to Compact/Details.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_icon_view(
     model: &gio::ListStore,
     filter: &gtk4::CustomFilter,
@@ -17,6 +18,7 @@ pub(crate) fn build_icon_view(
     on_open: impl Fn(veyra_filesystem::FileItem) + 'static,
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
+    is_trash: Rc<dyn Fn() -> bool>,
     thumbnails: Rc<ThumbnailService>,
 ) -> (gtk4::Widget, gtk4::SingleSelection) {
     let selection = build_selection(model, filter, Some(sorter.clone()));
@@ -28,7 +30,13 @@ pub(crate) fn build_icon_view(
         }
     });
     grid_view.set_min_columns(2);
-    crate::context_menu::attach(&grid_view, &selection, has_clipboard, split_active);
+    crate::context_menu::attach(
+        &grid_view,
+        &selection,
+        has_clipboard,
+        split_active,
+        is_trash,
+    );
 
     let scrolled = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)

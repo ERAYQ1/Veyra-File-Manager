@@ -27,6 +27,7 @@ mod state;
 mod statusbar;
 mod tab_page;
 mod thumbnails;
+mod trash;
 mod views;
 mod widgets;
 mod window;

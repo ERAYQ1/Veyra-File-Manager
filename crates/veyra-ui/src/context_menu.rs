@@ -44,6 +44,7 @@ pub(crate) fn attach<V: IsA<gtk4::Widget> + Clone>(
     selection: &gtk4::SingleSelection,
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
+    is_trash: Rc<dyn Fn() -> bool>,
 ) {
     let popover = gtk4::PopoverMenu::from_model(None::<&gio::MenuModel>);
     popover.set_parent(view);
@@ -62,11 +63,19 @@ pub(crate) fn attach<V: IsA<gtk4::Widget> + Clone>(
             .pick(x, y, gtk4::PickFlags::DEFAULT)
             .is_some_and(|picked| picked != view_widget);
 
-        let menu = hit_item
-            .then(|| selected_item(&selection))
-            .flatten()
-            .map(|item| build_item_menu(&item, split_active()))
-            .unwrap_or_else(|| build_background_menu(has_clipboard()));
+        let menu = if is_trash() {
+            hit_item
+                .then(|| selected_item(&selection))
+                .flatten()
+                .map(|_| build_trash_item_menu())
+                .unwrap_or_else(build_trash_background_menu)
+        } else {
+            hit_item
+                .then(|| selected_item(&selection))
+                .flatten()
+                .map(|item| build_item_menu(&item, split_active()))
+                .unwrap_or_else(|| build_background_menu(has_clipboard()))
+        };
 
         popover.set_menu_model(Some(&menu));
         popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
@@ -74,6 +83,40 @@ pub(crate) fn attach<V: IsA<gtk4::Widget> + Clone>(
     });
 
     view.add_controller(gesture);
+}
+
+/// Builds the per-item menu for `trash:///`: only actions that make sense on
+/// a trashed entry survive here — normal "Move to Trash", "Rename",
+/// "Compress", "Open with" etc. are meaningless once something is already in
+/// the Trash, so they're omitted entirely rather than shown disabled.
+fn build_trash_item_menu() -> gio::Menu {
+    let menu = gio::Menu::new();
+
+    let restore_section = gio::Menu::new();
+    restore_section.append(Some("Restore"), Some("win.restore-selected"));
+    restore_section.append(Some("Delete Permanently"), Some("win.delete-selection"));
+    menu.append_section(None, &restore_section);
+
+    let properties_section = gio::Menu::new();
+    properties_section.append(Some("Properties"), Some("win.properties-selected"));
+    menu.append_section(None, &properties_section);
+
+    menu
+}
+
+/// Builds the empty-space (background) menu for `trash:///`.
+fn build_trash_background_menu() -> gio::Menu {
+    let menu = gio::Menu::new();
+
+    let empty_section = gio::Menu::new();
+    empty_section.append(Some("Empty Trash"), Some("win.empty-trash"));
+    menu.append_section(None, &empty_section);
+
+    let properties_section = gio::Menu::new();
+    properties_section.append(Some("Properties"), Some("win.properties-current"));
+    menu.append_section(None, &properties_section);
+
+    menu
 }
 
 /// Builds the per-item menu for `item`: entries that only make sense for a

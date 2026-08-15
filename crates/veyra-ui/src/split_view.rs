@@ -15,6 +15,7 @@ use libadwaita as adw;
 
 use crate::recent::{self, RecentBannerHandles};
 use crate::tab_page::{active_tab, TabPage, TabRegistry};
+use crate::trash::{self, TrashBannerHandles};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PanelId {
@@ -58,6 +59,10 @@ pub(crate) struct Chrome {
     /// Faz 15: app-wide privacy toggle, shared by both panels — `true`
     /// means opening a file never adds it to the XDG recent-files registry.
     pub privacy_mode: Rc<RefCell<bool>>,
+    /// Faz 18: the `trash:///`-only info row (item/size summary + "Empty
+    /// Trash"), revealed by `window::update_chrome` whenever this panel's
+    /// active tab is showing Trash.
+    pub trash_banner: TrashBannerHandles,
 }
 
 /// One independent panel: its own navigation chrome, its own `AdwTabView`
@@ -191,6 +196,7 @@ pub(crate) fn build_panel(id: PanelId, privacy_mode: Rc<RefCell<bool>>) -> Panel
     toolbar_row.append(&title_stack);
 
     let recent_banner = recent::build_banner(privacy_mode.clone());
+    let trash_banner = trash::build_banner();
 
     let tab_view = adw::TabView::new();
     let tab_bar = adw::TabBar::new();
@@ -203,6 +209,7 @@ pub(crate) fn build_panel(id: PanelId, privacy_mode: Rc<RefCell<bool>>) -> Panel
     frame.add_css_class("veyra-panel");
     frame.append(&toolbar_row);
     frame.append(&recent_banner.revealer);
+    frame.append(&trash_banner.revealer);
     frame.append(&tab_bar);
     frame.append(&tab_view);
     frame.append(&status.widget);
@@ -220,6 +227,7 @@ pub(crate) fn build_panel(id: PanelId, privacy_mode: Rc<RefCell<bool>>) -> Panel
         status_right: status.right_label,
         recent_banner,
         privacy_mode,
+        trash_banner,
     };
 
     Panel {

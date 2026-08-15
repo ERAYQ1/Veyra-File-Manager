@@ -7,7 +7,7 @@ use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita as adw;
-use libadwaita::prelude::AdwApplicationWindowExt;
+use libadwaita::prelude::*;
 
 use veyra_filesystem::{FileItem, OperationKind, OperationRequest, VeyraPath};
 use veyra_search::SearchIndex;
@@ -19,7 +19,9 @@ use crate::state::{AppState, SharedState};
 use crate::tab_page::{active_tab, TabPage, TabRegistry, ViewSelections};
 use crate::views::ViewMode;
 use crate::widgets::progress_toast::ProgressToastHandles;
-use crate::{breadcrumbs, dialogs, fs_async, headerbar, operations, recent, sidebar, widgets};
+use crate::{
+    breadcrumbs, dialogs, fs_async, headerbar, operations, recent, sidebar, trash, widgets,
+};
 
 /// A single Copy/Cut clipboard slot, shared across both panels and all their
 /// tabs (Faz 5 operates on the current selection, not a multi-item marquee —
@@ -219,6 +221,7 @@ pub(crate) fn build_window(
     setup_properties_actions(app, &window, &panels, &focused, thumbnails);
     setup_preview_actions(app, &window, &preview, &header, refresh_preview);
     setup_recent_actions(&window, &panels, privacy_mode);
+    setup_trash_actions(app, &window, &panels, &focused);
 
     window
 }
@@ -1390,6 +1393,109 @@ fn refresh_recent_panels(panels: &Panels) {
     }
 }
 
+/// Registers the Faz 18 `win.empty-trash` (behind
+/// `dialogs::empty_trash_confirm`, Rule #38/#39) and `win.restore-selected`
+/// actions. Both act on whichever tab is active in the currently focused
+/// panel — `empty-trash` because there is only ever one home trash to empty
+/// regardless of which panel's banner triggered it, `restore-selected`
+/// because it targets the focused panel's current selection, same as every
+/// other selection-scoped `win.*` action in `setup_operation_actions`.
+fn setup_trash_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    focused: &Rc<RefCell<PanelId>>,
+) {
+    let action_empty_trash = gio::SimpleAction::new("empty-trash", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        action_empty_trash.connect_activate(move |_, _| {
+            let window_for_confirm = window.clone();
+            let panels = panels.clone();
+            dialogs::empty_trash_confirm::show(&window, move || {
+                let panels_for_done = panels.clone();
+                fs_async::run_blocking(veyra_filesystem::empty_trash, move |result| {
+                    if let Err(err) = result {
+                        tracing::warn!(error = %err, "failed to empty trash");
+                        show_trash_error(
+                            &window_for_confirm,
+                            "Unable to Empty Trash",
+                            &err.to_string(),
+                        );
+                    }
+                    refresh_trash_panels(&panels_for_done);
+                });
+            });
+        });
+    }
+    window.add_action(&action_empty_trash);
+    for panel in [&panels.left, &panels.right] {
+        panel
+            .chrome
+            .trash_banner
+            .empty_button
+            .set_action_name(Some("win.empty-trash"));
+    }
+
+    let action_restore = gio::SimpleAction::new("restore-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_restore.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            let window = window.clone();
+            let state = tab.state.clone();
+            let chrome = panel.chrome.clone();
+            fs_async::run_blocking(
+                move || veyra_filesystem::restore_from_trash(&item.path),
+                move |result| match result {
+                    Ok(_) => refresh(&state, &chrome),
+                    Err(err) => {
+                        tracing::warn!(error = %err, "failed to restore item from trash");
+                        show_trash_error(&window, "Unable to Restore Item", &err.to_string());
+                    }
+                },
+            );
+        });
+    }
+    window.add_action(&action_restore);
+    app.set_accels_for_action("win.restore-selected", &["<Primary><Shift>r"]);
+}
+
+/// Reloads every panel whose focused tab is currently showing `trash:///`,
+/// after `win.empty-trash` empties it.
+fn refresh_trash_panels(panels: &Panels) {
+    for panel in [&panels.left, &panels.right] {
+        if let Some(tab) = active_tab(&panel.tab_view, &panel.registry) {
+            if trash::is_trash_location(&tab.state.borrow().current_dir) {
+                refresh(&tab.state, &panel.chrome);
+            }
+        }
+    }
+}
+
+/// Surfaces a Trash operation failure (disk full, permission denied, a
+/// restore destination conflict, ...) as an `AdwAlertDialog` rather than a
+/// silent no-op or a panic (Rule #15/#18).
+fn show_trash_error(parent: &adw::ApplicationWindow, heading: &str, body: &str) {
+    let dialog = adw::AlertDialog::builder()
+        .heading(heading)
+        .body(body)
+        .build();
+    dialog.add_responses(&[("ok", "OK")]);
+    dialog.set_default_response(Some("ok"));
+    dialog.set_close_response("ok");
+    dialog.present(Some(parent));
+}
+
 /// Builds a new tab rooted at `start_dir` inside the panel identified by
 /// `tab_view`/`registry`, registers it, and switches to it. Every tab owns
 /// an independent `AppState` (location, history, item model), its own
@@ -1435,6 +1541,11 @@ fn open_tab(
         })
     };
 
+    let is_trash: Rc<dyn Fn() -> bool> = {
+        let state = state.clone();
+        Rc::new(move || trash::is_trash_location(&state.borrow().current_dir))
+    };
+
     let selections;
     let details_column_view_slot;
     let details_sort_columns_slot;
@@ -1453,6 +1564,7 @@ fn open_tab(
             },
             has_clipboard.clone(),
             split_active.clone(),
+            is_trash.clone(),
             thumbnails.clone(),
         );
         view_stack.add_named(&icon_widget, Some(ViewMode::Icon.stack_name()));
@@ -1467,6 +1579,7 @@ fn open_tab(
             },
             has_clipboard.clone(),
             split_active.clone(),
+            is_trash.clone(),
             thumbnails.clone(),
         );
         view_stack.add_named(&compact_widget, Some(ViewMode::Compact.stack_name()));
@@ -1482,6 +1595,7 @@ fn open_tab(
             move |item| on_open(item),
             has_clipboard,
             split_active,
+            is_trash,
             thumbnails,
         );
         let details_selection = details.selection;
@@ -1865,6 +1979,9 @@ fn update_chrome(tab: &TabPage, chrome: &Chrome) {
             .set_active(*chrome.privacy_mode.borrow());
     }
 
+    let is_trash = trash::is_trash_location(&current_dir);
+    chrome.trash_banner.revealer.set_reveal_child(is_trash);
+
     chrome.status_left.set_label(&count_label(item_count));
     update_free_space(&tab.state, chrome);
 }
@@ -1914,6 +2031,16 @@ fn load_directory(state: &SharedState, chrome: &Chrome, path: VeyraPath) {
         return;
     }
 
+    // `trash:///` is likewise not a real GVfs mount `read_dir` can walk
+    // (Faz 18) — `veyra_filesystem::list_trash` reads the home trash's
+    // `files/` directory directly instead, same non-blocking contract.
+    if trash::is_trash_location(&path) {
+        fs_async::run_blocking(veyra_filesystem::list_trash, move |result| {
+            on_directory_loaded(&state_for_done, &chrome_for_done, result)
+        });
+        return;
+    }
+
     fs_async::run_blocking(
         move || veyra_filesystem::read_dir(&path),
         move |result| on_directory_loaded(&state_for_done, &chrome_for_done, result),
@@ -1933,6 +2060,12 @@ fn on_directory_loaded(
                     .recent_banner
                     .title_label
                     .set_label(&recent::format_group_summary(&items, chrono::Utc::now()));
+            }
+            if trash::is_trash_location(&state.borrow().current_dir) {
+                chrome
+                    .trash_banner
+                    .title_label
+                    .set_label(&trash::format_summary(&items));
             }
             let model = state.borrow().model.clone();
             model.remove_all();

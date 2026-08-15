@@ -1,5 +1,41 @@
 # Changelog
 
+## Faz 18 — Trash Integration (Çöp Kutusu Entegrasyonu) (`veyra-filesystem`, `veyra-ui`)
+
+### Eklenenler
+- **`veyra-filesystem::ops`:**
+  - `list_trash() -> Result<Vec<FileItem>, FsError>`: home trash'in (`$XDG_DATA_HOME/Trash`, `~/.local/share/Trash`'e fallback) `files/` dizinini doğrudan okuyor — `trash://` GVfs arka planına (`gvfsd-trash`) bağımlı değil, Faz 2'nin `restore_from_trash` tasarım kararıyla aynı gerekçeyle. Her `FileItem.path` fiziksel `Trash/files/...` yolu olduğundan, ek bir "trash entry" tipi gerekmeden doğrudan `restore_from_trash`/`delete`'e verilebiliyor ve mevcut Icon/Compact/Details görünümleri hiçbir değişiklik olmadan `trash:///` listesini render edebiliyor.
+  - `empty_trash() -> Result<(), FsError>`: `Trash/files` ve `Trash/info` altındaki her girdiyi siliyor; öge bazlı best-effort (bir izin hatası kalanları durdurmuyor), ilk hata varsa çağırana döndürülüyor.
+  - `restore_from_trash`: orijinal üst klasör artık mevcut değilse `create_dir_all` ile otomatik yeniden oluşturuluyor (diğer ana akım dosya yöneticileriyle aynı davranış), böylece geri yükleme başarısız olmuyor.
+  - `lib.rs`: `list_trash`, `empty_trash` public export edildi.
+- **`veyra-ui::trash` (yeni modül, Faz 15'in `recent.rs` desenini izliyor):** `is_trash_location`, `format_summary` ("Trash — 12 items, 4.3 MB total" / boşsa "Trash is Empty"), `TrashBannerHandles` + `build_banner()`.
+- **Trash Banner (`split_view::Chrome.trash_banner`):** `trash:///` odaklandığında görünen `GtkRevealer` üst çubuğu — özet etiketi + `destructive-action` stilli "Empty Trash" butonu. `window.rs::update_chrome`/`on_directory_loaded` Recent banner ile aynı desende reveal/refresh ediyor.
+- **`dialogs::empty_trash_confirm`:** "Empty all items from Trash? This action cannot be undone." uyarılı `AdwAlertDialog` (Kural #38/#39), `delete_confirm`/`clear_recent_confirm` ile aynı kalıp.
+- **`win.*` aksiyonları (`window.rs::setup_trash_actions`):**
+  - `win.empty-trash`: onay diyaloğu → `fs_async::run_blocking(empty_trash, ...)` → her iki panelde `trash:///` gösteriliyorsa yeniden yükleniyor; hata `AdwAlertDialog` ile bildiriliyor.
+  - `win.restore-selected` (`<Primary><Shift>r`): odaklı panelin seçili ögesini `restore_from_trash` ile geri yüklüyor, arka planda; başarısızlık (disk dolu, izin, hedef çakışması) `AdwAlertDialog` ile gösteriliyor.
+  - Mevcut `win.delete-selection` (`<Shift>Delete`, zaten `delete_confirm` diyaloğu arkasında) çöp kutusu bağlamında "Delete Permanently" olarak yeniden kullanılıyor — davranışı zaten birebir aynı olduğundan ayrı bir aksiyon eklenmedi.
+- **`context_menu.rs`:** `attach()` artık `is_trash: Rc<dyn Fn() -> bool>` alıyor (her tıklamada tazelenen, `has_clipboard`/`split_active` ile aynı desen). `trash:///` içindeyken öge menüsü sadece "Restore" / "Delete Permanently" / "Properties" gösteriyor, boş alan menüsü "Empty Trash" / "Properties" gösteriyor — normal "Move to Trash", "Rename", "Compress", "Open With" vb. tamamen gizleniyor (devre dışı değil).
+- **`window.rs::open_tab`:** her sekme artık kendi `is_trash` kapanışını (`state`'ten `trash::is_trash_location` okuyan) inşa edip Icon/Compact/Details görünüm kurucularına ve context menüye iletiyor.
+
+### Testler
+- `veyra-filesystem/tests/trash.rs`: 1 → 4 test (`list_trash_includes_freshly_trashed_entry`, `restore_recreates_missing_parent_directory`, `empty_trash_clears_isolated_trash_root` — gerçek trash'i asla silmeyen, `XDG_DATA_HOME` yönlendirmesiyle izole edilmiş bir kökte çalışıyor). Tüm testler `TRASH_TEST_LOCK` ile serileştirildi (gerçek `~/.local/share/Trash`'e paralel erişim ve `empty_trash` testinin env değişkeni geçersiz kılması güvenli olsun diye).
+- `veyra-ui/src/trash.rs`: 4 birim test (`is_trash_location`, `format_summary` boş/tekil/çoğul).
+- Toplam: 197/197 test (workspace genelinde, 190'dan).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 197/197 geçti.
+- `cargo fmt --all --check`: temiz.
+
+### Bilinen Notlar
+- Per-mount trash dizinleri (`$topdir/.Trash-$uid`, topdir-relative `Path=` girdileri) hâlâ desteklenmiyor — `list_trash`/`restore_from_trash`/`empty_trash` sadece home trash'i (`$XDG_DATA_HOME/Trash`) kapsıyor. Faz 2'nin bıraktığı sınır bilerek genişletilmedi; yanlış/test edilmemiş bir çoklu-mount uygulaması eklemek yerine dürüst bir sınır olarak bırakıldı.
+- `trash:///` listesi `trash://` GVfs arka planından değil doğrudan `Trash/files`'tan okunuyor — `gvfsd-trash` çalışmasa bile çalışır, ama bu da yalnızca yerel home trash'i kapsadığı anlamına geliyor.
+
+### Sıradaki Faz
+Faz 19 — Compress/Extract (Arşiv Desteği). Onay bekleniyor.
+
 ## Faz 17 — Devices & Volumes (Aygıtlar ve Sürücüler) (`veyra-ui`)
 
 ### Eklenenler
