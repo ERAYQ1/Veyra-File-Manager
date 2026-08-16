@@ -4,8 +4,6 @@
 //! bar, is entirely `AdwPreferencesDialog`'s own built-in behavior) opened
 //! from the context menu's "Properties" entry or `Alt+Enter`.
 //!
-//! The window itself, and its General/Advanced pages, open immediately from
-//! whatever the caller's already-loaded `FileItem` already knows — no I/O.
 //! Everything that costs an extra stat (disk usage, device id, filesystem
 //! type) or a full tree walk (a folder's recursive "Contains" count) is
 //! queried afterwards via `fs_async::run_blocking`, per Rule #11/#12, and
@@ -13,6 +11,17 @@
 //! runs behind an `OperationControl` cancelled when the dialog closes, since
 //! it's the one Properties computation that can take a long time on a huge
 //! tree (Rule #13).
+//!
+//! Faz 31: `show`'s caller usually hands over a `FileItem` straight from a
+//! huge-directory listing, which only carries `FAST_ATTRIBUTES` (no
+//! permissions/ownership — see `veyra_filesystem::ops::read_dir_chunked`).
+//! Permissions and ownership are exactly what the Permissions page and the
+//! General page's timestamp rows need, so `show` first does the one lazy
+//! full `stat()` this single entry needs (Rule #33 — a single-item stat is
+//! cheap; it's re-stating every row of a 100k-entry directory that isn't)
+//! off the GTK thread, then builds and presents the dialog from that
+//! upgraded item. Falls back to the caller's original `item` if the entry
+//! vanished between being listed and the dialog opening (Rule #17).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -37,6 +46,22 @@ use crate::views::icon_name_for;
 /// change so the caller can refresh whatever view is currently showing the
 /// item (e.g. its executable-bit icon).
 pub(crate) fn show(
+    parent: &(impl IsA<gtk4::Widget> + Clone),
+    item: FileItem,
+    thumbnails: Rc<ThumbnailService>,
+    on_permissions_changed: Rc<dyn Fn()>,
+) {
+    let parent = parent.clone();
+    let path = item.path.clone();
+    fs_async::run_blocking(
+        move || veyra_filesystem::stat(&path).unwrap_or(item),
+        move |resolved_item| {
+            show_dialog(&parent, resolved_item, thumbnails, on_permissions_changed);
+        },
+    );
+}
+
+fn show_dialog(
     parent: &impl IsA<gtk4::Widget>,
     item: FileItem,
     thumbnails: Rc<ThumbnailService>,

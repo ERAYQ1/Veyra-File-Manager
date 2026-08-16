@@ -40,6 +40,17 @@ where
 /// directory listing can paint its first batch immediately (Rule #30)
 /// instead of waiting for the entire scan. `on_done` runs once, after the
 /// last chunk, with `work`'s return value.
+///
+/// Faz 31: a fast producer (e.g. a 100,000-entry `read_dir_chunked` scan)
+/// can fill `receiver`'s queue faster than the consumer drains it, so
+/// `receiver.recv().await` keeps resolving immediately with no real
+/// suspension — the `async fn` body just runs `on_chunk` in a tight Rust
+/// loop without ever handing control back to the `GMainContext`, which
+/// would otherwise starve input/redraw/resize event processing for however
+/// long the whole scan takes (Rule #11). Yielding to the main loop after
+/// every chunk (rather than, say, every N) keeps that gap bounded by a
+/// single `READ_DIR_CHUNK_SIZE` batch, so the UI stays responsive through
+/// the whole load.
 pub(crate) fn run_streaming<T, R, F, C, D>(work: F, mut on_chunk: C, on_done: D)
 where
     T: Send + 'static,
@@ -67,7 +78,10 @@ where
     glib::spawn_future_local(async move {
         while let Ok(msg) = receiver.recv().await {
             match msg {
-                Msg::Chunk(chunk) => on_chunk(chunk),
+                Msg::Chunk(chunk) => {
+                    on_chunk(chunk);
+                    yield_to_main_loop().await;
+                }
                 Msg::Done(result) => {
                     on_done(result);
                     break;
@@ -75,4 +89,18 @@ where
             }
         }
     });
+}
+
+/// Cedes control back to the `GMainContext` for one turn — an idle source
+/// fires on the next main-loop iteration, after any pending input/draw
+/// events already queued ahead of it, rather than resolving synchronously
+/// like an already-ready channel recv would.
+fn yield_to_main_loop() -> impl std::future::Future<Output = ()> {
+    let (tx, rx) = async_channel::bounded::<()>(1);
+    glib::idle_add_local_once(move || {
+        let _ = tx.send_blocking(());
+    });
+    async move {
+        let _ = rx.recv().await;
+    }
 }

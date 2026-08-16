@@ -115,44 +115,64 @@ pub(crate) fn build_grid_view(
         });
     }
 
-    factory.connect_bind(move |_, list_item| {
-        let list_item = list_item
-            .downcast_ref::<gtk4::ListItem>()
-            .expect("factory item must be ListItem");
-        let Some(item) = list_item
-            .item()
-            .and_then(|o| o.downcast::<glib::BoxedAnyObject>().ok())
-        else {
-            return;
-        };
-        let file_item = item.borrow::<FileItem>();
+    {
+        let thumbnails = thumbnails.clone();
+        factory.connect_bind(move |_, list_item| {
+            let list_item = list_item
+                .downcast_ref::<gtk4::ListItem>()
+                .expect("factory item must be ListItem");
+            let Some(item) = list_item
+                .item()
+                .and_then(|o| o.downcast::<glib::BoxedAnyObject>().ok())
+            else {
+                return;
+            };
+            let file_item = item.borrow::<FileItem>();
 
-        let Some(item_box) = list_item
-            .child()
-            .and_then(|w| w.downcast::<gtk4::Box>().ok())
-        else {
-            return;
-        };
-        // Faz 14: recycled list items must have the class explicitly
-        // cleared for non-hidden entries, not just set for hidden ones.
-        if file_item.metadata.is_hidden {
-            item_box.add_css_class("veyra-hidden-item");
-        } else {
-            item_box.remove_css_class("veyra-hidden-item");
-        }
-        let mut child = item_box.first_child();
-        if let Some(icon) = child.and_then(|w| w.downcast::<gtk4::Image>().ok()) {
-            icon.set_icon_name(Some(icon_name_for(&file_item)));
-            thumbnails.bind(&icon, &file_item);
-            child = icon.next_sibling();
-        } else {
-            child = None;
-        }
-        if let Some(label) = child.and_then(|w| w.downcast::<gtk4::Label>().ok()) {
-            label.set_text(file_item.name());
-            label.set_tooltip_text(Some(file_item.name()));
-        }
-    });
+            let Some(item_box) = list_item
+                .child()
+                .and_then(|w| w.downcast::<gtk4::Box>().ok())
+            else {
+                return;
+            };
+            // Faz 14: recycled list items must have the class explicitly
+            // cleared for non-hidden entries, not just set for hidden ones.
+            if file_item.metadata.is_hidden {
+                item_box.add_css_class("veyra-hidden-item");
+            } else {
+                item_box.remove_css_class("veyra-hidden-item");
+            }
+            let mut child = item_box.first_child();
+            if let Some(icon) = child.and_then(|w| w.downcast::<gtk4::Image>().ok()) {
+                icon.set_icon_name(Some(icon_name_for(&file_item)));
+                thumbnails.bind(&icon, &file_item);
+                child = icon.next_sibling();
+            } else {
+                child = None;
+            }
+            if let Some(label) = child.and_then(|w| w.downcast::<gtk4::Label>().ok()) {
+                label.set_text(file_item.name());
+                label.set_tooltip_text(Some(file_item.name()));
+            }
+        });
+    }
+
+    {
+        let thumbnails = thumbnails.clone();
+        factory.connect_unbind(move |_, list_item| {
+            let list_item = list_item
+                .downcast_ref::<gtk4::ListItem>()
+                .expect("factory item must be ListItem");
+            if let Some(icon) = list_item
+                .child()
+                .and_then(|w| w.downcast::<gtk4::Box>().ok())
+                .and_then(|b| b.first_child())
+                .and_then(|w| w.downcast::<gtk4::Image>().ok())
+            {
+                thumbnails.unbind(&icon);
+            }
+        });
+    }
 
     let grid_view = gtk4::GridView::new(Some(selection.clone()), Some(factory));
     grid_view.connect_activate(move |_, position| on_activate(position));

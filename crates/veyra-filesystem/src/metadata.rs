@@ -82,6 +82,26 @@ pub(crate) const FULL_ATTRIBUTES: &str = concat!(
     "time::modified,time::created,time::access",
 );
 
+/// Faz 31: attributes requested for `read_dir_chunked`'s huge-directory
+/// listing path (Rule #30). Drops the costly-to-stat fields `FULL_ATTRIBUTES`
+/// carries — `owner::user`, `owner::group`, `unix::mode`/`uid`/`gid`,
+/// `unix::inode`, and `time::created`/`time::access` — since GIO/GVfs has to
+/// do real extra work per entry to resolve ownership and permission bits,
+/// and a 100,000-entry scan pays that cost on every single one whether or
+/// not the user ever looks at it. Keeps only what a listing needs to paint a
+/// row and know what kind of entry it is: `build_file_item` already treats
+/// every attribute as optional (`has_attribute` checks), so entries loaded
+/// with this set simply carry `permissions: None`, `owner: None`, etc. —
+/// the same shape already used for GVfs backends that never expose those
+/// attributes. `ops::stat` (or the `FULL_ATTRIBUTES` set) is the lazy
+/// upgrade path: called on-demand for a single entry (Properties dialog,
+/// selection) rather than eagerly for every row.
+pub(crate) const FAST_ATTRIBUTES: &str = concat!(
+    "standard::name,standard::display-name,standard::type,standard::size,",
+    "standard::content-type,standard::is-hidden,standard::is-symlink,standard::symlink-target,",
+    "time::modified",
+);
+
 pub(crate) fn build_file_item(info: &gio::FileInfo, child: &gio::File) -> FileItem {
     let path = VeyraPath::from_gio_file(child);
     let kind = FileKind::from_gio(info, child);

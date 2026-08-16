@@ -9,7 +9,7 @@ use gio::prelude::*;
 use gio::FileType;
 
 use crate::error::{map_gio_error, FsError};
-use crate::metadata::{build_file_item, FileItem, FULL_ATTRIBUTES};
+use crate::metadata::{build_file_item, FileItem, FAST_ATTRIBUTES, FULL_ATTRIBUTES};
 use crate::path::VeyraPath;
 use crate::permissions::FilePermissions;
 use crate::queue::OperationControl;
@@ -58,6 +58,12 @@ pub const READ_DIR_CHUNK_SIZE: usize = 500;
 /// Cooperatively cancellable via `control`, matching `count_dir_recursive`/
 /// `chmod_recursive`: cancelling mid-walk stops enumeration and returns
 /// `Ok(())` for whatever was already delivered via `on_chunk`, not an error.
+///
+/// Faz 31: queries `FAST_ATTRIBUTES`, not `FULL_ATTRIBUTES` — permissions,
+/// ownership, inode, and created/accessed timestamps are left unset on the
+/// returned `FileItem`s (Rule #33). Callers that need those for a specific
+/// entry (Properties dialog, a selected item) fetch them on demand via
+/// `stat`, which still queries the full set.
 pub fn read_dir_chunked(
     dir: &VeyraPath,
     chunk_size: usize,
@@ -69,7 +75,7 @@ pub fn read_dir_chunked(
 
     let enumerator = file
         .enumerate_children(
-            FULL_ATTRIBUTES,
+            FAST_ATTRIBUTES,
             gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
             gio::Cancellable::NONE,
         )

@@ -158,6 +158,7 @@ pub(crate) fn build_details_view(
 
 fn name_column(thumbnails: Rc<ThumbnailService>, dnd_wiring: DndWiring) -> gtk4::ColumnViewColumn {
     let factory = gtk4::SignalListItemFactory::new();
+    let thumbnails_for_unbind = thumbnails.clone();
 
     factory.connect_setup(move |_, list_item| {
         let list_item = list_item
@@ -218,6 +219,20 @@ fn name_column(thumbnails: Rc<ThumbnailService>, dnd_wiring: DndWiring) -> gtk4:
         }
         if let Some(label) = child.and_then(|w| w.downcast::<gtk4::Label>().ok()) {
             label.set_text(file_item.name());
+        }
+    });
+
+    factory.connect_unbind(move |_, list_item| {
+        let list_item = list_item
+            .downcast_ref::<gtk4::ListItem>()
+            .expect("factory item must be ListItem");
+        if let Some(icon) = list_item
+            .child()
+            .and_then(|w| w.downcast::<gtk4::Box>().ok())
+            .and_then(|b| b.first_child())
+            .and_then(|w| w.downcast::<gtk4::Image>().ok())
+        {
+            thumbnails_for_unbind.unbind(&icon);
         }
     });
 

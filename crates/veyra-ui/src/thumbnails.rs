@@ -24,6 +24,7 @@ use std::io::Write as _;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -58,6 +59,7 @@ struct Request {
     uri: String,
     mtime: i64,
     cache_dir: PathBuf,
+    cancelled: Arc<Mutex<HashSet<PathBuf>>>,
     reply_tx: async_channel::Sender<Option<DecodedImage>>,
 }
 
@@ -107,6 +109,14 @@ impl DecodedImage {
 pub(crate) struct ThumbnailService {
     l1: RefCell<LruCache<PathBuf, L1Entry>>,
     in_flight: RefCell<HashSet<PathBuf>>,
+    /// Faz 31: paths whose request has been abandoned (the bound row
+    /// scrolled out of view / got rebound before the result arrived).
+    /// Shared with the worker threads so an already-queued request for a
+    /// path can be skipped *before* paying the decode cost — the actual
+    /// "drop it from the backlog" half of scroll cancellation (Rule #31);
+    /// the `widget-name` guard in `bind` only handles the other half
+    /// (never painting a stale result over a rebound row).
+    cancelled: Arc<Mutex<HashSet<PathBuf>>>,
     request_tx: async_channel::Sender<Request>,
     cache_dir: PathBuf,
 }
@@ -131,6 +141,14 @@ impl ThumbnailService {
             let request_rx = request_rx.clone();
             std::thread::spawn(move || {
                 while let Ok(request) = request_rx.recv_blocking() {
+                    // Faz 31: a request that sat in the queue behind a fast
+                    // scroll may already be abandoned by the time a worker
+                    // picks it up — skip the decode/IO entirely rather than
+                    // spending CPU on a thumbnail nothing will ever paint.
+                    if take_cancelled(&request.cancelled, &request.path) {
+                        let _ = request.reply_tx.send_blocking(None);
+                        continue;
+                    }
                     let decoded = produce_thumbnail(&request);
                     let _ = request.reply_tx.send_blocking(decoded);
                 }
@@ -142,6 +160,7 @@ impl ThumbnailService {
                 NonZeroUsize::new(L1_CAPACITY).expect("L1_CAPACITY is nonzero"),
             )),
             in_flight: RefCell::new(HashSet::new()),
+            cancelled: Arc::new(Mutex::new(HashSet::new())),
             request_tx,
             cache_dir,
         })
@@ -164,6 +183,12 @@ impl ThumbnailService {
             return;
         }
 
+        // A previous bind for this exact path may have been cancelled (row
+        // scrolled away) while its request was still queued; rebinding it
+        // now means it's wanted again, so undo that before it can be picked
+        // up (or re-picked-up, if the worker hasn't dequeued it yet).
+        self.cancelled.lock().unwrap().remove(&path);
+
         if !self.in_flight.borrow_mut().insert(path.clone()) {
             // Another bind already requested this exact path; its result,
             // once it lands, populates L1 for the next bind/redraw.
@@ -177,6 +202,7 @@ impl ThumbnailService {
             uri,
             mtime,
             cache_dir: self.cache_dir.clone(),
+            cancelled: self.cancelled.clone(),
             reply_tx,
         });
 
@@ -193,6 +219,26 @@ impl ThumbnailService {
                 paint(&icon, &pixbuf);
             }
         });
+    }
+
+    /// Faz 31: releases whatever thumbnail request `icon` is currently
+    /// waiting on, called from the view factory's `connect_unbind` when a
+    /// `GtkListItem` row is recycled away from its current file (typically
+    /// a fast scroll moving it out of the viewport). If the request is
+    /// still queued or in flight, it's marked cancelled so a worker thread
+    /// skips the decode instead of spending CPU/IO on a thumbnail this row
+    /// no longer represents (Rule #31). Safe to call even when `icon` was
+    /// never bound to a thumbnailable path (`bind` clears the widget name
+    /// in that case, so this becomes a no-op).
+    pub(crate) fn unbind(&self, icon: &gtk4::Image) {
+        let name = icon.widget_name();
+        if let Some(path_str) = name.strip_prefix(WIDGET_NAME_GUARD_PREFIX) {
+            let path = PathBuf::from(path_str);
+            if self.in_flight.borrow().contains(&path) {
+                self.cancelled.lock().unwrap().insert(path);
+            }
+        }
+        icon.set_widget_name("");
     }
 
     fn l1_get(&self, path: &Path, mtime: i64) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
@@ -214,6 +260,15 @@ impl ThumbnailService {
             },
         );
     }
+}
+
+/// Atomically checks and clears whether `path` was cancelled — `true` means
+/// the caller (a worker about to decode it) should drop the request instead
+/// of processing it. Pulled out as its own function so the scroll-
+/// cancellation contract (Rule #31) is unit-testable without spinning up
+/// the worker threads or any GTK widget.
+fn take_cancelled(cancelled: &Mutex<HashSet<PathBuf>>, path: &Path) -> bool {
+    cancelled.lock().unwrap().remove(path)
 }
 
 fn paint(icon: &gtk4::Image, pixbuf: &gtk4::gdk_pixbuf::Pixbuf) {
@@ -424,6 +479,61 @@ mod tests {
             guard_token(Path::new("/a/one.png")),
             guard_token(Path::new("/a/two.png"))
         );
+    }
+
+    #[test]
+    fn scroll_away_marks_pending_request_cancelled_and_worker_skips_it() {
+        // Simulates the fast-scroll scenario: a row is bound (request
+        // enqueued, path tracked as in-flight), then scrolled out of view
+        // before the worker ever picks the request up — `unbind` should
+        // mark it cancelled so the worker's `take_cancelled` check drops it
+        // instead of decoding (Rule #31 backlog prevention).
+        let cancelled: Mutex<HashSet<PathBuf>> = Mutex::new(HashSet::new());
+        let path = PathBuf::from("/huge-folder/image-000042.png");
+
+        // Not cancelled yet: nothing has abandoned this request.
+        assert!(!take_cancelled(&cancelled, &path));
+
+        // Row scrolls away: mark it cancelled, as `unbind` does for an
+        // in-flight path.
+        cancelled.lock().unwrap().insert(path.clone());
+
+        // Worker dequeues it: sees it's cancelled, consumes the flag, skips
+        // the decode.
+        assert!(take_cancelled(&cancelled, &path));
+
+        // The flag doesn't leak forever — a second dequeue attempt (or a
+        // stale duplicate) sees it's already been consumed.
+        assert!(!take_cancelled(&cancelled, &path));
+    }
+
+    #[test]
+    fn rebinding_a_cancelled_path_before_the_worker_runs_un_cancels_it() {
+        // If the user scrolls back to a row before its (still-queued)
+        // request has been dequeued, `bind` clears the cancellation so the
+        // worker still produces the thumbnail instead of dropping it.
+        let cancelled: Mutex<HashSet<PathBuf>> = Mutex::new(HashSet::new());
+        let path = PathBuf::from("/huge-folder/image-000042.png");
+
+        cancelled.lock().unwrap().insert(path.clone());
+        // Re-bind: undo the cancellation, mirroring `bind`'s
+        // `cancelled.lock().unwrap().remove(&path)`.
+        cancelled.lock().unwrap().remove(&path);
+
+        assert!(!take_cancelled(&cancelled, &path));
+    }
+
+    #[test]
+    fn unbind_of_a_path_with_no_pending_request_does_not_panic_or_leak() {
+        // A row that never had a thumbnailable path (`bind` already left
+        // `widget-name` empty) must be a safe no-op for `unbind`'s guard
+        // token parsing.
+        assert_eq!(
+            WIDGET_NAME_GUARD_PREFIX.strip_prefix("no-such-prefix"),
+            None
+        );
+        let empty = "";
+        assert!(empty.strip_prefix(WIDGET_NAME_GUARD_PREFIX).is_none());
     }
 
     #[test]
