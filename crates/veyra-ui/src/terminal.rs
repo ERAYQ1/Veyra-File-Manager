@@ -52,6 +52,13 @@ struct Candidate {
     args: Vec<OsString>,
 }
 
+/// Faz 28: A resolved terminal's program and arguments, used by privileged
+/// operations (e.g. pkexec) to invoke the same terminal as root.
+pub(crate) struct ResolvedTerminal {
+    pub program: OsString,
+    pub args: Vec<OsString>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum TerminalError {
     #[error("a terminal can't be opened at a non-local location")]
@@ -84,6 +91,17 @@ pub fn open_terminal(path: &VeyraPath) -> Result<(), TerminalError> {
     Err(match last_err {
         Some(err) => TerminalError::Spawn(err),
         None => TerminalError::NotFound,
+    })
+}
+
+/// Faz 28: Resolves the user's preferred terminal to a concrete program and
+/// arguments, without launching it. Returns `None` if no terminal is available.
+/// Used by privileged operations (e.g. pkexec) to invoke the terminal as root.
+pub(crate) fn resolve_terminal() -> Option<ResolvedTerminal> {
+    let candidates = candidates();
+    candidates.into_iter().next().map(|c| ResolvedTerminal {
+        program: c.program,
+        args: c.args,
     })
 }
 

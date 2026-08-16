@@ -153,6 +153,53 @@ impl FilePermissions {
     pub fn with_other_execute(self, enabled: bool) -> Self {
         self.with_bit(0o001, enabled)
     }
+
+    /// Faz 28: `true` if the setuid (set-user-ID) bit is set.
+    pub fn is_setuid(&self) -> bool {
+        self.mode & SETUID != 0
+    }
+
+    /// Faz 28: `true` if the setgid (set-group-ID) bit is set.
+    pub fn is_setgid(&self) -> bool {
+        self.mode & SETGID != 0
+    }
+
+    /// Faz 28: `true` if the sticky bit is set.
+    pub fn is_sticky(&self) -> bool {
+        self.mode & STICKY != 0
+    }
+
+    /// Faz 28: Returns a copy with the setuid bit set or cleared.
+    pub fn with_setuid(self, enabled: bool) -> Self {
+        self.with_bit(SETUID, enabled)
+    }
+
+    /// Faz 28: Returns a copy with the setgid bit set or cleared.
+    pub fn with_setgid(self, enabled: bool) -> Self {
+        self.with_bit(SETGID, enabled)
+    }
+
+    /// Faz 28: Returns a copy with the sticky bit set or cleared.
+    pub fn with_sticky(self, enabled: bool) -> Self {
+        self.with_bit(STICKY, enabled)
+    }
+
+    /// Faz 28: Parses a 3- or 4-digit octal string (e.g. `"755"` or `"0755"`)
+    /// into a `FilePermissions`. Rejects non-octal digits, empty strings, and
+    /// strings longer than 4 characters. Returns `None` on invalid input.
+    pub fn parse_octal(s: &str) -> Option<Self> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() || trimmed.len() > 4 {
+            return None;
+        }
+        // Reject if any character is not an octal digit (0-7).
+        if !trimmed.chars().all(|c| ('0'..='7').contains(&c)) {
+            return None;
+        }
+        u32::from_str_radix(trimmed, 8).ok().map(|mode| Self {
+            mode: mode & 0o7777,
+        })
+    }
 }
 
 fn triad_char(mode: u32, bit: u32, present: char) -> char {
@@ -243,5 +290,106 @@ mod tests {
     fn with_bit_setters_preserve_special_bits() {
         let perms = FilePermissions::from_mode(0o4755).with_other_write(true);
         assert_eq!(perms.octal_string(), "4757");
+    }
+
+    #[test]
+    fn is_setuid_getter() {
+        assert!(FilePermissions::from_mode(0o4755).is_setuid());
+        assert!(!FilePermissions::from_mode(0o0755).is_setuid());
+    }
+
+    #[test]
+    fn is_setgid_getter() {
+        assert!(FilePermissions::from_mode(0o2755).is_setgid());
+        assert!(!FilePermissions::from_mode(0o0755).is_setgid());
+    }
+
+    #[test]
+    fn is_sticky_getter() {
+        assert!(FilePermissions::from_mode(0o1777).is_sticky());
+        assert!(!FilePermissions::from_mode(0o0777).is_sticky());
+    }
+
+    #[test]
+    fn with_setuid_setter() {
+        let perms = FilePermissions::from_mode(0o755).with_setuid(true);
+        assert_eq!(perms.octal_string(), "4755");
+        assert!(perms.is_setuid());
+
+        let perms = FilePermissions::from_mode(0o4755).with_setuid(false);
+        assert_eq!(perms.octal_string(), "0755");
+        assert!(!perms.is_setuid());
+    }
+
+    #[test]
+    fn with_setgid_setter() {
+        let perms = FilePermissions::from_mode(0o755).with_setgid(true);
+        assert_eq!(perms.octal_string(), "2755");
+        assert!(perms.is_setgid());
+
+        let perms = FilePermissions::from_mode(0o2755).with_setgid(false);
+        assert_eq!(perms.octal_string(), "0755");
+        assert!(!perms.is_setgid());
+    }
+
+    #[test]
+    fn with_sticky_setter() {
+        let perms = FilePermissions::from_mode(0o777).with_sticky(true);
+        assert_eq!(perms.octal_string(), "1777");
+        assert!(perms.is_sticky());
+
+        let perms = FilePermissions::from_mode(0o1777).with_sticky(false);
+        assert_eq!(perms.octal_string(), "0777");
+        assert!(!perms.is_sticky());
+    }
+
+    #[test]
+    fn parse_octal_three_digit() {
+        let perms = FilePermissions::parse_octal("755").unwrap();
+        assert_eq!(perms.octal_string(), "0755");
+        assert_eq!(perms.mode(), 0o755);
+    }
+
+    #[test]
+    fn parse_octal_four_digit() {
+        let perms = FilePermissions::parse_octal("0755").unwrap();
+        assert_eq!(perms.octal_string(), "0755");
+        assert_eq!(perms.mode(), 0o755);
+    }
+
+    #[test]
+    fn parse_octal_with_special_bits() {
+        let perms = FilePermissions::parse_octal("4755").unwrap();
+        assert_eq!(perms.octal_string(), "4755");
+        assert!(perms.is_setuid());
+
+        let perms = FilePermissions::parse_octal("1777").unwrap();
+        assert_eq!(perms.octal_string(), "1777");
+        assert!(perms.is_sticky());
+    }
+
+    #[test]
+    fn parse_octal_roundtrip() {
+        for mode in [0o644, 0o755, 0o4755, 0o2755, 0o1777] {
+            let perms1 = FilePermissions::from_mode(mode);
+            let octal = perms1.octal_string();
+            let perms2 = FilePermissions::parse_octal(&octal).unwrap();
+            assert_eq!(perms1, perms2);
+        }
+    }
+
+    #[test]
+    fn parse_octal_rejects_non_octal_digits() {
+        assert!(FilePermissions::parse_octal("999").is_none());
+        assert!(FilePermissions::parse_octal("888").is_none());
+    }
+
+    #[test]
+    fn parse_octal_rejects_invalid_input() {
+        assert!(FilePermissions::parse_octal("").is_none());
+        assert!(FilePermissions::parse_octal("   ").is_none());
+        assert!(FilePermissions::parse_octal("12345").is_none());
+        assert!(FilePermissions::parse_octal("abc").is_none());
+        assert!(FilePermissions::parse_octal("77x").is_none());
     }
 }

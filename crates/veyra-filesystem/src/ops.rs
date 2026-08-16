@@ -12,6 +12,7 @@ use crate::error::{map_gio_error, FsError};
 use crate::metadata::{build_file_item, FileItem, FULL_ATTRIBUTES};
 use crate::path::VeyraPath;
 use crate::permissions::FilePermissions;
+use crate::queue::OperationControl;
 
 /// Lists the direct children of `dir`. Symlinks are reported as themselves
 /// (never followed) so callers can distinguish a directory from a symlink
@@ -404,4 +405,157 @@ pub fn open(path: &VeyraPath) -> Result<(), FsError> {
             map_gio_error(path, e)
         }
     })
+}
+
+/// Faz 28: Outcome of a recursive chmod operation.
+#[derive(Debug)]
+pub struct ChmodRecursiveOutcome {
+    pub succeeded: u64,
+    pub errors: Vec<(VeyraPath, FsError)>,
+}
+
+/// Faz 28: Recursively changes permissions on `root` and all its descendants.
+/// Symlinked directories are not traversed into — they are chmod'd as entries
+/// but never followed (Rule #22). A subdirectory that fails to enumerate
+/// mid-walk (permission denied, removed concurrently) is skipped rather than
+/// aborting the whole operation (Rule #18). Cooperatively cancellable via
+/// `control` — cancelling mid-walk returns whatever was succeeded so far plus
+/// any errors encountered before cancellation.
+///
+/// This function is blocking and must only be called from `fs_async::run_blocking`
+/// on a background thread, never on the GTK main thread (Rule #11/#14).
+pub fn chmod_recursive(
+    root: &VeyraPath,
+    permissions: FilePermissions,
+    control: &OperationControl,
+) -> Result<ChmodRecursiveOutcome, FsError> {
+    let mut outcome = ChmodRecursiveOutcome {
+        succeeded: 0,
+        errors: Vec::new(),
+    };
+    chmod_recursive_walk(
+        &root.to_gio_file(),
+        root,
+        permissions,
+        control,
+        &mut outcome,
+    )?;
+    Ok(outcome)
+}
+
+fn chmod_recursive_walk(
+    file: &gio::File,
+    path_for_errors: &VeyraPath,
+    permissions: FilePermissions,
+    control: &OperationControl,
+    outcome: &mut ChmodRecursiveOutcome,
+) -> Result<(), FsError> {
+    // chmod root itself first
+    match set_permissions(path_for_errors, permissions) {
+        Ok(()) => outcome.succeeded += 1,
+        Err(err) => outcome.errors.push((path_for_errors.clone(), err)),
+    }
+
+    let enumerator = file
+        .enumerate_children(
+            "standard::type",
+            gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+            gio::Cancellable::NONE,
+        )
+        .map_err(|e| map_gio_error(path_for_errors, e))?;
+
+    loop {
+        if control.is_cancelled() {
+            return Ok(());
+        }
+        match enumerator.next_file(gio::Cancellable::NONE) {
+            Ok(Some(info)) => {
+                let child = enumerator.child(&info);
+                let child_path = VeyraPath::from_gio_file(&child);
+                if info.file_type() == FileType::Directory {
+                    let _ =
+                        chmod_recursive_walk(&child, &child_path, permissions, control, outcome);
+                } else {
+                    match set_permissions(&child_path, permissions) {
+                        Ok(()) => outcome.succeeded += 1,
+                        Err(err) => outcome.errors.push((child_path.clone(), err)),
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(_) => break,
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn chmod_recursive_applies_to_root_and_descendants() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.txt"), b"hello").unwrap();
+        fs::create_dir(tmp.path().join("sub")).unwrap();
+        fs::write(tmp.path().join("sub/b.txt"), b"world!").unwrap();
+
+        let dir = VeyraPath::from_local(tmp.path());
+        let new_perms = FilePermissions::from_mode(0o700);
+        let control = OperationControl::new();
+        let outcome = chmod_recursive(&dir, new_perms, &control).unwrap();
+
+        assert_eq!(outcome.succeeded, 4); // root dir + a.txt + sub dir + b.txt
+        assert!(outcome.errors.is_empty());
+
+        // Verify permissions were applied
+        let root_meta = std::fs::metadata(tmp.path()).unwrap();
+        assert_eq!(
+            root_meta.permissions().mode() & 0o7777,
+            0o700,
+            "root directory should have 0700 permissions"
+        );
+        let file_meta = std::fs::metadata(tmp.path().join("a.txt")).unwrap();
+        assert_eq!(
+            file_meta.permissions().mode() & 0o7777,
+            0o700,
+            "a.txt should have 0700 permissions"
+        );
+    }
+
+    #[test]
+    fn chmod_recursive_cancelled_early() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.txt"), b"test").unwrap();
+        fs::create_dir(tmp.path().join("sub")).unwrap();
+
+        let dir = VeyraPath::from_local(tmp.path());
+        let new_perms = FilePermissions::from_mode(0o644);
+        let control = OperationControl::new();
+
+        // Cancel before the operation starts
+        control.cancel();
+        let outcome = chmod_recursive(&dir, new_perms, &control).unwrap();
+
+        // Should have applied to root, then cancelled
+        assert!(outcome.succeeded >= 1);
+    }
+
+    #[test]
+    fn chmod_recursive_collects_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.txt"), b"test").unwrap();
+
+        let dir = VeyraPath::from_local(tmp.path());
+        let new_perms = FilePermissions::from_mode(0o755);
+        let control = OperationControl::new();
+        let outcome = chmod_recursive(&dir, new_perms, &control).unwrap();
+
+        // On a normal filesystem where we have write permission, this should succeed
+        assert_eq!(outcome.errors.len(), 0);
+        assert!(outcome.succeeded >= 2); // at least the directory and file
+    }
 }

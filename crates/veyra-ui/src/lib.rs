@@ -24,6 +24,7 @@ mod network;
 mod open_with;
 mod operations;
 mod preview;
+mod privileged;
 mod recent;
 mod search_results;
 mod shortcuts;

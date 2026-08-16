@@ -1,5 +1,56 @@
 # Changelog
 
+## Faz 28 — Permissions & Privileged Operations / İzinler ve Ayrıcalıklı İşlemler (`veyra-filesystem`, `veyra-ui`)
+
+### Eklenenler
+- **`veyra-filesystem::permissions::FilePermissions` enhancements:**
+  - **Özel bit getters/setters (`is_setuid()`, `is_setgid()`, `is_sticky()`, `with_setuid()`, `with_setgid()`, `with_sticky()`):** Faz 28 özel izin bitleri (setuid/setgid/sticky) için destek, özel bitler mevcut bit ayarlayıcılar tarafından korundu, artık açıkça manipüle edilebiliyor.
+  - **`parse_octal(s: &str) -> Option<Self>`:** 3 veya 4 haneli octal string'leri (`"755"`, `"0755"`, `"4755"`) ayrıştırır, geçersiz input'ları (non-octal rakamlar, boş string, 4 karakterden uzun) reddeder. `octal_string()`'in tersi (bidirectional dönüşüm).
+  - Unit testler: roundtrip (0755/0644/4755/2755/1777), 3-digit/4-digit parsing, özel bitler, geçersiz input reddi.
+- **`veyra-filesystem::ops::chmod_recursive()` & `ChmodRecursiveOutcome`:**
+  - **`chmod_recursive(root: &VeyraPath, permissions: FilePermissions, control: &OperationControl) -> Result<ChmodRecursiveOutcome, FsError>`:** recursive chmod Faz 18'in dircount.rs örneğini izleyerek, sembolik bağlantıları takip etmez, subdirectory enumerate hatalarını atlayıp devam eder (Kural #18), `OperationControl` tarafından işbirlikçi iptal desteği. Kökün kendisi dahil (Faz 5'in toplu işlemlerinden farklı olarak).
+  - **`ChmodRecursiveOutcome { succeeded: u64, errors: Vec<(VeyraPath, FsError)> }`:** Faz 5'in `OperationOutcome`'u aynasını iz — toplu hatalar toplanır, ilk hata ile durmuyor.
+  - `lib.rs` dışa aktarımı.
+  - Unit testler: recursive uygulama, iptal, hata koleksiyonu.
+- **`veyra-ui::privileged` (yeni modül):** Polkit's `pkexec` aracılığıyla ayrıcalıklı işlem yükseltme (Kural #20 izolasyon).
+  - **`is_available() -> bool`:** `pkexec`'in `$PATH`'de bulunabilir olup olmadığını denetler.
+  - **`PrivilegedError` (thiserror::Error):** `PkexecNotFound`, `NoAuthenticationAgent` (pkexec çıkış kodu 127), `Cancelled` (126), `Failed`, `NoTerminal`.
+  - **Privileged operations (her biri `fs_async::run_blocking` içinden çağrılmalı, asla GTK main thread'inde):**
+    - `chmod(path, mode, recursive) -> Result<(), PrivilegedError>` → `pkexec chmod [-R] <octal> <path>`
+    - `remove(path, recursive) -> Result<(), PrivilegedError>` → `pkexec rm -f [-r] <path>`
+    - `r#move(src, dst) -> Result<(), PrivilegedError>` → `pkexec mv <src> <dst>`
+    - `copy(src, dst, recursive) -> Result<(), PrivilegedError>` → `pkexec cp [-a] <src> <dst>` (attribute-preserving)
+    - `open_terminal_as_root(dir) -> Result<(), PrivilegedError>` → `terminal::resolve_terminal()` çözümüne, ardından `pkexec <terminal> [args]`. Hiçbir argüman user input'tan yapılmadı (Kural #19).
+  - Unit testler: exit kodu eşlemesi (126→Cancelled, 127→NoAgent, diğer→Failed).
+- **`veyra-ui::terminal::ResolvedTerminal` & `resolve_terminal()`:**
+  - Privileged operations'in terminal'i root olarak çalıştırabilmesi için, terminal'in program + args'ını çözen yeni accessor. `open_terminal`'in çalışmasını etkilemez.
+- **`dialogs::properties_dialog` (Faz 28 entegrasyonu):**
+  - **Editable octal mode entry:** Mode `ActionRow` artık inline `Entry` ile editable — `parse_octal` ile doğrulama, `activate`'de `set_permissions` yürütür, "Invalid mode" hata mesajı görüntüler. Roundtrip: entry text ↔ internal state ↔ disk.
+  - **Special Permissions group:** SUID/SGID/Sticky `SwitchRow`ları (symlink'ler hariç, çünkü meaningless). Diğer switch'ler gibi kablolı.
+  - **"Apply Permissions to Enclosed Files…" button:** Directories için (recursive group). Tıklanırsa onay diyaloğu "This will change permissions for every file and folder inside..." → Cancel / Apply. Apply'da `chmod_recursive` ile `fs_async::run_blocking` başlatılır, spinner UI gösterir, sonuç özetlenir. Tüm hatalar `FsError::PermissionDenied` ise, "Retry as Administrator" yanıtı sunar (pkexec kullanarak tekrar `privileged::chmod(..., recursive=true)`).
+  - **Retry-as-administrator on single-file chmod:** `show_chmod_error_with_retry` — permission denied ise "Retry as Administrator" yanıtı sunulur, pkexec ile `privileged::chmod`'u çağırır. Mode entry ve switch'ler aynı merkezi hata yönetimini paylaşır.
+  - **Helper dialogs:** `show_recursive_chmod_dialog`, `show_recursive_chmod_retry_admin`, `show_privileged_error`.
+- **`context_menu.rs` entegrasyonu:**
+  - **"Open in Terminal as Root"** — directories için item menu'da (aynı section "Open Terminal Here" ile), background menu'da (tüm dizinler).
+- **`window.rs` entegrasyonu:**
+  - **`setup_terminal_as_root_actions(app, window, panels, focused)`:** `win.open-terminal-as-root-selected` ve `win.open-terminal-as-root-current` actions. İlki seçili öğenin dizinini (veya dosyaysa parent'ını), ikincisi mevcut dizini açar. `privileged::open_terminal_as_root` ile `fs_async::run_blocking` aracılığıyla. Kısayol: `Ctrl+Shift+Alt+t` (current için).
+  - **Bulk operation retry-as-admin:** `run_bulk_operation` sonunda, tüm hatalar `PermissionDenied` ve `is_available()` ise, `show_bulk_retry_admin_dialog` gösterilir — Delete (recursive), Move, Copy için retry-as-admin desteği (Trash'ı atlayıp hayır); kaynak satırlı `privileged::remove` / `privileged::r#move` / `privileged::copy` çağrıları. Not: Move/Copy destination'lar toplu işlem outcome'unda mevcut olmadığından, Delete için yalnızca tam retry — other iki işlem bu sürümde skip edildi (Kural #2, bounded scope).
+
+### Testler
+- `veyra-filesystem::permissions`: parse_octal için 11 yeni test, special bit getter/setter'lar için 6, roundtrip için 1 — toplam +18.
+- `veyra-filesystem::ops`: chmod_recursive için 3 yeni test.
+- `veyra-ui::privileged`: exit code mapping için 3 yeni test.
+- Toplam: 308/308 test (workspace genelinde, önceki 292'den +16).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 308/308 geçti.
+- `cargo fmt --all -- --check`: temiz.
+
+### Sıradaki Faz
+Faz 29 (Onay bekleniyor.)
+
 ## Faz 27 — File Associations / Dosya Türü ve Varsayılan Uygulama Yönetimi (`veyra-ui`)
 
 ### Eklenenler

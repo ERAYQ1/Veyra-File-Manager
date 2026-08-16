@@ -247,6 +247,7 @@ pub(crate) fn build_window(
     setup_trash_actions(app, &window, &panels, &focused);
     setup_disk_analyzer_actions(app, &window, &panels, &focused, navigate.clone());
     setup_terminal_actions(app, &window, &panels, &focused);
+    setup_terminal_as_root_actions(app, &window, &panels, &focused);
     setup_network_actions(&window, navigate);
     setup_command_palette_actions(app, &window, &panels, &focused, &header, refresh_preview);
     setup_file_associations_action(&window);
@@ -1743,6 +1744,93 @@ fn setup_terminal_actions(
     app.set_accels_for_action("win.open-terminal-here-current", &["F4", "<Primary><Alt>t"]);
 }
 
+/// Faz 28: Registers `win.open-terminal-as-root-selected` and
+/// `win.open-terminal-as-root-current`, which spawn a terminal as root via
+/// pkexec for the selected item's directory or the currently-open directory.
+fn setup_terminal_as_root_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    focused: &Rc<RefCell<PanelId>>,
+) {
+    let action_terminal_root_selected =
+        gio::SimpleAction::new("open-terminal-as-root-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_terminal_root_selected.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            let target_dir = if item.kind().is_directory() {
+                item.path.clone()
+            } else if let Some(local) = item.path.as_local_path() {
+                if let Some(parent) = local.parent() {
+                    VeyraPath::from_local(parent)
+                } else {
+                    item.path.clone()
+                }
+            } else {
+                item.path.clone()
+            };
+            let window = window.clone();
+            fs_async::run_blocking(
+                move || {
+                    crate::privileged::open_terminal_as_root(target_dir.as_local_path().unwrap())
+                },
+                move |result| {
+                    if let Err(err) = result {
+                        show_error_dialog(
+                            &window,
+                            "Unable to Open Terminal as Root",
+                            &err.to_string(),
+                        );
+                    }
+                },
+            );
+        });
+    }
+    window.add_action(&action_terminal_root_selected);
+
+    let action_terminal_root_current =
+        gio::SimpleAction::new("open-terminal-as-root-current", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_terminal_root_current.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let path = tab.state.borrow().current_dir.clone();
+            let window = window.clone();
+            fs_async::run_blocking(
+                move || crate::privileged::open_terminal_as_root(path.as_local_path().unwrap()),
+                move |result| {
+                    if let Err(err) = result {
+                        show_error_dialog(
+                            &window,
+                            "Unable to Open Terminal as Root",
+                            &err.to_string(),
+                        );
+                    }
+                },
+            );
+        });
+    }
+    window.add_action(&action_terminal_root_current);
+    app.set_accels_for_action(
+        "win.open-terminal-as-root-current",
+        &["<Primary><Shift><Alt>t"],
+    );
+}
+
 /// Registers Faz 21's `win.connect-to-server`, activated by the sidebar's
 /// Network section "+ Connect to Server…" button. Shows the dialog; a
 /// successful connection navigates the focused panel into the new mount.
@@ -2315,7 +2403,7 @@ fn run_bulk_operation(
     let request = OperationRequest {
         kind,
         sources,
-        destination,
+        destination: destination.clone(),
     };
     let (control, receiver) = operations::spawn(request);
     widgets::progress_toast::begin(progress, &control, kind);
@@ -2340,7 +2428,21 @@ fn run_bulk_operation(
                         for (path, err) in &outcome.errors {
                             tracing::warn!(path = %path, error = %err, "bulk operation error");
                         }
-                        if let Some((_, chrome)) = refresh_targets.first() {
+                        // Faz 28: If all errors are permission-denied and pkexec is available,
+                        // offer retry-as-admin.
+                        let all_permission_denied = outcome.errors.iter().all(|(_, e)| {
+                            matches!(e, veyra_filesystem::FsError::PermissionDenied(_))
+                        });
+
+                        if all_permission_denied && crate::privileged::is_available() {
+                            show_bulk_retry_admin_dialog(
+                                &window,
+                                kind,
+                                destination.clone(),
+                                &outcome,
+                                refresh_targets.clone(),
+                            );
+                        } else if let Some((_, chrome)) = refresh_targets.first() {
                             chrome.status_left.set_label(&format!(
                                 "{} error(s) during operation",
                                 outcome.errors.len()
@@ -2352,6 +2454,119 @@ fn run_bulk_operation(
             }
         }
     });
+}
+
+/// Faz 28: Shows retry-as-admin dialog for bulk operations that failed with
+/// permission-denied errors, allowing the user to retry the failed items with
+/// elevated privileges.
+fn show_bulk_retry_admin_dialog(
+    window: &adw::ApplicationWindow,
+    kind: OperationKind,
+    destination: Option<VeyraPath>,
+    outcome: &veyra_filesystem::OperationOutcome,
+    refresh_targets: Vec<(SharedState, Chrome)>,
+) {
+    if outcome.errors.is_empty() {
+        return;
+    }
+
+    let heading = match kind {
+        OperationKind::Delete => "Delete Permission Denied",
+        OperationKind::Move => "Move Permission Denied",
+        OperationKind::Copy => "Copy Permission Denied",
+        OperationKind::Trash => return, // Don't offer root for trash
+    };
+
+    let failed_paths: Vec<VeyraPath> = outcome
+        .errors
+        .iter()
+        .map(|(path, _)| path.clone())
+        .collect();
+
+    let dialog = adw::AlertDialog::builder()
+        .heading(heading)
+        .body(format!(
+            "{} item(s) couldn't be {} due to insufficient permissions.",
+            failed_paths.len(),
+            match kind {
+                OperationKind::Delete => "deleted",
+                OperationKind::Move => "moved",
+                OperationKind::Copy => "copied",
+                OperationKind::Trash => "trashed",
+            }
+        ))
+        .build();
+    dialog.add_responses(&[("cancel", "Cancel"), ("retry", "Retry as Administrator")]);
+    dialog.set_response_appearance("retry", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("retry"));
+
+    let dialog_window = window.clone();
+    dialog.connect_response(None, move |_, response| {
+        if response != "retry" {
+            return;
+        }
+        let failed_paths = failed_paths.clone();
+        let destination = destination.clone();
+        let refresh_targets = refresh_targets.clone();
+        let window = dialog_window.clone();
+        fs_async::run_blocking(
+            move || {
+                let dest_local = destination.as_ref().and_then(VeyraPath::as_local_path);
+                let mut succeeded = 0u64;
+                let mut failed = 0u64;
+                for path in &failed_paths {
+                    let Some(local_path) = path.as_local_path() else {
+                        failed += 1;
+                        continue;
+                    };
+                    let result = match kind {
+                        OperationKind::Delete => crate::privileged::remove(local_path, true),
+                        OperationKind::Move | OperationKind::Copy => {
+                            let (Some(dest_dir), Some(name)) = (dest_local, path.file_name())
+                            else {
+                                failed += 1;
+                                continue;
+                            };
+                            let target = dest_dir.join(name);
+                            if kind == OperationKind::Move {
+                                crate::privileged::r#move(local_path, &target)
+                            } else {
+                                crate::privileged::copy(local_path, &target, true)
+                            }
+                        }
+                        OperationKind::Trash => continue,
+                    };
+                    match result {
+                        Ok(()) => succeeded += 1,
+                        Err(err) => {
+                            tracing::warn!(path = %path, error = %err, "privileged retry failed");
+                            failed += 1;
+                        }
+                    }
+                }
+                (succeeded, failed)
+            },
+            move |(succeeded, failed)| {
+                for (state, chrome) in &refresh_targets {
+                    refresh(state, chrome);
+                }
+                if let Some((_, chrome)) = refresh_targets.first() {
+                    chrome.status_left.set_label(&format!(
+                        "Administrator retry: {succeeded} succeeded, {failed} failed"
+                    ));
+                }
+                if failed > 0 {
+                    show_error_dialog(
+                        &window,
+                        "Some Items Still Failed",
+                        &format!("{failed} item(s) could not be completed even with administrator privileges."),
+                    );
+                }
+            },
+        );
+    });
+
+    dialog.present(Some(window));
 }
 
 /// Builds the Faz 26 DND execution closure shared by every drag-and-drop

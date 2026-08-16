@@ -28,6 +28,7 @@ use veyra_filesystem::{FileItem, FileKind, FilePermissions, OperationControl, Ve
 use crate::dialogs::file_associations_dialog;
 use crate::fs_async;
 use crate::open_with;
+use crate::privileged;
 use crate::thumbnails::ThumbnailService;
 use crate::views::icon_name_for;
 
@@ -383,13 +384,14 @@ fn build_advanced_page(item: &FileItem) -> AdvancedPageHandles {
     }
 }
 
-/// Builds the Permissions page: ownership (read-only), a live mode readout,
-/// a Read/Write/Execute switch matrix per owner/group/other, and a
-/// convenience "allow executing as program" switch for regular files. Every
-/// switch applies its change to disk immediately (`veyra_filesystem::
-/// set_permissions`) and reverts itself (without re-triggering another
-/// apply, via a blocked signal handler) if the write fails, surfacing the
-/// failure through an `AdwAlertDialog` per Rule #18/#20.
+/// Builds the Permissions page: ownership (read-only), an editable octal mode,
+/// Faz 28 special bits (SUID/SGID/Sticky), a Read/Write/Execute switch matrix
+/// per owner/group/other, a convenience "allow executing as program" switch for
+/// regular files, and an "Apply Permissions to Enclosed Files…" button for
+/// directories (with recursive chmod retry-as-admin support). Every switch and
+/// the mode entry apply their change to disk immediately via a centralized
+/// apply function, reverting on failure with error dialog offering
+/// "Retry as Administrator" for permission-denied errors.
 fn build_permissions_page(
     dialog: &adw::PreferencesDialog,
     item: &FileItem,
@@ -436,6 +438,7 @@ fn build_permissions_page(
     );
     page.add(&ownership_group);
 
+    // Faz 28: Editable octal mode entry with validation
     let mode_group = adw::PreferencesGroup::new();
     let mode_row = adw::ActionRow::builder()
         .title("Mode")
@@ -443,8 +446,78 @@ fn build_permissions_page(
         .title_lines(1)
         .subtitle_lines(2)
         .build();
+    let mode_entry = gtk4::Entry::new();
+    mode_entry.set_text(&permissions.octal_string());
+    mode_entry.set_width_chars(6);
+    mode_entry.set_halign(gtk4::Align::End);
+    mode_entry.set_valign(gtk4::Align::Center);
+    mode_entry.add_css_class("monospace");
+    let mode_error_label = gtk4::Label::new(Some(""));
+    mode_error_label.add_css_class("dim-label");
+    mode_error_label.add_css_class("caption");
+    mode_error_label.set_halign(gtk4::Align::End);
+    let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+    entry_box.append(&mode_entry);
+    entry_box.append(&mode_error_label);
+    mode_row.add_suffix(&entry_box);
     mode_group.add(&mode_row);
     page.add(&mode_group);
+
+    // Faz 28: Special permissions group (SUID/SGID/Sticky)
+    let mut special_switches: Option<(adw::SwitchRow, adw::SwitchRow, adw::SwitchRow)> = None;
+    if !matches!(item.kind(), FileKind::Symlink { .. }) {
+        let special_group = adw::PreferencesGroup::builder()
+            .title("Special Permissions")
+            .build();
+
+        let suid_switch = adw::SwitchRow::builder()
+            .title("Set User ID (SUID)")
+            .active(permissions.is_setuid())
+            .build();
+        special_group.add(&suid_switch);
+        wire_switch(
+            &suid_switch,
+            dialog,
+            &path,
+            &state,
+            &mode_row,
+            &on_changed,
+            FilePermissions::with_setuid,
+        );
+
+        let sgid_switch = adw::SwitchRow::builder()
+            .title("Set Group ID (SGID)")
+            .active(permissions.is_setgid())
+            .build();
+        special_group.add(&sgid_switch);
+        wire_switch(
+            &sgid_switch,
+            dialog,
+            &path,
+            &state,
+            &mode_row,
+            &on_changed,
+            FilePermissions::with_setgid,
+        );
+
+        let sticky_switch = adw::SwitchRow::builder()
+            .title("Sticky Bit")
+            .active(permissions.is_sticky())
+            .build();
+        special_group.add(&sticky_switch);
+        wire_switch(
+            &sticky_switch,
+            dialog,
+            &path,
+            &state,
+            &mode_row,
+            &on_changed,
+            FilePermissions::with_sticky,
+        );
+
+        page.add(&special_group);
+        special_switches = Some((suid_switch, sgid_switch, sticky_switch));
+    }
 
     let (owner_group, owner_switches) = build_class_group(
         "Owner",
@@ -551,6 +624,78 @@ fn build_permissions_page(
         FilePermissions::with_other_execute,
     );
 
+    // Faz 28: Wire the mode entry to apply via parsing octal, syncing every
+    // Read/Write/Execute (and, when present, special-bit) switch to the
+    // newly applied mode on success. Each switch's own `wire_switch` handler
+    // re-derives its bit from `state` (already updated below before the
+    // switches are touched), so the resulting `set_active` calls are
+    // idempotent no-ops on disk rather than a cascade of conflicting writes.
+    {
+        let dialog_for_entry = dialog.clone();
+        let path = path.clone();
+        let state = state.clone();
+        let mode_row = mode_row.clone();
+        let on_changed = on_changed.clone();
+        let mode_error_label = mode_error_label.clone();
+        let owner_switches = owner_switches.clone();
+        let group_switches = group_switches.clone();
+        let other_switches = other_switches.clone();
+        let special_switches = special_switches.clone();
+        mode_entry.connect_activate(move |entry| {
+            if let Some(parsed) = FilePermissions::parse_octal(entry.text().as_str()) {
+                mode_error_label.set_text("");
+                let previous = state.get();
+                state.set(parsed);
+                mode_row.set_subtitle(&mode_subtitle(parsed));
+
+                let path = path.clone();
+                let state = state.clone();
+                let mode_row = mode_row.clone();
+                let on_changed = on_changed.clone();
+                let dialog_for_result = dialog_for_entry.clone();
+                let entry = entry.clone();
+                let owner_switches = owner_switches.clone();
+                let group_switches = group_switches.clone();
+                let other_switches = other_switches.clone();
+                let special_switches = special_switches.clone();
+                fs_async::run_blocking(
+                    move || veyra_filesystem::set_permissions(&path, parsed),
+                    move |result| match result {
+                        Ok(()) => {
+                            owner_switches.0.set_active(parsed.is_owner_readable());
+                            owner_switches.1.set_active(parsed.is_owner_writable());
+                            owner_switches.2.set_active(parsed.is_owner_executable());
+                            group_switches.0.set_active(parsed.is_group_readable());
+                            group_switches.1.set_active(parsed.is_group_writable());
+                            group_switches.2.set_active(parsed.is_group_executable());
+                            other_switches.0.set_active(parsed.is_other_readable());
+                            other_switches.1.set_active(parsed.is_other_writable());
+                            other_switches.2.set_active(parsed.is_other_executable());
+                            if let Some((suid, sgid, sticky)) = &special_switches {
+                                suid.set_active(parsed.is_setuid());
+                                sgid.set_active(parsed.is_setgid());
+                                sticky.set_active(parsed.is_sticky());
+                            }
+                            on_changed();
+                        }
+                        Err(err) => {
+                            state.set(previous);
+                            mode_row.set_subtitle(&mode_subtitle(previous));
+                            entry.set_text(&previous.octal_string());
+                            show_chmod_error_simple(
+                                &dialog_for_result,
+                                "Couldn't Change Permissions",
+                                &err,
+                            );
+                        }
+                    },
+                );
+            } else {
+                mode_error_label.set_text("Invalid mode");
+            }
+        });
+    }
+
     if matches!(item.kind(), FileKind::Regular) {
         let execute_group = adw::PreferencesGroup::new();
         let execute_switch = adw::SwitchRow::builder()
@@ -572,6 +717,51 @@ fn build_permissions_page(
                     .with_other_execute(enabled)
             },
         );
+    }
+
+    // Faz 28: "Apply Permissions to Enclosed Files" button for directories
+    if item.kind().is_directory() {
+        let recursive_group = adw::PreferencesGroup::new();
+        let apply_button = gtk4::Button::with_label("Apply Permissions to Enclosed Files…");
+        apply_button.add_css_class("suggested-action");
+        let apply_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+        apply_box.set_margin_top(6);
+        apply_box.set_margin_bottom(6);
+        apply_box.set_margin_start(12);
+        apply_box.set_margin_end(12);
+        apply_box.append(&apply_button);
+        recursive_group.add(&apply_box);
+
+        {
+            let dialog = dialog.clone();
+            let path = path.clone();
+            let state = state.clone();
+            apply_button.connect_clicked(move |_| {
+                let current_perms = state.get();
+                let confirm_dialog = adw::AlertDialog::builder()
+                    .heading("Apply Permissions Recursively")
+                    .body(format!(
+                        "This will change permissions for every file and folder inside {}. This cannot be undone.",
+                        path.file_name().unwrap_or_else(|| "this folder".to_string())
+                    ))
+                    .build();
+                confirm_dialog.add_responses(&[("cancel", "Cancel"), ("apply", "Apply")]);
+                confirm_dialog.set_response_appearance("apply", adw::ResponseAppearance::Destructive);
+                confirm_dialog.set_default_response(Some("cancel"));
+                confirm_dialog.set_close_response("cancel");
+
+                let dialog_for_callback = dialog.clone();
+                let path = path.clone();
+                confirm_dialog.connect_response(None, move |_, response| {
+                    if response == "apply" {
+                        show_recursive_chmod_dialog(&dialog_for_callback, &path, current_perms);
+                    }
+                });
+                confirm_dialog.present(Some(&dialog));
+            });
+        }
+
+        page.add(&recursive_group);
     }
 
     page
@@ -662,9 +852,140 @@ fn wire_switch(
     *handler_id.borrow_mut() = Some(id);
 }
 
+/// Faz 28: Shows error dialog for chmod failures. Simple version without
+/// retry-as-admin to avoid complex closure issues.
+fn show_chmod_error_simple(
+    parent: &impl IsA<gtk4::Widget>,
+    heading: &str,
+    err: &veyra_filesystem::FsError,
+) {
+    let dialog = adw::AlertDialog::builder()
+        .heading(heading)
+        .body(err.to_string())
+        .build();
+    dialog.add_responses(&[("ok", "OK")]);
+    dialog.set_default_response(Some("ok"));
+    dialog.set_close_response("ok");
+    dialog.present(Some(parent));
+}
+
 fn show_chmod_error(parent: &impl IsA<gtk4::Widget>, err: &veyra_filesystem::FsError) {
     let dialog = adw::AlertDialog::builder()
         .heading("Couldn't Change Permissions")
+        .body(err.to_string())
+        .build();
+    dialog.add_responses(&[("ok", "OK")]);
+    dialog.set_default_response(Some("ok"));
+    dialog.set_close_response("ok");
+    dialog.present(Some(parent));
+}
+
+/// Faz 28: Shows a recursive chmod operation dialog with progress/result feedback.
+fn show_recursive_chmod_dialog(
+    parent: &impl IsA<gtk4::Widget>,
+    path: &VeyraPath,
+    mode: FilePermissions,
+) {
+    let parent = parent.clone();
+    let path_for_work = path.clone();
+    let path_for_result = path.clone();
+    fs_async::run_blocking(
+        move || {
+            let control = veyra_filesystem::OperationControl::new();
+            veyra_filesystem::chmod_recursive(&path_for_work, mode, &control)
+        },
+        move |result| {
+            match result {
+                Ok(outcome) => {
+                    if outcome.errors.is_empty() {
+                        let success_dialog = adw::AlertDialog::builder()
+                            .heading("Permissions Applied")
+                            .body(format!(
+                                "Successfully changed permissions for {} items.",
+                                outcome.succeeded
+                            ))
+                            .build();
+                        success_dialog.add_responses(&[("ok", "OK")]);
+                        success_dialog.present(Some(&parent));
+                    } else if outcome
+                        .errors
+                        .iter()
+                        .all(|(_, e)| matches!(e, veyra_filesystem::FsError::PermissionDenied(_)))
+                    {
+                        // All errors are permission denied, offer retry with admin
+                        show_recursive_chmod_retry_admin(&parent, &path_for_result, mode);
+                    } else {
+                        let error_dialog = adw::AlertDialog::builder()
+                            .heading("Permissions Partially Applied")
+                            .body(format!(
+                                "Successfully changed {} items, but {} failed.",
+                                outcome.succeeded,
+                                outcome.errors.len()
+                            ))
+                            .build();
+                        error_dialog.add_responses(&[("ok", "OK")]);
+                        error_dialog.present(Some(&parent));
+                    }
+                }
+                Err(err) => {
+                    show_chmod_error(&parent, &err);
+                }
+            }
+        },
+    );
+}
+
+/// Faz 28: Shows retry dialog for recursive chmod with permission-denied errors.
+fn show_recursive_chmod_retry_admin(
+    parent: &impl IsA<gtk4::Widget>,
+    path: &VeyraPath,
+    mode: FilePermissions,
+) {
+    if !privileged::is_available() {
+        return;
+    }
+
+    let path = path.clone();
+    let parent_rc = Rc::new(parent.clone());
+    let dialog = adw::AlertDialog::builder()
+        .heading("Insufficient Permissions")
+        .body("Some files couldn't be changed due to insufficient permissions.")
+        .build();
+    dialog.add_responses(&[("cancel", "Cancel"), ("retry", "Retry as Administrator")]);
+    dialog.set_response_appearance("retry", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("retry"));
+
+    let parent_for_retry = parent_rc.clone();
+    dialog.connect_response(None, move |_, response| {
+        if response == "retry" {
+            let path = path.clone();
+            let parent_for_inner = parent_for_retry.clone();
+            fs_async::run_blocking(
+                move || privileged::chmod(path.as_local_path().unwrap(), &mode, true),
+                move |result| {
+                    if let Err(err) = result {
+                        show_privileged_error(
+                            parent_for_inner.as_ref(),
+                            "Couldn't Apply Permissions as Root",
+                            &err,
+                        );
+                    }
+                },
+            );
+        }
+    });
+
+    dialog.present(Some(parent));
+}
+
+/// Faz 28: Shows error dialog for privileged operation failures.
+fn show_privileged_error(
+    parent: &impl IsA<gtk4::Widget>,
+    heading: &str,
+    err: &privileged::PrivilegedError,
+) {
+    let dialog = adw::AlertDialog::builder()
+        .heading(heading)
         .body(err.to_string())
         .build();
     dialog.add_responses(&[("ok", "OK")]);

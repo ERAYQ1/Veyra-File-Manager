@@ -205,6 +205,12 @@ fn build_item_menu(item: &FileItem, is_split_active: bool) -> gio::Menu {
         Some("Open Terminal Here"),
         Some("win.open-terminal-here-selected"),
     );
+    if is_dir {
+        path_section.append(
+            Some("Open in Terminal as Root"),
+            Some("win.open-terminal-as-root-selected"),
+        );
+    }
     path_section.append(Some("Copy Path"), Some("win.copy-path-selected"));
     path_section.append(Some("Copy Location"), Some("win.copy-location-selected"));
     menu.append_section(None, &path_section);
@@ -240,6 +246,10 @@ fn build_background_menu(has_clipboard: bool) -> gio::Menu {
     misc_section.append(
         Some("Open Terminal Here"),
         Some("win.open-terminal-here-current"),
+    );
+    misc_section.append(
+        Some("Open in Terminal as Root"),
+        Some("win.open-terminal-as-root-current"),
     );
     misc_section.append(
         Some("Analyze Disk Usage…"),
