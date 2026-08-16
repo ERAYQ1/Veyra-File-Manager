@@ -1,5 +1,26 @@
 # Changelog
 
+## Faz 32 — File Operation Queue / Merkezi Dosya İşlemleri Kuyruğu (`veyra-ui`)
+
+### Eklenenler
+- **Çoklu Satırlı Eşzamanlı İşlem Yöneticisi (`progress_toast.rs`):**
+  - Tek paylaşımlı alt çubuk yerine her arka plan işlemi (`OperationId` ile anahtarlanan) kendi satırına, bağımsız ilerleme çubuğuna, yüzdesine ve bağımsız `OperationControl` (Pause / Resume / Cancel) kontrollerine kavuşturuldu.
+  - İkinci bir dosya işlemi başlatıldığında birincisinin kontrolleri artık ezilmiyor; her iki işlem de eşzamanlı olarak bağımsızca duraklatılıp devam ettirilebiliyor veya iptal edilebiliyor.
+  - Çok sayıda işlem açıldığında arayüzü taşmaması için `GtkScrolledWindow` (azami 240px yükseklik) ile sarmalandı.
+  - Son aktif işlem bittiğinde panel otomatik olarak kapanır.
+- **Pencere Entegrasyonu (`window.rs`):**
+  - `run_bulk_operation` ve `run_archive_operation` akışları `OperationId` taşıyacak şekilde güncellendi.
+  - Çakışma yönetimi kanal tabanlı olarak işlem başına bağımsız çalışmaya devam ediyor.
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 345/345 geçti.
+- `cargo fmt --all -- --check`: temiz.
+
+### Sıradaki Faz
+Faz 33 — Batch Rename (Toplu Yeniden Adlandırma).
+
 ## Faz 31 — Huge Directory Engine: Lazy Metadata & Viewport Virtualization / Dev Klasör Motoru: Tembel Metaveri ve Görünüm Sanallaştırması (`veyra-filesystem`, `veyra-ui`)
 
 Faz 30 `read_dir_chunked` ile 100.000+ dosyalık klasörlerin ilk paketini hızla ekrana getirdi, ama her paket hâlâ `FULL_ATTRIBUTES` ile `owner::user`, `owner::group` ve `unix::mode` gibi ekstra GIO/GVfs stat maliyeti taşıyordu — 100k satırın tamamı için gereksiz. Faz 31 bu maliyeti listeleme yolundan tamamen çıkardı ve iki kalan darboğazı kapattı: hızlı kaydırmada terk edilen thumbnail isteklerinin arka plan kuyruğunda birikmesi, ve akışlı yükleme sırasında GTK ana döngüsünün nefes almadan tek seferde binlerce ögeyi işlemesi (Kural #30, #31, #33).

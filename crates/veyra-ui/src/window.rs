@@ -2406,21 +2406,23 @@ fn run_bulk_operation(
         destination: destination.clone(),
     };
     let (control, receiver) = operations::spawn(request);
-    widgets::progress_toast::begin(progress, &control, kind);
+    let op_id = widgets::progress_toast::begin(progress, &control, kind);
 
     let window = window.clone();
     let progress = progress.clone();
     glib::spawn_future_local(async move {
         while let Ok(event) = receiver.recv().await {
             match event {
-                OperationEvent::Progress(p) => widgets::progress_toast::update(&progress, &p),
+                OperationEvent::Progress(p) => {
+                    widgets::progress_toast::update(&progress, op_id, &p)
+                }
                 OperationEvent::Conflict(conflict, answer_tx) => {
                     dialogs::conflict_dialog::show(&window, &conflict, move |decision| {
                         let _ = answer_tx.send_blocking(decision);
                     });
                 }
                 OperationEvent::Done(outcome) => {
-                    widgets::progress_toast::finish(&progress);
+                    widgets::progress_toast::finish(&progress, op_id);
                     for (state, chrome) in &refresh_targets {
                         refresh(state, chrome);
                     }
@@ -2645,7 +2647,7 @@ fn run_archive_operation(
     control: veyra_filesystem::OperationControl,
     receiver: async_channel::Receiver<archive_ops::ArchiveEvent>,
 ) {
-    widgets::progress_toast::begin_with_verb(progress, &control, verb);
+    let op_id = widgets::progress_toast::begin_with_verb(progress, &control, verb);
 
     let window = window.clone();
     let progress = progress.clone();
@@ -2653,10 +2655,10 @@ fn run_archive_operation(
         while let Ok(event) = receiver.recv().await {
             match event {
                 archive_ops::ArchiveEvent::Progress(p) => {
-                    widgets::progress_toast::update(&progress, &p)
+                    widgets::progress_toast::update(&progress, op_id, &p)
                 }
                 archive_ops::ArchiveEvent::Done(result) => {
-                    widgets::progress_toast::finish(&progress);
+                    widgets::progress_toast::finish(&progress, op_id);
                     for (state, chrome) in &refresh_targets {
                         refresh(state, chrome);
                     }

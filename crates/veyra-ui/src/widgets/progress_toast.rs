@@ -1,31 +1,94 @@
-//! Bottom progress bar for the active bulk Copy/Move/Trash/Delete
-//! operation: current file, percent, byte total, and Pause/Resume/Cancel
-//! controls. A `GtkRevealer` rather than an `AdwToast` — Faz 5 needs live
-//! Pause/Resume buttons and a progress bar inside it, which a plain toast
-//! (text + one action) can't host.
+//! Faz 32 File Operation Queue: bottom panel listing every active bulk
+//! Copy/Move/Trash/Delete (and Faz 19 Compress/Extract) operation as its own
+//! row — current file, percent, byte total, and per-row Pause/Resume/Cancel
+//! controls. Previously a single shared row got silently rebound to
+//! whichever operation started most recently, so a second paste while a
+//! first was still copying made the first un-pausable/un-cancellable from
+//! the UI even though it kept running in the background. Each operation now
+//! gets its own row, keyed by an `OperationId`, so any number can run and be
+//! controlled concurrently.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 
 use veyra_filesystem::{format_size, OperationControl, OperationKind, Progress};
 
-#[derive(Clone)]
-pub(crate) struct ProgressToastHandles {
-    pub widget: gtk4::Revealer,
-    control: Rc<RefCell<Option<OperationControl>>>,
-    verb: Rc<RefCell<&'static str>>,
+/// Identifies one row/operation for the lifetime of `begin`..`finish`.
+pub(crate) type OperationId = u64;
+
+struct Row {
+    frame: gtk4::Box,
+    verb: &'static str,
     title_label: gtk4::Label,
     detail_label: gtk4::Label,
     progress_bar: gtk4::ProgressBar,
-    pause_button: gtk4::Button,
+}
+
+#[derive(Clone)]
+pub(crate) struct ProgressToastHandles {
+    pub widget: gtk4::Revealer,
+    list: gtk4::Box,
+    rows: Rc<RefCell<HashMap<OperationId, Row>>>,
+    next_id: Rc<Cell<OperationId>>,
 }
 
 pub(crate) fn build() -> ProgressToastHandles {
-    let control: Rc<RefCell<Option<OperationControl>>> = Rc::new(RefCell::new(None));
+    let list = gtk4::Box::new(gtk4::Orientation::Vertical, 1);
 
-    let title_label = gtk4::Label::new(None);
+    let scroller = gtk4::ScrolledWindow::new();
+    scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroller.set_max_content_height(240);
+    scroller.set_propagate_natural_height(true);
+    scroller.set_child(Some(&list));
+
+    let widget = gtk4::Revealer::new();
+    widget.set_child(Some(&scroller));
+    widget.set_transition_type(gtk4::RevealerTransitionType::SlideUp);
+    widget.set_reveal_child(false);
+
+    ProgressToastHandles {
+        widget,
+        list,
+        rows: Rc::new(RefCell::new(HashMap::new())),
+        next_id: Rc::new(Cell::new(0)),
+    }
+}
+
+fn verb(kind: OperationKind) -> &'static str {
+    match kind {
+        OperationKind::Copy => "Copying",
+        OperationKind::Move => "Moving",
+        OperationKind::Trash => "Moving to Trash",
+        OperationKind::Delete => "Deleting",
+    }
+}
+
+/// Adds a row for a freshly-started operation and binds `control` so that
+/// row's own Pause/Resume/Cancel buttons act on it. Returns the id later
+/// calls to `update`/`finish` must pass to target this row specifically.
+pub(crate) fn begin(
+    handles: &ProgressToastHandles,
+    control: &OperationControl,
+    kind: OperationKind,
+) -> OperationId {
+    begin_with_verb(handles, control, verb(kind))
+}
+
+/// Like [`begin`], for operations outside the Copy/Move/Trash/Delete
+/// `OperationKind` set (Faz 19's Compress/Extract, which share the same
+/// `OperationControl`/`Progress` machinery but aren't bulk file ops).
+pub(crate) fn begin_with_verb(
+    handles: &ProgressToastHandles,
+    control: &OperationControl,
+    verb: &'static str,
+) -> OperationId {
+    let id = handles.next_id.get();
+    handles.next_id.set(id + 1);
+
+    let title_label = gtk4::Label::new(Some(verb));
     title_label.set_xalign(0.0);
     title_label.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
     title_label.set_single_line_mode(true);
@@ -53,15 +116,12 @@ pub(crate) fn build() -> ProgressToastHandles {
         let control = control.clone();
         let pause_button_handle = pause_button.clone();
         pause_button.connect_clicked(move |_| {
-            let Some(op) = control.borrow().clone() else {
-                return;
-            };
-            if op.is_paused() {
-                op.resume();
+            if control.is_paused() {
+                control.resume();
                 pause_button_handle.set_icon_name("media-playback-pause-symbolic");
                 pause_button_handle.set_tooltip_text(Some("Pause"));
             } else {
-                op.pause();
+                control.pause();
                 pause_button_handle.set_icon_name("media-playback-start-symbolic");
                 pause_button_handle.set_tooltip_text(Some("Resume"));
             }
@@ -73,87 +133,46 @@ pub(crate) fn build() -> ProgressToastHandles {
     cancel_button.update_property(&[gtk4::accessible::Property::Label("Cancel")]);
     {
         let control = control.clone();
-        cancel_button.connect_clicked(move |_| {
-            if let Some(op) = control.borrow().clone() {
-                op.cancel();
-            }
-        });
+        cancel_button.connect_clicked(move |_| control.cancel());
     }
 
-    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-    content.set_margin_top(8);
-    content.set_margin_bottom(8);
-    content.set_margin_start(12);
-    content.set_margin_end(12);
-    content.append(&text_box);
-    content.append(&pause_button);
-    content.append(&cancel_button);
-    content.add_css_class("toolbar");
+    let frame = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    frame.set_margin_top(8);
+    frame.set_margin_bottom(8);
+    frame.set_margin_start(12);
+    frame.set_margin_end(12);
+    frame.append(&text_box);
+    frame.append(&pause_button);
+    frame.append(&cancel_button);
+    frame.add_css_class("toolbar");
 
-    let widget = gtk4::Revealer::new();
-    widget.set_child(Some(&content));
-    widget.set_transition_type(gtk4::RevealerTransitionType::SlideUp);
-    widget.set_reveal_child(false);
-
-    ProgressToastHandles {
-        widget,
-        control,
-        verb: Rc::new(RefCell::new("Working")),
-        title_label,
-        detail_label,
-        progress_bar,
-        pause_button,
-    }
-}
-
-fn verb(kind: OperationKind) -> &'static str {
-    match kind {
-        OperationKind::Copy => "Copying",
-        OperationKind::Move => "Moving",
-        OperationKind::Trash => "Moving to Trash",
-        OperationKind::Delete => "Deleting",
-    }
-}
-
-/// Reveals the bar for a freshly-started operation and binds `control` so
-/// Pause/Resume/Cancel act on it.
-pub(crate) fn begin(
-    handles: &ProgressToastHandles,
-    control: &OperationControl,
-    kind: OperationKind,
-) {
-    begin_with_verb(handles, control, verb(kind));
-}
-
-/// Like [`begin`], for operations outside the Copy/Move/Trash/Delete
-/// `OperationKind` set (Faz 19's Compress/Extract, which share the same
-/// `OperationControl`/`Progress` machinery but aren't bulk file ops).
-pub(crate) fn begin_with_verb(
-    handles: &ProgressToastHandles,
-    control: &OperationControl,
-    verb: &'static str,
-) {
-    *handles.control.borrow_mut() = Some(control.clone());
-    *handles.verb.borrow_mut() = verb;
-    handles
-        .pause_button
-        .set_icon_name("media-playback-pause-symbolic");
-    handles.pause_button.set_tooltip_text(Some("Pause"));
-    handles.title_label.set_label(verb);
-    handles.detail_label.set_label("");
-    handles.progress_bar.set_fraction(0.0);
+    handles.list.append(&frame);
+    handles.rows.borrow_mut().insert(
+        id,
+        Row {
+            frame,
+            verb,
+            title_label,
+            detail_label,
+            progress_bar,
+        },
+    );
     handles.widget.set_reveal_child(true);
+
+    id
 }
 
-/// Updates the bar from a new `Progress` snapshot.
-pub(crate) fn update(handles: &ProgressToastHandles, progress: &Progress) {
-    let verb = *handles.verb.borrow();
-    handles
-        .title_label
-        .set_label(&format!("{verb}… {}", progress.current_file));
-    handles
-        .progress_bar
-        .set_fraction(progress.percent() / 100.0);
+/// Updates row `id` from a new `Progress` snapshot. A no-op if that row
+/// already finished (e.g. a straggling event after cancel).
+pub(crate) fn update(handles: &ProgressToastHandles, id: OperationId, progress: &Progress) {
+    let rows = handles.rows.borrow();
+    let Some(row) = rows.get(&id) else {
+        return;
+    };
+
+    row.title_label
+        .set_label(&format!("{}… {}", row.verb, progress.current_file));
+    row.progress_bar.set_fraction(progress.percent() / 100.0);
 
     let detail = if progress.bytes_total > 0 {
         format!(
@@ -167,11 +186,17 @@ pub(crate) fn update(handles: &ProgressToastHandles, progress: &Progress) {
     } else {
         String::new()
     };
-    handles.detail_label.set_label(&detail);
+    row.detail_label.set_label(&detail);
 }
 
-/// Hides the bar and releases the finished operation's control handle.
-pub(crate) fn finish(handles: &ProgressToastHandles) {
-    handles.widget.set_reveal_child(false);
-    *handles.control.borrow_mut() = None;
+/// Removes row `id`'s widget and releases its control handle. Hides the
+/// whole queue panel once the last row is gone.
+pub(crate) fn finish(handles: &ProgressToastHandles, id: OperationId) {
+    let mut rows = handles.rows.borrow_mut();
+    if let Some(row) = rows.remove(&id) {
+        handles.list.remove(&row.frame);
+    }
+    if rows.is_empty() {
+        handles.widget.set_reveal_child(false);
+    }
 }
