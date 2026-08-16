@@ -93,8 +93,7 @@ fn save_to(path: &Path, bookmarks: &[Bookmark]) -> io::Result<()> {
         content.push('\n');
     }
     let tmp_path = path.with_extension("tmp");
-    std::fs::write(&tmp_path, content)?;
-    std::fs::rename(&tmp_path, path)
+    veyra_core::security::write_atomic_private(&tmp_path, path, content.as_bytes())
 }
 
 fn add_at(path: &Path, target: &VeyraPath, label: Option<String>) -> io::Result<()> {

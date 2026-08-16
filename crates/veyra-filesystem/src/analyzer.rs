@@ -179,7 +179,7 @@ fn walk(
                         largest_dirs,
                         duplicate_index,
                     );
-                    node.size_bytes += child_node.size_bytes;
+                    node.size_bytes = node.size_bytes.saturating_add(child_node.size_bytes);
                     largest_dirs.push(UsageEntry {
                         name: child_node.name.clone(),
                         path: child_node.path.clone(),
@@ -189,7 +189,7 @@ fn walk(
                 } else {
                     node.direct_file_count += 1;
                     let size = info.size().max(0) as u64;
-                    node.size_bytes += size;
+                    node.size_bytes = node.size_bytes.saturating_add(size);
                     largest_files.push(UsageEntry {
                         name: child_name.clone(),
                         path: child_path.clone(),

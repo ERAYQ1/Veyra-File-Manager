@@ -29,6 +29,11 @@ use std::path::PathBuf;
 /// since collapsing them (e.g. `"a/../../etc"` -> `"etc"`) could still
 /// change which real filesystem entry is being referenced.
 pub(crate) fn sanitize_entry_path(raw: &str) -> Option<PathBuf> {
+    if veyra_core::security::validate_filename(raw).is_err() {
+        // Null byte or absurdly long entry name — never a legitimate path,
+        // and a null byte can truncate the eventual syscall unpredictably.
+        return None;
+    }
     let mut out = PathBuf::new();
     for part in raw.split(['/', '\\']) {
         match part {
@@ -86,5 +91,16 @@ mod tests {
         assert_eq!(sanitize_entry_path("."), None);
         assert_eq!(sanitize_entry_path("./"), None);
         assert_eq!(sanitize_entry_path("/"), None);
+    }
+
+    #[test]
+    fn rejects_null_byte_in_entry_name() {
+        assert_eq!(sanitize_entry_path("evil\0.txt"), None);
+    }
+
+    #[test]
+    fn rejects_overlong_entry_name() {
+        let long = "a".repeat(veyra_core::security::MAX_PATH_BYTES + 1);
+        assert_eq!(sanitize_entry_path(&long), None);
     }
 }

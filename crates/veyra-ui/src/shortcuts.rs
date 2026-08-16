@@ -383,8 +383,7 @@ fn save_to(path: &Path, map: &ShortcutMap) -> io::Result<()> {
     let json = serde_json::to_string_pretty(&map.0)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     let tmp_path = path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, json)?;
-    std::fs::rename(&tmp_path, path)
+    veyra_core::security::write_atomic_private(&tmp_path, path, json.as_bytes())
 }
 
 /// Renders `accel` (GTK's `<Primary>c` syntax) as a display string like

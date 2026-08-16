@@ -190,8 +190,7 @@ fn save_history_to(path: &Path, entries: &[String]) -> io::Result<()> {
         content.push('\n');
     }
     let tmp_path = path.with_extension("tmp");
-    std::fs::write(&tmp_path, content)?;
-    std::fs::rename(&tmp_path, path)
+    veyra_core::security::write_atomic_private(&tmp_path, path, content.as_bytes())
 }
 
 fn record_history_at(path: &Path, uri: &str) -> io::Result<()> {

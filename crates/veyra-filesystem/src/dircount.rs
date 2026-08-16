@@ -65,7 +65,7 @@ fn walk(
                     let _ = walk(&child, &child_path, control, count);
                 } else {
                     count.file_count += 1;
-                    count.total_size += info.size().max(0) as u64;
+                    count.total_size = count.total_size.saturating_add(info.size().max(0) as u64);
                 }
             }
             Ok(None) => break,

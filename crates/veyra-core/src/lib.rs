@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod error;
+pub mod security;
 
 pub use config::XdgDirs;
 pub use error::VeyraError;

@@ -1,5 +1,30 @@
 # Changelog
 
+## Faz 29 — Security Hardening & Vulnerability Prevention / Güvenlik Sertleştirmesi ve Zafiyet Önleme (`veyra-core`, `veyra-filesystem`, `veyra-ui`)
+
+Faz 0-28 boyunca kurulmuş savunmaların (Zip Slip koruması, `NOFOLLOW_SYMLINKS` tabanlı symlink izolasyonu, argv-tabanlı süreç oluşturma) `docs/security-model.md`'ye karşı denetimi ve kalan boşlukların kapatılması. Denetim archive extraction, recursive dizin gezintisi, süreç oluşturma ve loglamanın zaten Kural #19-24'e uyduğunu doğruladı; üç somut sertleştirme uygulandı.
+
+### Eklenenler
+- **`veyra-core::security` (yeni modül):** Tüm crate'ler arasında paylaşılan güvenlik ilkelleri.
+  - **`validate_filename(name: &str) -> Result<(), FilenameError>`:** Null-byte enjeksiyonunu (`FilenameError::NullByte`) ve `MAX_PATH_BYTES` (4096, Linux `PATH_MAX`) üstü aşırı uzun yolları (`FilenameError::TooLong`) reddeder; hiçbir girdide panic olmaz.
+  - **`has_bidi_override(name: &str) -> bool`:** Unicode bidi override/embedding karakterlerini (`U+202A`-`U+202E`, `U+2066`-`U+2069`, örn. RTL Override `U+202E`) tespit eder — dosya uzantısı spoofing'ine karşı UI uyarısı için advisory sinyal (sert red değil, meşru RTL dosya adlarını engellememek için).
+  - **`write_atomic_private(tmp_path, final_path, contents) -> io::Result<()>`:** Atomik `.tmp` + rename yazma deseni artık `.tmp` dosyasını rename'den önce `0600` izinlerine kısıtlıyor ve herhangi bir adım başarısız olursa `.tmp` kalıntısını temizliyor (Security Model 3.2).
+- **`archive::security::sanitize_entry_path`:** Artık her arşiv girdi adını `veyra_core::security::validate_filename` ile de doğruluyor — null-byte içeren veya aşırı uzun girdi adları `SkipReason::UnsafePath` olarak sessizce reddediliyor (zip/tar/7z'nin hepsi aynı chokepoint'ten geçtiği için tek noktadan).
+- **Aritmetik taşma sertleştirmesi:** `analyzer.rs` (`UsageNode::size_bytes` özyinelemeli toplama) ve `dircount.rs` (`DirCount::total_size`) artık `+=` yerine `saturating_add()` kullanıyor — çok büyük ağaçlarda `u64` taşmasına karşı savunma.
+- **Güvenli geçici dosyalar:** `bookmarks.rs`, `shortcuts.rs`, `network.rs` atomik yazımları (`.tmp` + rename) artık `write_atomic_private` üzerinden geçiyor; `.tmp` dosyası artık rename öncesi kısa süreliğine dünya-okunabilir kalmıyor.
+
+### Doğrulananlar (kod değişikliği gerektirmedi)
+- **Path Traversal / Zip Slip (`archive/security.rs`, `archive/extract.rs`):** `sanitize_entry_path` `..`, mutlak yol ve Windows sürücü önekini reddediyor/normalize ediyor; her format (zip/tar/tar.gz/tar.xz/tar.zst/7z) `plan_entry` chokepoint'inden geçiyor.
+- **Symlink & TOCTOU (`analyzer.rs`, `dircount.rs`, `queue.rs`):** Tüm özyinelemeli gezintiler `gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS` kullanıyor (lstat eşdeğeri) — symlink'ler asla takip edilmiyor, döngü riski yapısal olarak yok.
+- **Shell/Komut Enjeksiyonu (`privileged.rs`, `terminal.rs`, `open_with.rs`):** Sıfır `sh -c`; her yerde `Command::new(binary).arg(...)` tipli/doğrulanmış argümanlarla.
+- **Hassas Veri Loglaması:** `tracing` çağrılarında parola/jeton/kimlik bilgisi loglanmıyor; loglanan yollar kullanıcı verisi değil UI'da zaten görünür dosya yolları.
+
+### Testler
+- **Yeni test paketi `crates/veyra-filesystem/tests/security.rs`:** Path Traversal (mutlak yol zip girdisi), Zip Slip (tar `..` girdisi, raw header bytes ile), symlink materyalizasyon reddi (tar symlink girdisi), symlink döngü güvenliği (`count_dir_recursive` özyinelemeli sayım kendine referanslı symlink üzerinde), null-byte/aşırı uzun dosya adı reddi, RTL bidi override tespiti, shell metakarakter enjeksiyon kanıtı (argv-tabanlı `Command` semantiği) — 9 test.
+- **`veyra-core::security` birim testleri:** null-byte reddi, aşırı uzun yol reddi, normal isimlerin kabulü, RTL override tespiti, `write_atomic_private` izin/temizlik davranışı — 6 test.
+- **`archive::security` genişletilmiş testler:** null-byte içeren ve aşırı uzun arşiv girdi adlarının reddi — 2 yeni test.
+- Toplam: 310 → 327 test, hepsi geçiyor; `cargo fmt --all -- --check` ve `cargo clippy --workspace --all-targets -- -D warnings` temiz.
+
 ## Faz 28 — Permissions & Privileged Operations / İzinler ve Ayrıcalıklı İşlemler (`veyra-filesystem`, `veyra-ui`)
 
 ### Eklenenler
