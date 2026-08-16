@@ -37,6 +37,7 @@ mod tab_page;
 mod terminal;
 mod thumbnails;
 mod trash;
+mod undo;
 mod views;
 mod widgets;
 mod window;

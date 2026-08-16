@@ -93,6 +93,20 @@ pub struct OperationOutcome {
     pub skipped: Vec<VeyraPath>,
     pub errors: Vec<(VeyraPath, FsError)>,
     pub cancelled: bool,
+    /// Faz 33: root-level `(original_path, trashed_file_path)` pairs for a
+    /// `Trash` request — the Undo/Redo engine's raw material for restoring
+    /// exactly these entries later. Empty for every other `OperationKind`.
+    pub trashed: Vec<(VeyraPath, VeyraPath)>,
+    /// Faz 33: root-level `(source, destination)` pairs for a `Move`
+    /// request — one per top-level item requested, not per descendant file.
+    /// Only populated once the whole batch completes with zero errors (a
+    /// partial failure leaves it empty rather than risk the Undo/Redo
+    /// engine acting on a half-finished move). Empty for every other kind.
+    pub moved: Vec<(VeyraPath, VeyraPath)>,
+    /// Faz 33: root-level `(source, destination)` pairs for a `Copy`
+    /// request, under the same all-or-nothing population rule as `moved`.
+    /// Empty for every other kind.
+    pub copied: Vec<(VeyraPath, VeyraPath)>,
 }
 
 /// Runs `request` to completion (or cancellation/pause), invoking
@@ -136,8 +150,14 @@ fn run_simple(
             bytes_total: 0,
         });
 
-        let result = match request.kind {
-            OperationKind::Trash => ops::trash(&source),
+        let result: Result<(), FsError> = match request.kind {
+            OperationKind::Trash => match ops::trash_tracked(&source) {
+                Ok(trashed) => {
+                    outcome.trashed.push((source.clone(), trashed));
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            },
             OperationKind::Delete => ops::delete(&source),
             OperationKind::Copy | OperationKind::Move => unreachable!(),
         };
@@ -177,6 +197,12 @@ fn run_copy_move(
     // errored (conservative: an unrelated failure leaves every source
     // intact rather than risk losing data).
     let mut pending_move_cleanup: Vec<VeyraPath> = Vec::new();
+    // Faz 33: root-level (source, resolved destination) pairs, filled in as
+    // each top-level item is either fast-rename-moved or successfully
+    // planned via `flatten` — the Undo/Redo engine's raw material. Finalized
+    // into `outcome.moved`/`outcome.copied` below, once the whole batch's
+    // error state is known.
+    let mut root_pairs: Vec<(VeyraPath, VeyraPath)> = Vec::new();
 
     for source in &request.sources {
         if control.is_cancelled() {
@@ -232,13 +258,20 @@ fn run_copy_move(
         if request.kind == OperationKind::Move && ops::move_entry(source, &dest, overwrite).is_ok()
         {
             outcome.completed.push(source.clone());
+            // Already fully committed to disk, independent of anything
+            // else in this batch, so it's recorded unconditionally rather
+            // than gated on the whole-batch error check below.
+            outcome.moved.push((source.clone(), dest.clone()));
             continue;
         }
 
         if let Err(err) = flatten(source, &dest, &mut plan) {
             outcome.errors.push((source.clone(), err));
-        } else if request.kind == OperationKind::Move {
-            pending_move_cleanup.push(source.clone());
+        } else {
+            root_pairs.push((source.clone(), dest.clone()));
+            if request.kind == OperationKind::Move {
+                pending_move_cleanup.push(source.clone());
+            }
         }
     }
 
@@ -309,6 +342,14 @@ fn run_copy_move(
     if request.kind == OperationKind::Move && outcome.errors.is_empty() {
         for source in &pending_move_cleanup {
             let _ = ops::delete(source);
+        }
+    }
+
+    if outcome.errors.is_empty() {
+        match request.kind {
+            OperationKind::Move => outcome.moved.extend(root_pairs),
+            OperationKind::Copy => outcome.copied.extend(root_pairs),
+            OperationKind::Trash | OperationKind::Delete => unreachable!(),
         }
     }
 

@@ -2,7 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use veyra_filesystem::{delete, empty_trash, list_trash, restore_from_trash, trash, VeyraPath};
+use veyra_filesystem::{
+    delete, empty_trash, list_trash, restore_from_trash, trash, trash_tracked, VeyraPath,
+};
 
 /// Every test in this file touches the real (or, for `empty_trash`, an
 /// `XDG_DATA_HOME`-redirected) trash and/or process-wide environment
@@ -48,6 +50,67 @@ fn trash_then_restore_round_trip() {
     );
 
     delete(&restored).unwrap();
+}
+
+/// Faz 33: unlike `trash`, `trash_tracked` hands back exactly where it put
+/// the file — no need to search `Trash/info` for it — and that location must
+/// itself be a valid `restore_from_trash` argument, since that's the whole
+/// point (the Undo/Redo engine's raw material for reversing a Trash).
+#[test]
+fn trash_tracked_returns_a_restorable_location() {
+    let _guard = TRASH_TEST_LOCK.lock().unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("veyra-trash-tracked-test-")
+        .tempdir_in(std::env::var("HOME").expect("HOME must be set"))
+        .unwrap();
+    let original = dir.path().join("tracked.txt");
+    fs::write(&original, b"tracked payload").unwrap();
+
+    let path = VeyraPath::from_local(&original);
+    let trashed = trash_tracked(&path).unwrap();
+    assert!(!original.exists());
+    assert!(trashed.as_local_path().unwrap().exists());
+
+    let restored = restore_from_trash(&trashed).unwrap();
+    assert_eq!(restored, path);
+    assert_eq!(fs::read(&original).unwrap(), b"tracked payload");
+
+    delete(&path).unwrap();
+}
+
+/// Two same-named items trashed in a row must land at two distinct
+/// `Trash/files` entries, each independently restorable back to its own
+/// original location — otherwise the second trash would silently clobber
+/// the first's data.
+#[test]
+fn trash_tracked_deduplicates_colliding_names() {
+    let _guard = TRASH_TEST_LOCK.lock().unwrap();
+    let dir_a = tempfile::Builder::new()
+        .prefix("veyra-trash-tracked-a-")
+        .tempdir_in(std::env::var("HOME").expect("HOME must be set"))
+        .unwrap();
+    let dir_b = tempfile::Builder::new()
+        .prefix("veyra-trash-tracked-b-")
+        .tempdir_in(std::env::var("HOME").expect("HOME must be set"))
+        .unwrap();
+    let original_a = dir_a.path().join("dup.txt");
+    let original_b = dir_b.path().join("dup.txt");
+    fs::write(&original_a, b"a").unwrap();
+    fs::write(&original_b, b"b").unwrap();
+
+    let path_a = VeyraPath::from_local(&original_a);
+    let path_b = VeyraPath::from_local(&original_b);
+    let trashed_a = trash_tracked(&path_a).unwrap();
+    let trashed_b = trash_tracked(&path_b).unwrap();
+    assert_ne!(trashed_a, trashed_b);
+
+    let restored_a = restore_from_trash(&trashed_a).unwrap();
+    let restored_b = restore_from_trash(&trashed_b).unwrap();
+    assert_eq!(fs::read(restored_a.as_local_path().unwrap()).unwrap(), b"a");
+    assert_eq!(fs::read(restored_b.as_local_path().unwrap()).unwrap(), b"b");
+
+    delete(&path_a).unwrap();
+    delete(&path_b).unwrap();
 }
 
 /// `list_trash` must surface an entry that was just trashed, with the

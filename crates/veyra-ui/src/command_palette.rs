@@ -85,6 +85,22 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
             action_name: "win.copy-location-selected",
             action_target: None,
         },
+        CommandItem {
+            id: "undo",
+            title: "Undo",
+            category: "File Operations",
+            icon_name: "edit-undo-symbolic",
+            action_name: "win.undo",
+            action_target: None,
+        },
+        CommandItem {
+            id: "redo",
+            title: "Redo",
+            category: "File Operations",
+            icon_name: "edit-redo-symbolic",
+            action_name: "win.redo",
+            action_target: None,
+        },
         // --- Navigation & Tabs ---
         CommandItem {
             id: "new-tab",

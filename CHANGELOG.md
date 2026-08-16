@@ -1,5 +1,30 @@
 # Changelog
 
+## Faz 33 — Undo / Redo Engine (Geri Al / Yinele Motoru) (`veyra-filesystem`, `veyra-ui`)
+
+Rename, Move, Copy, Trash, Create Folder/File işlemlerinin tamamı artık `Ctrl+Z` ile geri alınabiliyor, `Ctrl+Shift+Z`/`Ctrl+Y` ile yinelenebiliyor. Kalıcı silme (`Shift+Delete`) hâlâ geri alınamaz (Kural #39) ve gerçekleştiğinde bekleyen kayıtları yığından temizliyor.
+
+### Eklenenler
+- **`veyra_filesystem::trash_tracked` (`ops.rs`):** `trash()`'in aksine, ögeyi `Trash/files/` altında nereye taşıdığını (fiziksel yolu) geri döndürüyor — GIO'nun `File::trash()`'i bunu asla söylemiyor. `restore_from_trash`/`list_trash` ile aynı doğrudan freedesktop.org Trash-spec okuma/yazma yaklaşımını izliyor (ana Trash'e özel, aynı belgelenmiş sınırlama).
+- **`OperationOutcome` (`queue.rs`) yeni alanlar:** `trashed`/`moved`/`copied` — kök seviyeli `(kaynak, hedef)` çiftleri. `moved`/`copied` yalnızca tüm grup hatasız tamamlandığında dolduruluyor (kısmi başarısızlıkta Geri Al/Yinele motoru yarım kalmış bir işlem üzerinde çalışmasın diye).
+- **`crates/veyra-ui/src/undo.rs` (yeni modül):** `UndoableAction` (Rename/Move/Copy/Trash/Restore/CreateFolder/CreateFile), 50 derinlik sınırlı `UndoStack` (yeni eylem `redo` yığınını temizler), ve `perform_undo`/`perform_redo` — her ikisi de hedefin hâlâ var olup olmadığını kontrol edip (Kural #15/#16, asla panic) başarısız/eksik ögeleri zarifçe atlıyor, kısmi başarıyı karşı yığına geri yazıyor.
+- **Pencere entegrasyonu (`window.rs`):** `win.undo`/`win.redo` eylemleri; `run_bulk_operation` artık Move/Copy/Trash başarısını `UndoStack`'e kaydediyor, kalıcı silme ise `UndoStack::purge` ile referans veren kayıtları temizliyor. `rename-selected`, `create-folder`/`create-document`, `restore-selected` kendi çağrı noktalarında kayıt yapıyor.
+- **Kısayollar/Komut Paleti:** `win.undo` (`Ctrl+Z`), `win.redo` (`Ctrl+Shift+Z`, `Ctrl+Y`) — `shortcuts.rs` kataloğuna ve `command_palette.rs`'e eklendi.
+
+### Kapsam kararları
+- Spec `Copy` eylemini `Vec<dst_path>` olarak tanımlıyor; Yinele bir kaynağa ihtiyaç duyduğu için `Vec<(src, dst)>` çifti tutuluyor.
+- `win.restore-selected` için ayrı bir `Restore` varyantı eklendi — restorasyon `Trash`'in geri alınması değil, kendi başına ileri yönlü bir kullanıcı eylemi (Geri Alınması yeniden çöpe atar, Yinelenmesi yeniden geri yükler).
+- Geri Al/Yinele geri bildirimi şu an panel durum çubuğunda gösteriliyor (yenilemenin öge sayısı güncellemesini ezmemesi için kısa gecikmeli) — pencerede henüz bir Toast/Overlay alt yapısı yok, yeni bir tane eklemek yerine mevcut durum çubuğu deseni (`chrome.status_left`) kullanıldı.
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 355/355 geçti (345 → 355; yeni: `veyra-filesystem/tests/trash.rs`'e 2, `veyra-ui::undo` modülüne 8 test).
+
+### Sıradaki Faz
+Faz 34 — Batch Rename (Toplu Yeniden Adlandırma).
+
 ## Faz 32 — File Operation Queue / Merkezi Dosya İşlemleri Kuyruğu (`veyra-ui`)
 
 ### Eklenenler

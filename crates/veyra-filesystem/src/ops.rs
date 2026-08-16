@@ -351,6 +351,77 @@ pub fn restore_from_trash(trashed_file: &VeyraPath) -> Result<VeyraPath, FsError
     Ok(destination)
 }
 
+/// Faz 33: Trashes `path` like `trash`, but returns the physical location it
+/// was moved to under `Trash/files/` — needed by the Undo/Redo engine, which
+/// must be able to call `restore_from_trash` on this exact entry later.
+/// Implemented as a direct freedesktop.org Trash-spec write (mirroring
+/// `restore_from_trash`/`list_trash`) rather than through GIO's
+/// `File::trash`, which only reports success/failure and never the
+/// destination name it chose. Scoped to the home trash, matching
+/// `restore_from_trash`'s documented limitation.
+pub fn trash_tracked(path: &VeyraPath) -> Result<VeyraPath, FsError> {
+    let root = home_trash_root().ok_or_else(|| {
+        FsError::InvalidPath(
+            "cannot resolve home trash directory (no XDG_DATA_HOME/HOME)".to_string(),
+        )
+    })?;
+    let files_dir = root.join("files");
+    let info_dir = root.join("info");
+    for dir in [&files_dir, &info_dir] {
+        if !dir.is_dir() {
+            std::fs::create_dir_all(dir).map_err(|source| FsError::Io {
+                path: VeyraPath::from_local(dir.clone()),
+                source,
+            })?;
+        }
+    }
+
+    let original = path.as_local_path().ok_or_else(|| {
+        FsError::InvalidPath(format!("trash_tracked requires a local path, got {path}"))
+    })?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| FsError::InvalidPath(format!("cannot determine a file name for {path}")))?;
+
+    let exists = |candidate: &str| {
+        files_dir.join(candidate).exists()
+            || info_dir.join(format!("{candidate}.trashinfo")).exists()
+    };
+    let unique_name = if !exists(&name) {
+        name
+    } else {
+        crate::conflict::suggest_name(&name, exists)
+    };
+
+    let trashed_path = VeyraPath::from_local(files_dir.join(&unique_name));
+    let trashinfo_path = info_dir.join(format!("{unique_name}.trashinfo"));
+
+    let deletion_date = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
+    let contents = format!(
+        "[Trash Info]\nPath={}\nDeletionDate={}\n",
+        percent_encode(&original.to_string_lossy()),
+        deletion_date
+    );
+    std::fs::write(&trashinfo_path, contents).map_err(|source| FsError::Io {
+        path: VeyraPath::from_local(trashinfo_path.clone()),
+        source,
+    })?;
+
+    if let Err(err) = path.to_gio_file().move_(
+        &trashed_path.to_gio_file(),
+        gio::FileCopyFlags::NONE,
+        gio::Cancellable::NONE,
+        None::<&mut dyn FnMut(i64, i64)>,
+    ) {
+        // Best-effort: don't leave an orphaned .trashinfo record behind for
+        // a move that never actually happened.
+        let _ = std::fs::remove_file(&trashinfo_path);
+        return Err(map_gio_error(path, err));
+    }
+
+    Ok(trashed_path)
+}
+
 /// Resolves the home trash root (`$XDG_DATA_HOME/Trash`, falling back to
 /// `~/.local/share/Trash` per the XDG Base Directory spec), matching the
 /// directory `trash()` (via GIO) and `restore_from_trash` already read from
@@ -435,6 +506,23 @@ pub fn empty_trash() -> Result<(), FsError> {
         Some(err) => Err(err),
         None => Ok(()),
     }
+}
+
+/// Percent-encodes a local path for a Trash spec `Path=` value — the
+/// `percent_decode` counterpart `restore_from_trash` reads back. Encodes
+/// every byte outside the unreserved set (`A-Za-z0-9-_.~/`), same
+/// dependency-free, narrow-purpose scope as `percent_decode` below.
+fn percent_encode(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for byte in input.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(*byte as char)
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
 }
 
 /// Decodes percent-encoded octets (`%XX`) in a Trash spec `Path=` value.

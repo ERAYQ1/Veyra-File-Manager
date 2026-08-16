@@ -121,6 +121,16 @@ pub(crate) fn catalog() -> Vec<ShortcutEntry> {
             category: CATEGORY_FILE_OPERATIONS,
         },
         ShortcutEntry {
+            action: "win.undo",
+            label: "Undo",
+            category: CATEGORY_FILE_OPERATIONS,
+        },
+        ShortcutEntry {
+            action: "win.redo",
+            label: "Redo",
+            category: CATEGORY_FILE_OPERATIONS,
+        },
+        ShortcutEntry {
             action: "win.copy-to-other-panel-selected",
             label: "Copy to Other Panel",
             category: CATEGORY_FILE_OPERATIONS,
@@ -254,6 +264,8 @@ pub(crate) fn default_shortcuts() -> ShortcutMap {
     set("win.set-view-mode::compact", &["<Primary>2"]);
     set("win.set-view-mode::details", &["<Primary>3"]);
     set("win.restore-selected", &["<Primary><Shift>r"]);
+    set("win.undo", &["<Primary>z"]);
+    set("win.redo", &["<Primary><Shift>z", "<Primary>y"]);
     set("win.show-shortcuts-help", &["<Primary>question"]);
     // No default accelerator: reset is destructive to a user's
     // customization and is reachable from the shortcuts help window and

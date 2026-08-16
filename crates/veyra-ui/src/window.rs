@@ -18,11 +18,12 @@ use crate::preview::{self, PreviewPanelHandles};
 use crate::split_view::{self, Chrome, Panel, PanelId, Panels};
 use crate::state::{AppState, SharedState};
 use crate::tab_page::{active_tab, TabPage, TabRegistry, ViewSelections};
+use crate::undo::{SharedUndoStack, UndoStack, UndoableAction};
 use crate::views::ViewMode;
 use crate::widgets::progress_toast::ProgressToastHandles;
 use crate::{
     archive_ops, breadcrumbs, dialogs, fs_async, headerbar, open_with, operations, recent,
-    shortcuts, sidebar, terminal, trash, widgets,
+    shortcuts, sidebar, terminal, trash, undo, widgets,
 };
 
 /// A single Copy/Cut clipboard slot, shared across both panels and all their
@@ -53,6 +54,7 @@ pub(crate) fn build_window(
     let focused: Rc<RefCell<PanelId>> = Rc::new(RefCell::new(PanelId::Left));
 
     let clipboard: Rc<RefCell<Option<ClipboardEntry>>> = Rc::new(RefCell::new(None));
+    let undo_stack: SharedUndoStack = Rc::new(RefCell::new(UndoStack::new()));
     let has_clipboard: Rc<dyn Fn() -> bool> = {
         let clipboard = clipboard.clone();
         Rc::new(move || clipboard.borrow().is_some())
@@ -102,7 +104,7 @@ pub(crate) fn build_window(
         .default_width(1200)
         .default_height(720)
         .build();
-    let dnd_execute = build_dnd_executor(&window, &panels, &progress);
+    let dnd_execute = build_dnd_executor(&window, &panels, &progress, &undo_stack);
 
     wire_panel(&panels.left, &focused, &header, &refresh_preview);
     wire_panel(&panels.right, &focused, &header, &refresh_preview);
@@ -227,8 +229,17 @@ pub(crate) fn build_window(
         refresh_preview.clone(),
         thumbnails.clone(),
         dnd_execute.clone(),
+        &undo_stack,
     );
-    setup_operation_actions(app, &window, &panels, &focused, &progress, &clipboard);
+    setup_operation_actions(
+        app,
+        &window,
+        &panels,
+        &focused,
+        &progress,
+        &clipboard,
+        &undo_stack,
+    );
     setup_archive_actions(&window, &panels, &focused, &progress);
     setup_context_menu_actions(
         app,
@@ -240,11 +251,13 @@ pub(crate) fn build_window(
         refresh_preview.clone(),
         thumbnails.clone(),
         dnd_execute.clone(),
+        &undo_stack,
     );
     setup_properties_actions(app, &window, &panels, &focused, thumbnails);
     setup_preview_actions(app, &window, &preview, &header, refresh_preview.clone());
     setup_recent_actions(&window, &panels, privacy_mode);
-    setup_trash_actions(app, &window, &panels, &focused);
+    setup_trash_actions(app, &window, &panels, &focused, &undo_stack);
+    setup_undo_actions(app, &window, &panels, &undo_stack);
     setup_disk_analyzer_actions(app, &window, &panels, &focused, navigate.clone());
     setup_terminal_actions(app, &window, &panels, &focused);
     setup_terminal_as_root_actions(app, &window, &panels, &focused);
@@ -842,6 +855,7 @@ fn setup_split_view_actions(
     refresh_preview: Rc<dyn Fn()>,
     thumbnails: Rc<crate::thumbnails::ThumbnailService>,
     dnd_execute: dnd::DropExecutor,
+    undo_stack: &SharedUndoStack,
 ) {
     let action_toggle_split = gio::SimpleAction::new("toggle-split-view", None);
     {
@@ -892,8 +906,16 @@ fn setup_split_view_actions(
         let panels = panels.clone();
         let focused = focused.clone();
         let progress = progress.clone();
+        let undo_stack = undo_stack.clone();
         action_copy_other.connect_activate(move |_, _| {
-            transfer_to_other_panel(&window, &panels, &focused, &progress, OperationKind::Copy);
+            transfer_to_other_panel(
+                &window,
+                &panels,
+                &focused,
+                &progress,
+                OperationKind::Copy,
+                &undo_stack,
+            );
         });
     }
     window.add_action(&action_copy_other);
@@ -905,8 +927,16 @@ fn setup_split_view_actions(
         let panels = panels.clone();
         let focused = focused.clone();
         let progress = progress.clone();
+        let undo_stack = undo_stack.clone();
         action_move_other.connect_activate(move |_, _| {
-            transfer_to_other_panel(&window, &panels, &focused, &progress, OperationKind::Move);
+            transfer_to_other_panel(
+                &window,
+                &panels,
+                &focused,
+                &progress,
+                OperationKind::Move,
+                &undo_stack,
+            );
         });
     }
     window.add_action(&action_move_other);
@@ -923,6 +953,7 @@ fn transfer_to_other_panel(
     focused: &Rc<RefCell<PanelId>>,
     progress: &ProgressToastHandles,
     kind: OperationKind,
+    undo_stack: &SharedUndoStack,
 ) {
     if !panels.right.frame.is_visible() {
         return;
@@ -953,6 +984,7 @@ fn transfer_to_other_panel(
         kind,
         vec![item.path],
         Some(destination),
+        undo_stack,
     );
 }
 
@@ -969,6 +1001,7 @@ fn setup_operation_actions(
     focused: &Rc<RefCell<PanelId>>,
     progress: &ProgressToastHandles,
     clipboard: &Rc<RefCell<Option<ClipboardEntry>>>,
+    undo_stack: &SharedUndoStack,
 ) {
     let action_copy = gio::SimpleAction::new("copy-selection", None);
     {
@@ -1019,6 +1052,7 @@ fn setup_operation_actions(
         let focused = focused.clone();
         let progress = progress.clone();
         let clipboard = clipboard.clone();
+        let undo_stack = undo_stack.clone();
         action_paste.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
@@ -1040,6 +1074,7 @@ fn setup_operation_actions(
                 kind,
                 vec![entry.path],
                 Some(destination),
+                &undo_stack,
             );
         });
     }
@@ -1052,6 +1087,7 @@ fn setup_operation_actions(
         let panels = panels.clone();
         let focused = focused.clone();
         let progress = progress.clone();
+        let undo_stack = undo_stack.clone();
         action_trash.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
@@ -1065,6 +1101,7 @@ fn setup_operation_actions(
                     OperationKind::Trash,
                     vec![item.path],
                     None,
+                    &undo_stack,
                 );
             }
         });
@@ -1078,6 +1115,7 @@ fn setup_operation_actions(
         let panels = panels.clone();
         let focused = focused.clone();
         let progress = progress.clone();
+        let undo_stack = undo_stack.clone();
         action_delete.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
@@ -1092,6 +1130,7 @@ fn setup_operation_actions(
             let progress = progress.clone();
             let path = item.path;
             let path_for_delete = path.clone();
+            let undo_stack = undo_stack.clone();
             dialogs::delete_confirm::show(&window, std::slice::from_ref(&path), move || {
                 run_bulk_operation(
                     &window_for_confirm,
@@ -1100,6 +1139,7 @@ fn setup_operation_actions(
                     OperationKind::Delete,
                     vec![path_for_delete],
                     None,
+                    &undo_stack,
                 );
             });
         });
@@ -1275,6 +1315,7 @@ fn setup_context_menu_actions(
     refresh_preview: Rc<dyn Fn()>,
     thumbnails: Rc<crate::thumbnails::ThumbnailService>,
     dnd_execute: dnd::DropExecutor,
+    undo_stack: &SharedUndoStack,
 ) {
     let action_not_implemented = gio::SimpleAction::new("not-implemented", None);
     action_not_implemented.set_enabled(false);
@@ -1408,6 +1449,7 @@ fn setup_context_menu_actions(
         let window = window.clone();
         let panels = panels.clone();
         let focused = focused.clone();
+        let undo_stack = undo_stack.clone();
         action_rename.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
@@ -1421,16 +1463,24 @@ fn setup_context_menu_actions(
             let state = tab.state.clone();
             let chrome = panel.chrome.clone();
             let previous_name = current_name.clone();
+            let undo_stack = undo_stack.clone();
             dialogs::rename_dialog::show(&window, &current_name, move |new_name| {
                 if new_name.is_empty() || new_name == previous_name {
                     return;
                 }
                 let state = state.clone();
                 let chrome = chrome.clone();
+                let old_path = path.clone();
+                let undo_stack = undo_stack.clone();
                 fs_async::run_blocking(
                     move || veyra_filesystem::rename(&path, &new_name),
                     move |result| match result {
-                        Ok(_) => refresh(&state, &chrome),
+                        Ok(new_path) => {
+                            undo_stack
+                                .borrow_mut()
+                                .record(UndoableAction::Rename { old_path, new_path });
+                            refresh(&state, &chrome);
+                        }
                         Err(err) => {
                             tracing::warn!(error = %err, "rename failed");
                             chrome
@@ -1508,10 +1558,11 @@ fn setup_context_menu_actions(
     {
         let panels = panels.clone();
         let focused = focused.clone();
+        let undo_stack = undo_stack.clone();
         action_create_folder.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             if let Some(tab) = active_tab(&panel.tab_view, &panel.registry) {
-                create_child_entry(&tab.state, &panel.chrome, "New Folder", true);
+                create_child_entry(&tab.state, &panel.chrome, "New Folder", true, &undo_stack);
             }
         });
     }
@@ -1522,10 +1573,17 @@ fn setup_context_menu_actions(
     {
         let panels = panels.clone();
         let focused = focused.clone();
+        let undo_stack = undo_stack.clone();
         action_create_document.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             if let Some(tab) = active_tab(&panel.tab_view, &panel.registry) {
-                create_child_entry(&tab.state, &panel.chrome, "New Document", false);
+                create_child_entry(
+                    &tab.state,
+                    &panel.chrome,
+                    "New Document",
+                    false,
+                    &undo_stack,
+                );
             }
         });
     }
@@ -2003,6 +2061,7 @@ fn setup_trash_actions(
     window: &adw::ApplicationWindow,
     panels: &Panels,
     focused: &Rc<RefCell<PanelId>>,
+    undo_stack: &SharedUndoStack,
 ) {
     let action_empty_trash = gio::SimpleAction::new("empty-trash", None);
     {
@@ -2041,6 +2100,7 @@ fn setup_trash_actions(
         let window = window.clone();
         let panels = panels.clone();
         let focused = focused.clone();
+        let undo_stack = undo_stack.clone();
         action_restore.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
@@ -2052,10 +2112,17 @@ fn setup_trash_actions(
             let window = window.clone();
             let state = tab.state.clone();
             let chrome = panel.chrome.clone();
+            let trashed_path = item.path.clone();
+            let undo_stack = undo_stack.clone();
             fs_async::run_blocking(
                 move || veyra_filesystem::restore_from_trash(&item.path),
                 move |result| match result {
-                    Ok(_) => refresh(&state, &chrome),
+                    Ok(restored) => {
+                        undo_stack
+                            .borrow_mut()
+                            .record(UndoableAction::Restore(vec![(restored, trashed_path)]));
+                        refresh(&state, &chrome);
+                    }
                     Err(err) => {
                         tracing::warn!(error = %err, "failed to restore item from trash");
                         show_error_dialog(&window, "Unable to Restore Item", &err.to_string());
@@ -2066,6 +2133,96 @@ fn setup_trash_actions(
     }
     window.add_action(&action_restore);
     app.set_accels_for_action("win.restore-selected", &["<Primary><Shift>r"]);
+}
+
+/// Registers Faz 33's `win.undo` (`Ctrl+Z`) and `win.redo`
+/// (`Ctrl+Shift+Z`/`Ctrl+Y`) actions: pop one step off the shared
+/// `UndoStack`, run its inverse filesystem call on a background thread
+/// (Rule #11/#14), and — on success — push the step that was actually
+/// executed back onto the opposite stack so it can be replayed. A missing/
+/// moved-since path is reported gracefully, never panics (Rule #15/#16).
+/// Refreshes every open tab across both panels afterwards, like the Faz 26
+/// DND executor does — an undo/redo step's affected directory can be
+/// anywhere, not just the currently focused tab.
+fn setup_undo_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    undo_stack: &SharedUndoStack,
+) {
+    let action_undo = gio::SimpleAction::new("undo", None);
+    {
+        let panels = panels.clone();
+        let undo_stack = undo_stack.clone();
+        action_undo.connect_activate(move |_, _| {
+            let Some(action) = undo_stack.borrow_mut().take_undo() else {
+                return;
+            };
+            let panels_for_done = panels.clone();
+            let undo_stack = undo_stack.clone();
+            fs_async::run_blocking(
+                move || undo::perform_undo(action),
+                move |result| {
+                    if result.error_count > 0 {
+                        tracing::warn!(errors = result.error_count, "undo had failures");
+                    }
+                    if let Some(resulting) = result.resulting_action {
+                        undo_stack.borrow_mut().record_redo(resulting);
+                    }
+                    report_and_refresh(&panels_for_done, result.message);
+                },
+            );
+        });
+    }
+    window.add_action(&action_undo);
+    app.set_accels_for_action("win.undo", &["<Primary>z"]);
+
+    let action_redo = gio::SimpleAction::new("redo", None);
+    {
+        let panels = panels.clone();
+        let undo_stack = undo_stack.clone();
+        action_redo.connect_activate(move |_, _| {
+            let Some(action) = undo_stack.borrow_mut().take_redo() else {
+                return;
+            };
+            let panels_for_done = panels.clone();
+            let undo_stack = undo_stack.clone();
+            fs_async::run_blocking(
+                move || undo::perform_redo(action),
+                move |result| {
+                    if result.error_count > 0 {
+                        tracing::warn!(errors = result.error_count, "redo had failures");
+                    }
+                    if let Some(resulting) = result.resulting_action {
+                        undo_stack.borrow_mut().record_undo(resulting);
+                    }
+                    report_and_refresh(&panels_for_done, result.message);
+                },
+            );
+        });
+    }
+    window.add_action(&action_redo);
+    app.set_accels_for_action("win.redo", &["<Primary><Shift>z", "<Primary>y"]);
+}
+
+/// Refreshes every open tab across both panels (an undo/redo step's affected
+/// directory, like a DND drop's, can be in either panel or any tab), then
+/// shows `message` — e.g. "Undid: Renamed 'report_v2.pdf' back to
+/// 'report.pdf'" — on both panels' status bar. There is no toast/overlay
+/// widget in this window yet, so this reuses the same status-bar feedback
+/// every other `win.*` action already gives; the message is set with a
+/// short delay so the refresh's own "Loading…"/item-count status updates
+/// don't immediately overwrite it.
+fn report_and_refresh(panels: &Panels, message: String) {
+    for (state, chrome) in all_tab_refresh_targets(panels) {
+        refresh(&state, &chrome);
+    }
+    let panels = panels.clone();
+    glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
+        for panel in [&panels.left, &panels.right] {
+            panel.chrome.status_left.set_label(&message);
+        }
+    });
 }
 
 /// Reloads every panel whose focused tab is currently showing `trash:///`,
@@ -2282,23 +2439,39 @@ fn open_item(tab: &TabPage, chrome: &Chrome, item: FileItem) {
 /// Creates a new folder or empty file named `base_name` (auto-suffixed with
 /// `(2)`, `(3)`, ... on collision, per `veyra_filesystem::suggest_name`)
 /// inside the current directory, then refreshes the listing.
-fn create_child_entry(state: &SharedState, chrome: &Chrome, base_name: &str, is_dir: bool) {
+fn create_child_entry(
+    state: &SharedState,
+    chrome: &Chrome,
+    base_name: &str,
+    is_dir: bool,
+    undo_stack: &SharedUndoStack,
+) {
     let dir = state.borrow().current_dir.clone();
     let name = unique_child_name(&dir, base_name);
     let path = child_path(&dir, &name);
 
     let state = state.clone();
     let chrome = chrome.clone();
+    let undo_stack = undo_stack.clone();
+    let path_for_create = path.clone();
     fs_async::run_blocking(
         move || {
             if is_dir {
-                veyra_filesystem::create_dir(&path)
+                veyra_filesystem::create_dir(&path_for_create)
             } else {
-                veyra_filesystem::create_file(&path)
+                veyra_filesystem::create_file(&path_for_create)
             }
         },
         move |result| match result {
-            Ok(()) => refresh(&state, &chrome),
+            Ok(()) => {
+                let action = if is_dir {
+                    UndoableAction::CreateFolder(path)
+                } else {
+                    UndoableAction::CreateFile(path)
+                };
+                undo_stack.borrow_mut().record(action);
+                refresh(&state, &chrome);
+            }
             Err(err) => {
                 tracing::warn!(error = %err, "failed to create new entry");
                 chrome
@@ -2395,6 +2568,7 @@ fn run_bulk_operation(
     kind: OperationKind,
     sources: Vec<VeyraPath>,
     destination: Option<VeyraPath>,
+    undo_stack: &SharedUndoStack,
 ) {
     if sources.is_empty() {
         return;
@@ -2410,6 +2584,7 @@ fn run_bulk_operation(
 
     let window = window.clone();
     let progress = progress.clone();
+    let undo_stack = undo_stack.clone();
     glib::spawn_future_local(async move {
         while let Ok(event) = receiver.recv().await {
             match event {
@@ -2425,6 +2600,33 @@ fn run_bulk_operation(
                     widgets::progress_toast::finish(&progress, op_id);
                     for (state, chrome) in &refresh_targets {
                         refresh(state, chrome);
+                    }
+                    // Faz 33: Move/Copy/Trash successes become an undo
+                    // record; a permanent delete instead purges any pending
+                    // record referencing what it just removed (Rule #39 — a
+                    // permanent delete is never itself undoable, and a
+                    // stale record pointing at a now-gone path must not
+                    // linger to fail later).
+                    match kind {
+                        OperationKind::Move if !outcome.moved.is_empty() => {
+                            undo_stack
+                                .borrow_mut()
+                                .record(UndoableAction::Move(outcome.moved.clone()));
+                        }
+                        OperationKind::Copy if !outcome.copied.is_empty() => {
+                            undo_stack
+                                .borrow_mut()
+                                .record(UndoableAction::Copy(outcome.copied.clone()));
+                        }
+                        OperationKind::Trash if !outcome.trashed.is_empty() => {
+                            undo_stack
+                                .borrow_mut()
+                                .record(UndoableAction::Trash(outcome.trashed.clone()));
+                        }
+                        OperationKind::Delete if !outcome.completed.is_empty() => {
+                            undo_stack.borrow_mut().purge(&outcome.completed);
+                        }
+                        _ => {}
                     }
                     if !outcome.errors.is_empty() {
                         for (path, err) in &outcome.errors {
@@ -2583,10 +2785,12 @@ fn build_dnd_executor(
     window: &adw::ApplicationWindow,
     panels: &Panels,
     progress: &ProgressToastHandles,
+    undo_stack: &SharedUndoStack,
 ) -> dnd::DropExecutor {
     let window = window.clone();
     let panels = panels.clone();
     let progress = progress.clone();
+    let undo_stack = undo_stack.clone();
     Rc::new(
         move |sources: Vec<VeyraPath>, destination: VeyraPath, action: dnd::DndAction| match action
         {
@@ -2597,6 +2801,7 @@ fn build_dnd_executor(
                 OperationKind::Move,
                 sources,
                 Some(destination),
+                &undo_stack,
             ),
             dnd::DndAction::Copy => run_bulk_operation(
                 &window,
@@ -2605,6 +2810,7 @@ fn build_dnd_executor(
                 OperationKind::Copy,
                 sources,
                 Some(destination),
+                &undo_stack,
             ),
             dnd::DndAction::Link => {
                 let panels = panels.clone();
