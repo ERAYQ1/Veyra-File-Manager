@@ -43,6 +43,66 @@ pub fn read_dir(dir: &VeyraPath) -> Result<Vec<FileItem>, FsError> {
     Ok(items)
 }
 
+/// Default batch size for `read_dir_chunked`: large enough to amortize the
+/// per-batch UI append cost, small enough that the first batch clears well
+/// under the ~50ms first-paint budget on a huge directory (Rule #30).
+pub const READ_DIR_CHUNK_SIZE: usize = 500;
+
+/// Streaming counterpart to `read_dir`: lists `dir`'s children in
+/// `chunk_size`-sized batches, calling `on_chunk` as each batch fills (plus
+/// once more for a final partial batch), instead of collecting the whole
+/// directory into memory before the caller sees anything. Lets the UI paint
+/// the first entries and start responding to input while a huge directory is
+/// still being enumerated (Rule #30).
+///
+/// Cooperatively cancellable via `control`, matching `count_dir_recursive`/
+/// `chmod_recursive`: cancelling mid-walk stops enumeration and returns
+/// `Ok(())` for whatever was already delivered via `on_chunk`, not an error.
+pub fn read_dir_chunked(
+    dir: &VeyraPath,
+    chunk_size: usize,
+    control: &OperationControl,
+    mut on_chunk: impl FnMut(Vec<FileItem>),
+) -> Result<(), FsError> {
+    let chunk_size = chunk_size.max(1);
+    let file = dir.to_gio_file();
+
+    let enumerator = file
+        .enumerate_children(
+            FULL_ATTRIBUTES,
+            gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+            gio::Cancellable::NONE,
+        )
+        .map_err(|e| map_gio_error(dir, e))?;
+
+    let mut batch = Vec::with_capacity(chunk_size);
+    loop {
+        if control.is_cancelled() {
+            return Ok(());
+        }
+        match enumerator.next_file(gio::Cancellable::NONE) {
+            Ok(Some(info)) => {
+                let child = enumerator.child(&info);
+                batch.push(build_file_item(&info, &child));
+                if batch.len() >= chunk_size {
+                    on_chunk(std::mem::replace(
+                        &mut batch,
+                        Vec::with_capacity(chunk_size),
+                    ));
+                }
+            }
+            Ok(None) => break,
+            Err(err) => return Err(map_gio_error(dir, err)),
+        }
+    }
+
+    if !batch.is_empty() {
+        on_chunk(batch);
+    }
+
+    Ok(())
+}
+
 /// Queries the metadata of `path` itself (as opposed to `read_dir`, which
 /// only reports the *children* of a directory). Used by the Faz 12
 /// Properties dialog to inspect a directory itself — e.g. the current tab's

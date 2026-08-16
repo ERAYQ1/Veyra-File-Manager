@@ -1,5 +1,23 @@
 # Changelog
 
+## Faz 30 — Performance & Huge Directory Virtualization / Performans ve Büyük Klasör Sanallaştırma (`veyra-filesystem`, `veyra-ui`)
+
+`read_dir` tüm dizin içeriğini tek seferde belleğe toplayıp döndürüyordu — 100.000+ dosyalı bir klasörde bu, ilk ögenin ekrana çizilmesinden önce tüm taramanın bitmesini bekletiyordu. Faz 30 bunu parçalı/akışlı bir tarama motoruyla değiştirdi: ilk 500 ögelik paket saniyenin çok altında ekrana düşüyor, kalan ögeler arka planda akmaya devam ediyor, kullanıcı önceki klasörden ayrılırsa tarama anında iptal ediliyor (Kural #30, #13, #33).
+
+### Eklenenler
+- **`veyra-filesystem::ops::read_dir_chunked(dir, chunk_size, control, on_chunk) -> Result<(), FsError>`:** `read_dir`'in akışlı karşılığı — çocukları `chunk_size`'lık paketler halinde `on_chunk`'a teslim eder (artı son yarım paket), tüm dizini tek bir `Vec` olarak biriktirmeden. `count_dir_recursive`/`chmod_recursive` ile aynı `OperationControl` işbirlikçi iptal deseni: iptal, teslim edilmiş her şeyi koruyarak taramayı hatasız (`Ok(())`) durdurur. `read_dir` (tüm çağıranları: `queue::flatten`, vb.) değişmeden korunuyor.
+- **`READ_DIR_CHUNK_SIZE: usize = 500`:** Varsayılan paket boyutu — ilk paket ~50ms ilk-boyama bütçesinin çok altında hazır olacak kadar küçük, UI ekleme maliyetini amortize edecek kadar büyük.
+- **`veyra-ui::fs_async::run_streaming`:** `run_blocking`'in akışlı karşılığı — arka plan iş parçacığından gelen her ara değeri (`on_chunk`) GTK ana döngüsüne geldiği anda teslim eder, tüm işlem bitene kadar arabelleğe almadan; son değer (`on_done`) işlem tamamlandığında bir kez çalışır. `async-channel` + `glib::spawn_future_local` üzerine kurulu, `run_blocking` ile aynı köprü deseni.
+- **`AppState::load_control: Option<OperationControl>`:** O anki sekmenin aktif dizin taramasının iptal anahtarı. `load_directory`, yeni bir tarama başlatmadan önce öncekini iptal ediyor — kullanıcı devasa bir klasörden ayrılırsa arka plandaki eski tarama artık modele stale öge eklemeye devam etmiyor.
+- **`load_directory` (yerel dosya sistemi yolu):** Artık `read_dir_chunked` + `run_streaming` üzerinden akıyor: model önce `remove_all()` ile temizleniyor, her paket geldikçe `gio::ListStore`'a ekleniyor ve durum çubuğu `"Loading… (N items)"` olarak canlı güncelleniyor; tarama bitince `"N items (toplam boyut)"` ile finalize ediliyor. `recent:///` ve `trash:///` konumları (gerçek GVfs mount'ları değil, zaten sınırlı boyutlu) eski tek-seferlik `run_blocking` + `read_dir`/`list_trash` yolunda değişmeden kalıyor.
+
+### Testler
+- **Yeni test paketi `crates/veyra-filesystem/tests/scaling.rs` (11 test):** 100/1.000/10.000/100.000 ögelik dizinlerde tam kapsama ve paket başına `chunk_size`'ı asla aşmayan sınırlı bellek kullanımı; ilk paketin tarama bitmeden teslim edildiğinin kanıtı; taramanın ortasında iptalin taramayı hemen durdurduğu ve başlamadan önce iptalin hiçbir şey teslim etmediği; 100.000 ögede sayım/boyut toplamlarının `saturating_add` ile taşmadan doğru sonuca ulaştığı; `chunk_size` 0 ve 1 sınır durumları; var olmayan dizin hatası.
+- Toplam: 327 → 338 test, hepsi geçiyor; `cargo fmt --all -- --check` ve `cargo clippy --workspace --all-targets -- -D warnings` temiz.
+
+### Not
+- Soğuk başlangıç (C bölümü): denetim, arama indekslemesinin (`veyra_search::spawn_background_index`) ve thumbnail servisi worker'larının halihazırda ana thread'i bloklamadan arka planda başladığını doğruladı (`window.rs` `build_window`); bu alanda ek değişiklik gerekmedi.
+
 ## Faz 29 — Security Hardening & Vulnerability Prevention / Güvenlik Sertleştirmesi ve Zafiyet Önleme (`veyra-core`, `veyra-filesystem`, `veyra-ui`)
 
 Faz 0-28 boyunca kurulmuş savunmaların (Zip Slip koruması, `NOFOLLOW_SYMLINKS` tabanlı symlink izolasyonu, argv-tabanlı süreç oluşturma) `docs/security-model.md`'ye karşı denetimi ve kalan boşlukların kapatılması. Denetim archive extraction, recursive dizin gezintisi, süreç oluşturma ve loglamanın zaten Kural #19-24'e uyduğunu doğruladı; üç somut sertleştirme uygulandı.

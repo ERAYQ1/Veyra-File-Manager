@@ -9,7 +9,7 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
-use veyra_filesystem::{FileItem, OperationKind, OperationRequest, VeyraPath};
+use veyra_filesystem::{FileItem, OperationControl, OperationKind, OperationRequest, VeyraPath};
 use veyra_search::SearchIndex;
 
 use crate::dnd;
@@ -2880,6 +2880,14 @@ fn tab_title(path: &VeyraPath) -> String {
 }
 
 fn load_directory(state: &SharedState, chrome: &Chrome, path: VeyraPath) {
+    // Cancel whatever chunked scan is still streaming into this tab's model
+    // (Rule #13) — otherwise a slow scan of a huge directory the user has
+    // already navigated away from keeps appending stale entries after this
+    // call replaces it.
+    if let Some(previous) = state.borrow_mut().load_control.take() {
+        previous.cancel();
+    }
+
     chrome.status_left.set_label("Loading…");
 
     let state_for_done = state.clone();
@@ -2910,9 +2918,74 @@ fn load_directory(state: &SharedState, chrome: &Chrome, path: VeyraPath) {
         return;
     }
 
-    fs_async::run_blocking(
-        move || veyra_filesystem::read_dir(&path),
-        move |result| on_directory_loaded(&state_for_done, &chrome_for_done, result),
+    // The regular filesystem path streams in `READ_DIR_CHUNK_SIZE`-sized
+    // batches so a huge directory (100,000+ entries, Rule #30) paints its
+    // first entries almost immediately instead of blocking the model update
+    // on the entire scan.
+    state.borrow().model.remove_all();
+
+    let control = OperationControl::new();
+    state.borrow_mut().load_control = Some(control.clone());
+
+    let model_for_chunk = state.borrow().model.clone();
+    let chrome_for_chunk = chrome.clone();
+    let control_for_chunk = control.clone();
+    let total_bytes = Rc::new(std::cell::Cell::new(0u64));
+    let total_bytes_for_chunk = total_bytes.clone();
+
+    let model_for_done = state.borrow().model.clone();
+    let control_for_done = control.clone();
+
+    let control_for_worker = control.clone();
+    fs_async::run_streaming(
+        move |emit| {
+            veyra_filesystem::read_dir_chunked(
+                &path,
+                veyra_filesystem::READ_DIR_CHUNK_SIZE,
+                &control_for_worker,
+                emit,
+            )
+        },
+        move |chunk: Vec<FileItem>| {
+            if control_for_chunk.is_cancelled() {
+                return;
+            }
+            let mut chunk_bytes = 0u64;
+            for item in &chunk {
+                chunk_bytes = chunk_bytes.saturating_add(item.metadata.size_bytes);
+            }
+            total_bytes_for_chunk.set(total_bytes_for_chunk.get().saturating_add(chunk_bytes));
+            for item in chunk {
+                model_for_chunk.append(&gtk4::glib::BoxedAnyObject::new(item));
+            }
+            let count = model_for_chunk.n_items();
+            chrome_for_chunk
+                .status_left
+                .set_label(&format!("Loading… ({})", count_label(count)));
+        },
+        move |result: Result<(), veyra_filesystem::FsError>| {
+            if control_for_done.is_cancelled() {
+                return;
+            }
+            state_for_done.borrow_mut().load_control = None;
+            match result {
+                Ok(()) => {
+                    let count = model_for_done.n_items();
+                    let size = veyra_filesystem::format_size(total_bytes.get());
+                    chrome_for_done
+                        .status_left
+                        .set_label(&format!("{} ({size})", count_label(count)));
+                    update_free_space(&state_for_done, &chrome_for_done);
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "failed to read directory");
+                    chrome_for_done
+                        .status_left
+                        .set_label(&format!("Error: {err}"));
+                    chrome_for_done.status_right.set_label("");
+                }
+            }
+        },
     );
 }
 

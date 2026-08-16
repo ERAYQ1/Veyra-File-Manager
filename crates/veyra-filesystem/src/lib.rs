@@ -29,8 +29,8 @@ pub use kind::FileKind;
 pub use metadata::{format_size, FileItem, FileMetadata};
 pub use ops::{
     chmod_recursive, copy, create_dir, create_file, delete, empty_trash, list_trash, move_entry,
-    open, read_dir, rename, restore_from_trash, set_permissions, stat, trash,
-    ChmodRecursiveOutcome,
+    open, read_dir, read_dir_chunked, rename, restore_from_trash, set_permissions, stat, trash,
+    ChmodRecursiveOutcome, READ_DIR_CHUNK_SIZE,
 };
 pub use path::VeyraPath;
 pub use permissions::FilePermissions;
