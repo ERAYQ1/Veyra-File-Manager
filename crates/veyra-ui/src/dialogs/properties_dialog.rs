@@ -25,7 +25,9 @@ use libadwaita::prelude::*;
 
 use veyra_filesystem::{FileItem, FileKind, FilePermissions, OperationControl, VeyraPath};
 
+use crate::dialogs::file_associations_dialog;
 use crate::fs_async;
+use crate::open_with;
 use crate::thumbnails::ThumbnailService;
 use crate::views::icon_name_for;
 
@@ -45,7 +47,7 @@ pub(crate) fn show(
         .content_height(560)
         .build();
 
-    let general = build_general_page(&item, &thumbnails);
+    let general = build_general_page(&item, &thumbnails, parent);
     dialog.add(&general.page);
 
     if item.metadata.permissions.is_some() {
@@ -132,7 +134,11 @@ struct GeneralPageHandles {
     contains: Option<(adw::ActionRow, gtk4::Spinner)>,
 }
 
-fn build_general_page(item: &FileItem, thumbnails: &Rc<ThumbnailService>) -> GeneralPageHandles {
+fn build_general_page(
+    item: &FileItem,
+    thumbnails: &Rc<ThumbnailService>,
+    parent: &impl IsA<gtk4::Widget>,
+) -> GeneralPageHandles {
     let page = adw::PreferencesPage::builder()
         .title("General")
         .icon_name("dialog-information-symbolic")
@@ -163,6 +169,61 @@ fn build_general_page(item: &FileItem, thumbnails: &Rc<ThumbnailService>) -> Gen
             .subtitle_lines(2)
             .build(),
     );
+
+    // For regular files only, add a "Default Application" row
+    if matches!(item.kind(), FileKind::Regular) {
+        let default_app = open_with::default_app(&item.metadata.mime_type);
+        let default_app_row = adw::ActionRow::builder()
+            .title("Default Application")
+            .title_lines(1)
+            .subtitle_lines(1)
+            .build();
+        default_app_row.set_use_markup(false);
+
+        // Suffix: app icon/name and "Change…" button
+        let suffix_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        suffix_box.set_halign(gtk4::Align::End);
+        suffix_box.set_valign(gtk4::Align::Center);
+
+        let app_label = gtk4::Label::new(None);
+        app_label.add_css_class("dim-label");
+        app_label.add_css_class("caption");
+        let app_text = default_app
+            .as_ref()
+            .map(|a| a.name().to_string())
+            .unwrap_or_else(|| "None".to_string());
+        app_label.set_text(&app_text);
+        suffix_box.append(&app_label);
+
+        let change_button = gtk4::Button::with_label("Change…");
+        change_button.add_css_class("flat");
+        change_button.set_valign(gtk4::Align::Center);
+
+        let content_type_for_button = item.metadata.mime_type.clone();
+        let parent = parent.clone();
+        let app_label = app_label.clone();
+        change_button.connect_clicked(move |_| {
+            let on_changed = {
+                let app_label = app_label.clone();
+                Rc::new(move |app: Option<gio::AppInfo>| {
+                    let text = app
+                        .as_ref()
+                        .map(|a| a.name().to_string())
+                        .unwrap_or_else(|| "None".to_string());
+                    app_label.set_text(&text);
+                })
+            };
+            file_associations_dialog::pick_default_app(
+                &parent,
+                &content_type_for_button,
+                on_changed,
+            );
+        });
+        suffix_box.append(&change_button);
+
+        default_app_row.add_suffix(&suffix_box);
+        info_group.add(&default_app_row);
+    }
 
     let location_row = adw::ActionRow::builder()
         .title("Location")

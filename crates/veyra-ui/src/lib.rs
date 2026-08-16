@@ -16,6 +16,7 @@ mod context_menu;
 mod devices;
 mod dialogs;
 mod dnd;
+mod file_associations;
 mod fs_async;
 mod headerbar;
 mod history;

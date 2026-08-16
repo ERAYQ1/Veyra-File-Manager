@@ -1,5 +1,34 @@
 # Changelog
 
+## Faz 27 — File Associations / Dosya Türü ve Varsayılan Uygulama Yönetimi (`veyra-ui`)
+
+### Eklenenler
+- **`file_associations` (yeni modül, `veyra-ui`):** MIME türü keşfi ve varsayılan uygulama yönetimi motoru.
+  - **`FileTypeEntry` veri modeli:** `content_type` (MIME türü), `description` (insan tarafından okunabilir), `icon` (GIO simgesi), `default_app` (atanmışsa varsayılan uygulama).
+  - **`list_system_file_types()`:** tüm uygulamaların desteklenen içerik türlerinin birleşimini toplar, tekilleştirir ve açıklamaya göre (tiebreak: content_type) sıralar. Yüzlerce MIME türü üretebilir, diyalog açılırken bir kez hesaplanır.
+  - **`matches_query` (saf, birim testli):** content_type, description veya varsayılan uygulama adına karşı büyük/küçük harf duyarsız alt-dizi eşleşmesi — File Associations diyaloğu canlı arama filtresi bunu kullanır.
+  - Unit testler: boş sorgu, content_type eşleşmesi, description eşleşmesi, app ad eşleşmesi, eşleşmeyen sorgu reddi.
+- **`dialogs::file_associations_dialog` (yeni):** MIME türleri, açıklamaları ve varsayılan yöneticileri listeleyen `AdwDialog` tabanlı diyalog.
+  - **Dosya türleri listesi:** `GtkSearchEntry` filtresi, `GtkListBox` + `adw::ActionRow` satırları (simge, açıklama, MIME türü, varsayılan uygulama adı, "Change…" butonu).
+  - **`pick_default_app(parent, content_type, on_changed)` (faktör edilmiş işlev):** minimal app seçici overlay (hiçbir auto-launch), önerilen ve tüm uygulamalar (open_with.rs ile aynı veri kaynağı), canlı arama, seçildiğinde sadece `open_with::set_default` çağrılar. Properties diyaloğunun "Default Application" satırından da çağrılabilir.
+  - Canlı güncelleme: varsayılan değiştiğinde, ağaç yeniden oluşturulmadan sadece o satırın suffix etiketi tazelenir.
+- **`Properties` diyaloğu entegrasyonu (`properties_dialog.rs`):** "Default Application" satırı, Regular dosyalar için General sayfasına eklendi (Type satırından sonra) — app simgesi/adı + "Change…" butonu, `pick_default_app` çağırır, satır içi güncelleme.
+- **`window.rs` entegrasyonu:** `setup_file_associations_action` — `win.manage-file-associations` aksiyonu, File Associations diyaloğu açar.
+- **`command_palette.rs` entegrasyonu:** "Manage File Associations…" (Tools kategorisi, icon `preferences-desktop-default-applications-symbolic`), action `win.manage-file-associations`.
+
+### Testler
+- `veyra-ui::file_associations`: 5 yeni birim testi (`matches_query`: boş sorgu, content_type eşleşmesi, description eşleşmesi, app adı eşleşmesi, non-match).
+- Toplam: 292/292 test (workspace genelinde, önceki 287'den +5).
+
+### Doğrulama
+- `cargo build --workspace`: 0 warning.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 292/292 geçti.
+- `cargo fmt --all -- --check`: temiz.
+
+### Sıradaki Faz
+Faz 28 (Onay bekleniyor.)
+
 ## Faz 26 — Drag & Drop / Sürükle ve Bırak (`veyra-ui`)
 
 ### Eklenenler

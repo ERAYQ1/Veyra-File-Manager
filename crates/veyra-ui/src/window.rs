@@ -249,6 +249,7 @@ pub(crate) fn build_window(
     setup_terminal_actions(app, &window, &panels, &focused);
     setup_network_actions(&window, navigate);
     setup_command_palette_actions(app, &window, &panels, &focused, &header, refresh_preview);
+    setup_file_associations_action(&window);
 
     // Faz 25: loaded/applied last so a user's `~/.config/veyra/shortcuts.json`
     // customization (or, absent one, `default_shortcuts()`, which mirrors
@@ -298,6 +299,20 @@ fn setup_shortcuts_actions(
         });
     }
     window.add_action(&action_reset);
+}
+
+/// Registers the Faz 27 `win.manage-file-associations` action, which opens
+/// the File Associations dialog listing all registered MIME types and their
+/// default handlers.
+fn setup_file_associations_action(window: &adw::ApplicationWindow) {
+    let action = gio::SimpleAction::new("manage-file-associations", None);
+    {
+        let window = window.clone();
+        action.connect_activate(move |_, _| {
+            dialogs::file_associations_dialog::show(&window);
+        });
+    }
+    window.add_action(&action);
 }
 
 /// Wires a panel's own close/detach/tab-switch bookkeeping and its five

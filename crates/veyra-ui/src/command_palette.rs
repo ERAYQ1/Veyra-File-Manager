@@ -217,6 +217,14 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
             action_target: None,
         },
         CommandItem {
+            id: "manage-file-associations",
+            title: "Manage File Associations…",
+            category: "Tools",
+            icon_name: "preferences-desktop-default-applications-symbolic",
+            action_name: "win.manage-file-associations",
+            action_target: None,
+        },
+        CommandItem {
             id: "keyboard-shortcuts",
             title: "Keyboard Shortcuts",
             category: "Tools",

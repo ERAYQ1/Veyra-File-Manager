@@ -6,6 +6,7 @@ pub(crate) mod connect_server_dialog;
 pub(crate) mod delete_confirm;
 pub(crate) mod disk_analyzer_dialog;
 pub(crate) mod empty_trash_confirm;
+pub(crate) mod file_associations_dialog;
 pub(crate) mod open_with_dialog;
 pub(crate) mod properties_dialog;
 pub(crate) mod rename_dialog;
