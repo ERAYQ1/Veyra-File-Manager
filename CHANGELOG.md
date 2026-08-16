@@ -1,5 +1,32 @@
 # Changelog
 
+## Faz 34 — Comprehensive Settings / Preferences (`veyra-core`, `veyra-search`, `veyra-ui`)
+
+Tema, görünüm, gizlilik ve performans ayarları artık dağınık/sabit kodlanmış değil: uygulamanın tüm yönlerini `~/.config/veyra/settings.json` üzerinden yöneten ve çalışma zamanında canlı uygulayan bir Ayarlar Penceresi (`Ctrl+,`, `win.show-preferences`) eklendi.
+
+### Eklenenler
+- **`crates/veyra-ui/src/config.rs` (yeni modül):** `VeyraSettings` — Appearance/Navigation/Files/Search/Preview/Performance/Privacy alanlarının tamamı, `shortcuts.rs`'in `ShortcutMap` deseniyle aynı şekilde `~/.config/veyra/settings.json`'a `veyra_core::security::write_atomic_private` ile atomik yazılıyor; dosya yoksa/bozuksa sessizce `VeyraSettings::default()`'a düşüyor (`#[serde(default)]` her alanda). `SharedSettings = Rc<RefCell<VeyraSettings>>` — `TabPage`/`AppState`'in zaten kullandığı paylaşım deseniyle pencere/panel/görünüm/diyalog arasında paylaşılıyor.
+- **`crates/veyra-ui/src/dialogs/preferences_dialog.rs` (yeni modül):** `AdwPreferencesDialog`, spesifikasyonun 9 sayfası (Appearance, Navigation, Files & Display, Search & Indexing, Preview, Performance, Keyboard Shortcuts, Privacy & Security, Advanced). Her satır değeri anında `settings.json`'a kaydediyor ve ilgili canlı etkiyi uyguluyor — ayrı bir "Uygula/Tamam" adımı yok.
+- **Canlı uygulama:** Tema `AdwStyleManager::set_color_scheme` ile anında; Icon Size ve Directory Stream Chunk Size değişince açık sekmeler `refresh_all_tabs` ile yeniden yükleniyor; Click Policy her tıklamada `settings`'den okunuyor (`views::attach_click_policy` — Grid ve Details görünümlerinde tek tıkla açmayı, mevcut çift-tıkla-aç `connect_activate`'i bozmadan, GTK'nin kendi seçim güncellemesinden sonra okunan seçim modeliyle uyguluyor); Thumbnail Cache Capacity `ThumbnailService::resize_l1` (lru crate'in `resize`'ı) ile anında; onay diyalogları (`confirm_trash_empty`/`confirm_permanent_delete`) eylem tetiklenirken okunuyor.
+- **`veyra_search::SearchIndex::search_with_limit` (`veyra-search`):** `search`'ün sabit `RESULT_LIMIT`'i yerine çağıran taraftan `max_search_results` alıyor; `enable_fts_index` kapalıyken header bar araması sonuç döndürmüyor; "Rebuild Search Index" butonu ve ayarı yeniden açmak `spawn_background_index`'i tekrar tetikliyor (indeksleme `INSERT OR REPLACE` kullandığından tekrar çalıştırmak her zaman güvenli).
+- **`crates/veyra-ui/src/session.rs` (yeni modül):** "Restore Previous Tabs on Startup" — pencere kapanırken her iki panelin açık sekme yolları `~/.config/veyra/session.json`'a yazılıyor (`AdwTabView::pages()`'in sıralı listesi, sırasız `TabRegistry` HashMap'i değil); ayar açıkken sonraki açılışta tek `start_dir` yerine kayıtlı sekmeler geri açılıyor.
+- **`veyra_core::security` yeni fonksiyonlar:** `sanitize_log_paths_enabled`/`set_sanitize_log_paths` (arka plan thumbnail worker thread'lerinden de erişilebilmesi için `Rc` değil `AtomicBool`) ve `log_path` — "Sanitize File Paths in Logs" açıkken loglardaki dosya yollarını yalnızca dosya adına indiriyor; mevcut ~10 `tracing::warn!(path = %...)` çağrı noktasına (`preview.rs`, `thumbnails.rs`, `window.rs`, `shortcuts.rs`) uygulandı.
+- **Kısayol/Komut Paleti/Pencere entegrasyonu:** `win.show-preferences` (`<Primary>comma`) — `shortcuts.rs` kataloğuna ve varsayılanlarına, `command_palette.rs`'e eklendi; `window.rs`'te `setup_preferences_actions` diğer `setup_*_actions` fonksiyonlarıyla aynı desende.
+
+### Kapsam kararları
+- `show_hidden`/`folders_first`/`default_view_mode` yeni açılan sekmelerin *başlangıç* değeri — zaten açık bir sekmeyi geriye dönük etkilemiyor (GNOME uygulamalarındaki "varsayılan" anlayışıyla tutarlı, kullanıcının dokunmadığı bir sekmeyi sürpriz şekilde yeniden sıralamamak için).
+- `open_folders_in_new_tab` saklanıyor ve kalıcı ama bu fazda klasöre tıklama davranışına derinlemesine bağlanmadı (mevcut sidebar/orta-tık "yeni sekmede aç" akışından ayrı); `restore_tabs_on_startup`'ın aksine gerçek bir davranış değişikliği gerektirmiyordu bu yüzden kapsam dışı bırakıldı.
+- `stream_chunk_size` bir sonraki dizin yüklemesinde/yenilemesinde uygulanıyor ("ortasında" yakalanacak bir tarama olmadığından).
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 359 → 371, tamamı geçti (yeni: `config` 7, `session` 5 test; `veyra-core::security` 1 yeni test).
+- `./target/debug/veyra` gerçek bir Wayland oturumunda başlatıldı, panik/çökme olmadan pencere açıldı; GTK gerektiren Preferences penceresinin tam tıklama-akışı bu ortamda otomatik doğrulanamadı (headless ajan, ekran etkileşimi aracı yok) — yalnızca derleme/birim testi ve gerçek uygulama başlatma seviyesinde doğrulandı.
+
+### Sıradaki Faz
+Faz 35 — Batch Rename (Toplu Yeniden Adlandırma).
+
 ## Ara Faz — Multi-Selection, Rubberband & Batch Context Actions (`veyra-ui`)
 
 Icon/Compact/Details görünümlerinin üçü de artık `GtkSingleSelection` yerine `GtkMultiSelection` kullanıyor: fareyle boş alandan sürükleyerek dikdörtgen (lastik bant) seçim, `Ctrl+Click` ile tekil ekle/çıkar, `Shift+Click` ile aralık seçimi ve `Ctrl+A` ile görünümdeki tüm ögeleri seçme artık çalışıyor. Sağ-tık menüsü ve Copy/Cut/Trash/Delete/Compress/Panel-transfer kısayolları artık seçili tüm dosyalara topluca uygulanıyor.

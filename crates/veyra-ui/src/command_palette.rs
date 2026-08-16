@@ -241,6 +241,14 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
             action_target: None,
         },
         CommandItem {
+            id: "preferences",
+            title: "Preferences",
+            category: "Tools",
+            icon_name: "preferences-system-symbolic",
+            action_name: "win.show-preferences",
+            action_target: None,
+        },
+        CommandItem {
             id: "keyboard-shortcuts",
             title: "Keyboard Shortcuts",
             category: "Tools",

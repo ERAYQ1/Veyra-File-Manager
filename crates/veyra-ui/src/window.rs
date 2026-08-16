@@ -41,14 +41,15 @@ pub(crate) fn build_window(
     app: &adw::Application,
     start_dir: VeyraPath,
     cache_dir: &Path,
+    settings: crate::config::SharedSettings,
 ) -> adw::ApplicationWindow {
     // Faz 15: app-wide privacy toggle, shared by both panels' Recent Files
     // banners and by `open_item` (which reads it before deciding whether to
     // record an opened file into the XDG recent-files registry).
     let privacy_mode: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
 
-    let left = split_view::build_panel(PanelId::Left, privacy_mode.clone());
-    let right = split_view::build_panel(PanelId::Right, privacy_mode.clone());
+    let left = split_view::build_panel(PanelId::Left, privacy_mode.clone(), settings.clone());
+    let right = split_view::build_panel(PanelId::Right, privacy_mode.clone(), settings.clone());
     right.frame.set_visible(false);
     let panels = Panels { left, right };
 
@@ -71,7 +72,7 @@ pub(crate) fn build_window(
         Rc::new(move |path: VeyraPath| navigate_focused(&panels, &focused, path))
     };
 
-    let preview = preview::build();
+    let preview = preview::build(settings.clone());
     let refresh_preview: Rc<dyn Fn()> = {
         let panels = panels.clone();
         let focused = focused.clone();
@@ -80,9 +81,25 @@ pub(crate) fn build_window(
     };
 
     let search_index = Arc::new(open_search_index(cache_dir));
-    veyra_search::spawn_background_index(search_index.clone(), glib::home_dir());
+    if settings.borrow().enable_fts_index {
+        veyra_search::spawn_background_index(search_index.clone(), glib::home_dir());
+    }
+    // Faz 34: the Preferences dialog's "Rebuild Search Index" button (and
+    // re-enabling "Enable Fast Search Indexer" after it was off) both just
+    // need to kick off another one-shot walk — `spawn_background_index`
+    // already re-indexes any path it revisits (`INSERT OR REPLACE`), so
+    // running it again is always safe, not just on first launch.
+    let rebuild_search_index: Rc<dyn Fn()> = {
+        let search_index = search_index.clone();
+        Rc::new(move || {
+            veyra_search::spawn_background_index(search_index.clone(), glib::home_dir());
+        })
+    };
 
-    let thumbnails = crate::thumbnails::ThumbnailService::new(cache_dir.join("thumbnails"));
+    let thumbnails = crate::thumbnails::ThumbnailService::new(
+        cache_dir.join("thumbnails"),
+        settings.borrow().thumbnail_cache_capacity,
+    );
 
     let header = headerbar::build(
         &panels,
@@ -90,6 +107,7 @@ pub(crate) fn build_window(
         search_index,
         navigate.clone(),
         refresh_preview.clone(),
+        settings.clone(),
     );
     let progress = widgets::progress_toast::build();
 
@@ -114,17 +132,54 @@ pub(crate) fn build_window(
     attach_panel_focus_key(&panels.left, &panels, &focused, &header, &refresh_preview);
     attach_panel_focus_key(&panels.right, &panels, &focused, &header, &refresh_preview);
 
-    open_tab(
-        &panels.left.tab_view,
-        &panels.left.registry,
-        &panels.left.chrome,
-        has_clipboard.clone(),
-        split_active.clone(),
-        refresh_preview.clone(),
-        thumbnails.clone(),
-        dnd_execute.clone(),
-        start_dir,
-    );
+    // Faz 34: "Restore Previous Tabs on Startup" — a non-empty saved session
+    // (from the last `window.connect_close_request` below) replaces the
+    // usual single `start_dir` tab with one tab per saved path, per panel;
+    // an empty/missing session (first launch, or the toggle was off last
+    // time) falls back to today's single-tab behavior unchanged.
+    let restored_session = if settings.borrow().restore_tabs_on_startup {
+        Some(crate::session::Session::load())
+    } else {
+        None
+    };
+    let restored_left = restored_session
+        .as_ref()
+        .map(crate::session::Session::left_paths)
+        .filter(|paths| !paths.is_empty());
+    let restored_right = restored_session
+        .as_ref()
+        .map(crate::session::Session::right_paths)
+        .filter(|paths| !paths.is_empty());
+
+    for path in restored_left.unwrap_or_else(|| vec![start_dir]) {
+        open_tab(
+            &panels.left.tab_view,
+            &panels.left.registry,
+            &panels.left.chrome,
+            has_clipboard.clone(),
+            split_active.clone(),
+            refresh_preview.clone(),
+            thumbnails.clone(),
+            dnd_execute.clone(),
+            path,
+        );
+    }
+    if let Some(right_paths) = restored_right {
+        for path in right_paths {
+            open_tab(
+                &panels.right.tab_view,
+                &panels.right.registry,
+                &panels.right.chrome,
+                has_clipboard.clone(),
+                split_active.clone(),
+                refresh_preview.clone(),
+                thumbnails.clone(),
+                dnd_execute.clone(),
+                path,
+            );
+        }
+        panels.right.frame.set_visible(true);
+    }
     if let Some(tab) = active_tab(&panels.left.tab_view, &panels.left.registry) {
         sync_view_switcher(&header.view_switcher_buttons, &tab);
     }
@@ -139,7 +194,9 @@ pub(crate) fn build_window(
     paned.set_shrink_end_child(false);
     paned.set_position(640);
 
-    preview.widget.set_visible(false);
+    preview
+        .widget
+        .set_visible(settings.borrow().enable_preview_panel);
     let content_paned = gtk4::Paned::new(gtk4::Orientation::Horizontal);
     content_paned.set_start_child(Some(&paned));
     content_paned.set_end_child(Some(&preview.widget));
@@ -254,7 +311,7 @@ pub(crate) fn build_window(
         dnd_execute.clone(),
         &undo_stack,
     );
-    setup_properties_actions(app, &window, &panels, &focused, thumbnails);
+    setup_properties_actions(app, &window, &panels, &focused, thumbnails.clone());
     setup_preview_actions(app, &window, &preview, &header, refresh_preview.clone());
     setup_recent_actions(&window, &panels, privacy_mode);
     setup_trash_actions(app, &window, &panels, &focused, &undo_stack);
@@ -274,6 +331,34 @@ pub(crate) fn build_window(
         Rc::new(RefCell::new(shortcuts::ShortcutMap::load()));
     shortcut_map.borrow().apply_to_application(app);
     setup_shortcuts_actions(app, &window, shortcut_map);
+
+    setup_preferences_actions(
+        app,
+        &window,
+        &panels,
+        &preview,
+        thumbnails.clone(),
+        rebuild_search_index,
+        settings.clone(),
+    );
+
+    // Faz 34: "Restore Previous Tabs on Startup" is only useful if a session
+    // actually gets written somewhere — save on every close regardless of
+    // whether the toggle is currently on, so turning it on later has real
+    // data to restore instead of nothing.
+    {
+        let panels = panels.clone();
+        window.connect_close_request(move |_| {
+            let session = crate::session::Session {
+                left_tabs: collect_tab_paths(&panels.left),
+                right_tabs: collect_tab_paths(&panels.right),
+            };
+            if let Err(err) = session.save() {
+                tracing::warn!(error = %err, "failed to save tab session");
+            }
+            glib::Propagation::Proceed
+        });
+    }
 
     window
 }
@@ -314,6 +399,43 @@ fn setup_shortcuts_actions(
         });
     }
     window.add_action(&action_reset);
+}
+
+/// Registers the Faz 34 `win.show-preferences` action (`Ctrl+,`), opening
+/// the Preferences dialog. Everything the dialog can change live (theme,
+/// icon size, click policy, thumbnail cache capacity, search index) is
+/// handed in as a callback or shared handle rather than the dialog reaching
+/// back into `window.rs` internals directly.
+fn setup_preferences_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    preview: &PreviewPanelHandles,
+    thumbnails: Rc<crate::thumbnails::ThumbnailService>,
+    rebuild_search_index: Rc<dyn Fn()>,
+    settings: crate::config::SharedSettings,
+) {
+    let action = gio::SimpleAction::new("show-preferences", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let preview_widget = preview.widget.clone();
+        action.connect_activate(move |_, _| {
+            dialogs::preferences_dialog::show(
+                &window,
+                settings.clone(),
+                thumbnails.clone(),
+                rebuild_search_index.clone(),
+                {
+                    let panels = panels.clone();
+                    Rc::new(move || refresh_all_tabs(&panels))
+                },
+                preview_widget.clone(),
+            );
+        });
+    }
+    window.add_action(&action);
+    app.set_accels_for_action("win.show-preferences", &["<Primary>comma"]);
 }
 
 /// Registers the Faz 27 `win.manage-file-associations` action, which opens
@@ -1162,7 +1284,8 @@ fn setup_operation_actions(
             let progress = progress.clone();
             let paths_for_delete = paths.clone();
             let undo_stack = undo_stack.clone();
-            dialogs::delete_confirm::show(&window, &paths, move || {
+            let confirm_permanent_delete = panel.chrome.settings.borrow().confirm_permanent_delete;
+            let run_delete = move || {
                 run_bulk_operation(
                     &window_for_confirm,
                     vec![(state, chrome)],
@@ -1172,7 +1295,14 @@ fn setup_operation_actions(
                     None,
                     &undo_stack,
                 );
-            });
+            };
+            // Faz 34: "Confirm Before Permanently Deleting Files" — off
+            // skips straight to the (still-undoable, Kural #38/#39) delete.
+            if confirm_permanent_delete {
+                dialogs::delete_confirm::show(&window, &paths, run_delete);
+            } else {
+                run_delete();
+            }
         });
     }
     window.add_action(&action_delete);
@@ -2102,7 +2232,8 @@ fn setup_trash_actions(
         action_empty_trash.connect_activate(move |_, _| {
             let window_for_confirm = window.clone();
             let panels = panels.clone();
-            dialogs::empty_trash_confirm::show(&window, move || {
+            let confirm_trash_empty = panels.left.chrome.settings.borrow().confirm_trash_empty;
+            let run_empty = move || {
                 let panels_for_done = panels.clone();
                 fs_async::run_blocking(veyra_filesystem::empty_trash, move |result| {
                     if let Err(err) = result {
@@ -2115,7 +2246,13 @@ fn setup_trash_actions(
                     }
                     refresh_trash_panels(&panels_for_done);
                 });
-            });
+            };
+            // Faz 34: "Confirm Before Emptying Trash".
+            if confirm_trash_empty {
+                dialogs::empty_trash_confirm::show(&window, run_empty);
+            } else {
+                run_empty();
+            }
         });
     }
     window.add_action(&action_empty_trash);
@@ -2316,13 +2453,24 @@ fn open_tab(
     let dnd_execute_for_tab = dnd_wiring.execute.clone();
     let search_query = Rc::new(RefCell::new(String::new()));
     let quick_filter = Rc::new(RefCell::new(crate::sorting::QuickFilter::default()));
-    let show_hidden = Rc::new(RefCell::new(false));
+    // Faz 34: a new tab's initial hidden-files/sort defaults come from the
+    // Preferences dialog's Files & Display page — once open, Ctrl+H and the
+    // Sort & Filter menu still isolate this tab from every other (Kural
+    // #51), matching how `default_view_mode` below only picks this tab's
+    // starting view, not a retroactive one.
+    let initial_settings = chrome.settings.borrow();
+    let show_hidden = Rc::new(RefCell::new(initial_settings.show_hidden));
     let filter = build_combined_filter(
         search_query.clone(),
         quick_filter.clone(),
         show_hidden.clone(),
     );
-    let sort_config = Rc::new(RefCell::new(crate::sorting::SortConfig::default()));
+    let sort_config = Rc::new(RefCell::new(crate::sorting::SortConfig {
+        folders_first: initial_settings.folders_first,
+        ..crate::sorting::SortConfig::default()
+    }));
+    let initial_view_mode = initial_settings.default_view_mode.to_view_mode();
+    drop(initial_settings);
     let sorter = crate::sorting::build_sorter(sort_config.clone());
     let sort_sync_guard = Rc::new(std::cell::Cell::new(false));
     let view_stack = gtk4::Stack::new();
@@ -2368,6 +2516,7 @@ fn open_tab(
             is_trash.clone(),
             thumbnails.clone(),
             dnd_wiring.clone(),
+            chrome.settings.clone(),
         );
         view_stack.add_named(&icon_widget, Some(ViewMode::Icon.stack_name()));
 
@@ -2384,6 +2533,7 @@ fn open_tab(
             is_trash.clone(),
             thumbnails.clone(),
             dnd_wiring.clone(),
+            chrome.settings.clone(),
         );
         view_stack.add_named(&compact_widget, Some(ViewMode::Compact.stack_name()));
 
@@ -2401,13 +2551,14 @@ fn open_tab(
             is_trash,
             thumbnails,
             dnd_wiring,
+            chrome.settings.clone(),
         );
         let details_selection = details.selection;
         view_stack.add_named(&details.widget, Some(ViewMode::Details.stack_name()));
         details_column_view_slot = details.column_view;
         details_sort_columns_slot = details.sort_columns;
 
-        view_stack.set_visible_child_name(ViewMode::Icon.stack_name());
+        view_stack.set_visible_child_name(initial_view_mode.stack_name());
 
         for selection in [&icon_selection, &compact_selection, &details_selection] {
             let refresh_preview = refresh_preview.clone();
@@ -2458,11 +2609,15 @@ fn open_item(tab: &TabPage, chrome: &Chrome, item: FileItem) {
         // Faz 15: record into the XDG recent-files registry before handing
         // off to the background thread — `RecentManager` is GTK-main-thread
         // only, so this must happen here, not inside the spawned thread.
-        let uri = item.path.to_gio_file().uri();
-        recent::record_opened(&uri, &chrome.privacy_mode);
+        // Faz 34: "Remember Recently Used Files" — off means never record,
+        // same as privacy mode but a persistent rather than session choice.
+        if chrome.settings.borrow().store_recent_files {
+            let uri = item.path.to_gio_file().uri();
+            recent::record_opened(&uri, &chrome.privacy_mode);
+        }
         std::thread::spawn(move || {
             if let Err(err) = veyra_filesystem::open(&item.path) {
-                tracing::warn!(path = %item.path, error = %err, "failed to open item");
+                tracing::warn!(path = %veyra_core::security::log_path(&item.path), error = %err, "failed to open item");
             }
         });
     }
@@ -2662,7 +2817,7 @@ fn run_bulk_operation(
                     }
                     if !outcome.errors.is_empty() {
                         for (path, err) in &outcome.errors {
-                            tracing::warn!(path = %path, error = %err, "bulk operation error");
+                            tracing::warn!(path = %veyra_core::security::log_path(path), error = %err, "bulk operation error");
                         }
                         // Faz 28: If all errors are permission-denied and pkexec is available,
                         // offer retry-as-admin.
@@ -2775,7 +2930,7 @@ fn show_bulk_retry_admin_dialog(
                     match result {
                         Ok(()) => succeeded += 1,
                         Err(err) => {
-                            tracing::warn!(path = %path, error = %err, "privileged retry failed");
+                            tracing::warn!(path = %veyra_core::security::log_path(path), error = %err, "privileged retry failed");
                             failed += 1;
                         }
                     }
@@ -2960,6 +3115,34 @@ fn go_up(tab: &TabPage, chrome: &Chrome) {
 fn refresh(state: &SharedState, chrome: &Chrome) {
     let path = state.borrow().current_dir.clone();
     load_directory(state, chrome, path);
+}
+
+/// Re-reads every open tab in both panels (Faz 34): the Preferences
+/// dialog's "Icon Size" and "Directory Stream Chunk Size" settings both need
+/// every already-open tab's listing rebuilt for the new value to actually
+/// show — this reuses the exact reload path `win.refresh`/`F5` already
+/// drives per-tab, just applied to every tab at once.
+pub(crate) fn refresh_all_tabs(panels: &Panels) {
+    for panel in [&panels.left, &panels.right] {
+        for tab in panel.registry.borrow().values() {
+            refresh(&tab.state, &panel.chrome);
+        }
+    }
+}
+
+/// Snapshots every open tab's current directory in `panel`, in tab order
+/// (`AdwTabView::pages()`'s own model, not the unordered `TabRegistry`
+/// `HashMap`) — backs Faz 34's session-on-close save for "Restore Previous
+/// Tabs on Startup".
+fn collect_tab_paths(panel: &Panel) -> Vec<String> {
+    let pages = panel.tab_view.pages();
+    let registry = panel.registry.borrow();
+    (0..pages.n_items())
+        .filter_map(|i| pages.item(i))
+        .filter_map(|obj| obj.downcast::<adw::TabPage>().ok())
+        .filter_map(|page| registry.get(&page).cloned())
+        .map(|tab| tab.state.borrow().current_dir.to_string())
+        .collect()
 }
 
 /// ANDs the free-text search query, the tab's active `QuickFilter` (Faz 13),
@@ -3177,14 +3360,17 @@ fn load_directory(state: &SharedState, chrome: &Chrome, path: VeyraPath) {
     let control_for_done = control.clone();
 
     let control_for_worker = control.clone();
+    // Faz 34: "Directory Stream Chunk Size" — falls back to
+    // `READ_DIR_CHUNK_SIZE` (the same default `VeyraSettings` itself uses)
+    // if it somehow reads as zero rather than handing the filesystem layer
+    // a chunk size that would never emit anything.
+    let stream_chunk_size = match chrome.settings.borrow().stream_chunk_size {
+        0 => veyra_filesystem::READ_DIR_CHUNK_SIZE,
+        n => n,
+    };
     fs_async::run_streaming(
         move |emit| {
-            veyra_filesystem::read_dir_chunked(
-                &path,
-                veyra_filesystem::READ_DIR_CHUNK_SIZE,
-                &control_for_worker,
-                emit,
-            )
+            veyra_filesystem::read_dir_chunked(&path, stream_chunk_size, &control_for_worker, emit)
         },
         move |chunk: Vec<FileItem>| {
             if control_for_chunk.is_cancelled() {

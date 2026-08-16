@@ -8,6 +8,7 @@ use libadwaita as adw;
 use veyra_filesystem::VeyraPath;
 use veyra_search::SearchIndex;
 
+use crate::config::SharedSettings;
 use crate::search_results;
 use crate::sorting::{QuickFilter, SortKey, SortOrder};
 use crate::split_view::{focused_tab, PanelId, Panels};
@@ -44,6 +45,7 @@ pub(crate) fn build(
     search_index: Arc<SearchIndex>,
     navigate: Rc<dyn Fn(VeyraPath)>,
     refresh_preview: Rc<dyn Fn()>,
+    settings: SharedSettings,
 ) -> HeaderBarHandles {
     let widget = adw::HeaderBar::new();
 
@@ -67,7 +69,11 @@ pub(crate) fn build(
             tab.filter.changed(gtk4::FilterChange::Different);
 
             let parsed = veyra_search::parse(&text);
-            if !parsed.has_filters() {
+            // Faz 34: "Enable Fast Search Indexer" off means advanced (`name:`/
+            // `type:`/`size:`/`modified:`) queries have no index to run
+            // against — surface that as "no results" rather than silently
+            // falling back to a different, unindexed search path.
+            if !parsed.has_filters() || !settings.borrow().enable_fts_index {
                 results.revealer.set_reveal_child(false);
                 return;
             }
@@ -75,10 +81,11 @@ pub(crate) fn build(
             let search_index = search_index.clone();
             let results = results.clone();
             let navigate = navigate.clone();
+            let limit = settings.borrow().max_search_results;
             crate::fs_async::run_blocking(
                 move || {
                     search_index
-                        .search(&parsed, chrono::Utc::now())
+                        .search_with_limit(&parsed, chrono::Utc::now(), limit)
                         .unwrap_or_default()
                 },
                 move |found| {

@@ -149,6 +149,18 @@ impl SearchIndex {
         query: &ParsedQuery,
         now: DateTime<Utc>,
     ) -> Result<Vec<SearchResult>, SearchError> {
+        self.search_with_limit(query, now, RESULT_LIMIT as usize)
+    }
+
+    /// Same as [`search`](Self::search), but with a caller-supplied row cap
+    /// instead of the compiled-in default — backs the Preferences dialog's
+    /// "Max Search Results" setting (Faz 34).
+    pub fn search_with_limit(
+        &self,
+        query: &ParsedQuery,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>, SearchError> {
         let conn = self.conn.lock().expect("search index mutex poisoned");
 
         let mut sql = String::from(
@@ -199,7 +211,7 @@ impl SearchIndex {
             sql.push_str(&conditions.join(" AND "));
         }
         sql.push_str(" ORDER BY f.name LIMIT ?");
-        params.push(Box::new(RESULT_LIMIT));
+        params.push(Box::new(limit as i64));
 
         let mut stmt = conn.prepare(&sql)?;
         let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();

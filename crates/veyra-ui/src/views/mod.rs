@@ -13,6 +13,7 @@ pub(crate) use icon_view::build_icon_view;
 
 use veyra_filesystem::{FileItem, FileKind};
 
+use crate::config::{ClickPolicy, SharedSettings};
 use crate::dnd::{self, DndWiring};
 use crate::thumbnails::ThumbnailService;
 
@@ -89,19 +90,30 @@ pub(crate) fn build_selection(
 
 /// Shared `GtkGridView` builder behind the Icon and Compact views: only the
 /// icon pixel size and item layout orientation differ between them.
+///
+/// `icon_size` is a closure rather than a plain `i32` so the Icon view can
+/// read the live Preferences "Icon Size" setting on every bind (Faz 34) —
+/// re-reading `settings` on each `connect_bind` call means a size change
+/// takes effect as soon as the affected tab's listing next refreshes,
+/// without rebuilding the view. Compact view instead passes a closure that
+/// always returns its own fixed small-icon constant, unaffected by that
+/// setting.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_grid_view(
     selection: &gtk4::MultiSelection,
-    icon_size: i32,
+    icon_size: impl Fn() -> i32 + Clone + 'static,
     horizontal_item: bool,
     thumbnails: Rc<ThumbnailService>,
     dnd_wiring: DndWiring,
-    on_activate: impl Fn(u32) + 'static,
+    settings: SharedSettings,
+    on_activate: Rc<dyn Fn(u32)>,
 ) -> gtk4::GridView {
     let factory = gtk4::SignalListItemFactory::new();
 
     {
         let dnd_wiring = dnd_wiring.clone();
         let selection = selection.clone();
+        let icon_size = icon_size.clone();
         factory.connect_setup(move |_, list_item| {
             let list_item = list_item
                 .downcast_ref::<gtk4::ListItem>()
@@ -118,7 +130,7 @@ pub(crate) fn build_grid_view(
             item_box.set_margin_end(6);
 
             let icon = gtk4::Image::new();
-            icon.set_pixel_size(icon_size);
+            icon.set_pixel_size(icon_size());
             item_box.append(&icon);
 
             let label = gtk4::Label::new(None);
@@ -140,6 +152,7 @@ pub(crate) fn build_grid_view(
 
     {
         let thumbnails = thumbnails.clone();
+        let icon_size = icon_size.clone();
         factory.connect_bind(move |_, list_item| {
             let list_item = list_item
                 .downcast_ref::<gtk4::ListItem>()
@@ -167,6 +180,7 @@ pub(crate) fn build_grid_view(
             }
             let mut child = item_box.first_child();
             if let Some(icon) = child.and_then(|w| w.downcast::<gtk4::Image>().ok()) {
+                icon.set_pixel_size(icon_size());
                 icon.set_icon_name(Some(icon_name_for(&file_item)));
                 thumbnails.bind(&icon, &file_item);
                 child = icon.next_sibling();
@@ -199,9 +213,52 @@ pub(crate) fn build_grid_view(
 
     let grid_view = gtk4::GridView::new(Some(selection.clone()), Some(factory));
     grid_view.set_enable_rubberband(true);
-    grid_view.connect_activate(move |_, position| on_activate(position));
+    // GTK's own `activate` signal fires on the platform's normal open
+    // gesture (double-click / Enter) regardless of the Preferences "Click
+    // Policy" setting, so it stays wired unconditionally. Single-click-to-
+    // open (Faz 34) is layered on top via its own gesture, gated on
+    // `settings` at click time rather than at view-construction time, so
+    // toggling the preference changes behavior on already-open tabs without
+    // rebuilding their views.
+    grid_view.connect_activate({
+        let on_activate = on_activate.clone();
+        move |_, position| on_activate(position)
+    });
+    attach_click_policy(&grid_view, selection, settings, on_activate);
     attach_background_drop(&grid_view, &dnd_wiring);
     grid_view
+}
+
+/// Adds single-click-to-open behavior to `view` (a `GridView` or
+/// `ColumnView`), active only while `settings.borrow().click_policy ==
+/// ClickPolicy::SingleClick`. Checked inside the handler on every click
+/// rather than baked in at construction, so a live Preferences change takes
+/// effect immediately (Faz 34). Relies on GTK's own list-item click
+/// handling already having updated `selection` in response to the same
+/// press by the time our gesture's `released` fires (bubble phase, lower
+/// priority than the view's internal selection gesture) — so this just
+/// reads the row the click landed on back out of the selection model
+/// instead of hit-testing widgets itself.
+pub(crate) fn attach_click_policy(
+    view: &impl IsA<gtk4::Widget>,
+    selection: &gtk4::MultiSelection,
+    settings: SharedSettings,
+    on_activate: Rc<dyn Fn(u32)>,
+) {
+    let gesture = gtk4::GestureClick::new();
+    gesture.set_button(gdk::BUTTON_PRIMARY);
+    let selection = selection.clone();
+    gesture.connect_released(move |_gesture, n_press, _x, _y| {
+        if n_press != 1 || settings.borrow().click_policy != ClickPolicy::SingleClick {
+            return;
+        }
+        let bitset = selection.selection();
+        if bitset.is_empty() {
+            return;
+        }
+        on_activate(bitset.nth(0));
+    });
+    view.add_controller(gesture);
 }
 
 /// Attaches a drag source (so `row` can be dragged out — the whole current

@@ -36,12 +36,6 @@ use veyra_filesystem::{FileItem, FileKind};
 /// Target decode/cache size (freedesktop.org "normal" thumbnail size).
 const THUMBNAIL_SIZE: i32 = 128;
 
-/// L1 capacity: comfortably covers a full screen of scrolling many times
-/// over while staying well under the ~50MB budget the phase calls for
-/// (worst case ~1000 * 128*128*4 bytes ≈ 64MB of raw pixel data, and actual
-/// decoded thumbnails are usually much smaller than their worst case).
-const L1_CAPACITY: usize = 1000;
-
 /// Background decode/IO worker threads. Kept small and fixed rather than
 /// one-thread-per-request: a single fast scroll can bind dozens of list
 /// items at once, and thumbnail decode is CPU-bound (Rule #33).
@@ -125,8 +119,10 @@ impl ThumbnailService {
     /// `cache_dir` is the L2 root (`<xdg-cache>/veyra/thumbnails`); its
     /// `normal/` subdirectory is created up front (Rule #26 XDG layout),
     /// mirroring the one-time `search_index.db` setup already done
-    /// synchronously at startup in `window.rs`.
-    pub(crate) fn new(cache_dir: PathBuf) -> Rc<Self> {
+    /// synchronously at startup in `window.rs`. `l1_capacity` seeds the L1
+    /// cache from the Preferences "Thumbnail Cache Capacity" setting (Faz
+    /// 34); [`resize_l1`](Self::resize_l1) adjusts it live afterwards.
+    pub(crate) fn new(cache_dir: PathBuf, l1_capacity: usize) -> Rc<Self> {
         let normal_dir = cache_dir.join("normal");
         if let Err(err) = std::fs::create_dir_all(&normal_dir) {
             tracing::warn!(
@@ -157,13 +153,24 @@ impl ThumbnailService {
 
         Rc::new(ThumbnailService {
             l1: RefCell::new(LruCache::new(
-                NonZeroUsize::new(L1_CAPACITY).expect("L1_CAPACITY is nonzero"),
+                NonZeroUsize::new(l1_capacity.max(1)).expect("capacity clamped to at least 1"),
             )),
             in_flight: RefCell::new(HashSet::new()),
             cancelled: Arc::new(Mutex::new(HashSet::new())),
             request_tx,
             cache_dir,
         })
+    }
+
+    /// Live-resizes the L1 cache (Faz 34's "Thumbnail Cache Capacity"
+    /// setting): shrinking evicts the least-recently-used entries down to
+    /// the new capacity, growing just raises the ceiling. Takes effect for
+    /// every already-open tab immediately — no rebuild needed, unlike
+    /// `stream_chunk_size` (which only applies to the next directory load).
+    pub(crate) fn resize_l1(&self, capacity: usize) {
+        self.l1
+            .borrow_mut()
+            .resize(NonZeroUsize::new(capacity.max(1)).expect("capacity clamped to at least 1"));
     }
 
     /// Binds `icon` for `item`: an L1 hit paints immediately and
@@ -322,7 +329,7 @@ fn produce_thumbnail(request: &Request) -> Option<DecodedImage> {
     )
     .inspect_err(|err| {
         tracing::debug!(
-            path = %request.path.display(),
+            path = %veyra_core::security::log_path(request.path.display()),
             error = %err,
             "thumbnail decode failed; falling back to symbolic icon"
         );

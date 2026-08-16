@@ -216,6 +216,11 @@ pub(crate) fn catalog() -> Vec<ShortcutEntry> {
             category: CATEGORY_TOOLS,
         },
         ShortcutEntry {
+            action: "win.show-preferences",
+            label: "Preferences",
+            category: CATEGORY_TOOLS,
+        },
+        ShortcutEntry {
             action: "win.reset-shortcuts",
             label: "Reset Shortcuts to Default",
             category: CATEGORY_TOOLS,
@@ -273,6 +278,7 @@ pub(crate) fn default_shortcuts() -> ShortcutMap {
     set("win.undo", &["<Primary>z"]);
     set("win.redo", &["<Primary><Shift>z", "<Primary>y"]);
     set("win.show-shortcuts-help", &["<Primary>question"]);
+    set("win.show-preferences", &["<Primary>comma"]);
     // No default accelerator: reset is destructive to a user's
     // customization and is reachable from the shortcuts help window and
     // Command Palette, so it doesn't need one (and shouldn't risk firing
@@ -379,7 +385,7 @@ fn load_from(path: &Path) -> ShortcutMap {
         return defaults;
     };
     let Ok(raw) = serde_json::from_str::<BTreeMap<String, Vec<String>>>(&contents) else {
-        tracing::warn!(path = %path.display(), "shortcuts.json is not valid JSON, using defaults");
+        tracing::warn!(path = %veyra_core::security::log_path(path.display()), "shortcuts.json is not valid JSON, using defaults");
         return defaults;
     };
 

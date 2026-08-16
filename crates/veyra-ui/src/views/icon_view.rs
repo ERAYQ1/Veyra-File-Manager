@@ -3,11 +3,10 @@ use std::rc::Rc;
 use gtk4::gio;
 use gtk4::prelude::*;
 
+use crate::config::SharedSettings;
 use crate::dnd::DndWiring;
 use crate::thumbnails::ThumbnailService;
 use crate::views::{build_grid_view, build_selection, item_at};
-
-const ICON_SIZE: i32 = 48;
 
 /// Large scalable-icon grid, ordered by the tab's shared `SortConfig`
 /// (`sorter`, see `crate::sorting`) — identical ordering to Compact/Details.
@@ -22,21 +21,28 @@ pub(crate) fn build_icon_view(
     is_trash: Rc<dyn Fn() -> bool>,
     thumbnails: Rc<ThumbnailService>,
     dnd_wiring: DndWiring,
+    settings: SharedSettings,
 ) -> (gtk4::Widget, gtk4::MultiSelection) {
     let selection = build_selection(model, filter, Some(sorter.clone()));
     let selection_for_activate = selection.clone();
 
+    // Faz 34: reads the live "Icon Size" preference on every bind, unlike
+    // Compact view's fixed small-icon constant below.
+    let icon_size_settings = settings.clone();
+    let on_activate: Rc<dyn Fn(u32)> = Rc::new(move |position| {
+        if let Some(item) = item_at(&selection_for_activate, position) {
+            on_open(item);
+        }
+    });
+
     let grid_view = build_grid_view(
         &selection,
-        ICON_SIZE,
+        move || icon_size_settings.borrow().icon_size.pixels(),
         false,
         thumbnails,
         dnd_wiring,
-        move |position| {
-            if let Some(item) = item_at(&selection_for_activate, position) {
-                on_open(item);
-            }
-        },
+        settings,
+        on_activate,
     );
     grid_view.set_min_columns(2);
     crate::context_menu::attach(

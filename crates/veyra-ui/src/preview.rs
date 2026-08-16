@@ -21,12 +21,8 @@ use libadwaita as adw;
 
 use veyra_filesystem::{format_size, FileItem, FileKind, FsError, VeyraPath};
 
+use crate::config::SharedSettings;
 use crate::fs_async;
-
-/// Cap on how much of a text file is read into memory for preview (Faz 10
-/// requirement B.2) — a multi-gigabyte log file must never be pulled into
-/// memory just to show its first screenful.
-const TEXT_PREVIEW_CAP_BYTES: usize = 512 * 1024;
 
 /// `PreviewPanelHandles::widget` is the single top-level widget callers
 /// embed in the window layout; every other field is an internal handle used
@@ -46,11 +42,15 @@ pub(crate) struct PreviewPanelHandles {
     info_subtitle: gtk4::Label,
     info_meta: gtk4::Label,
     info_open_button: gtk4::Button,
+    /// Faz 34: read live at render time for the text-preview size cap
+    /// (`max_preview_size_kb`) and whether a directory's card includes its
+    /// child count (`show_folder_count`).
+    settings: SharedSettings,
 }
 
 /// Builds the preview panel, initially showing its empty state. Callers
 /// decide when/whether `widget` is visible (Faz 10's `F9` toggle).
-pub(crate) fn build() -> PreviewPanelHandles {
+pub(crate) fn build(settings: SharedSettings) -> PreviewPanelHandles {
     let stack = gtk4::Stack::new();
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
     stack.set_vexpand(true);
@@ -86,7 +86,7 @@ pub(crate) fn build() -> PreviewPanelHandles {
             };
             std::thread::spawn(move || {
                 if let Err(err) = veyra_filesystem::open(&path) {
-                    tracing::warn!(path = %path, error = %err, "failed to open previewed item");
+                    tracing::warn!(path = %veyra_core::security::log_path(&path), error = %err, "failed to open previewed item");
                 }
             });
         });
@@ -106,6 +106,7 @@ pub(crate) fn build() -> PreviewPanelHandles {
         info_subtitle,
         info_meta,
         info_open_button,
+        settings,
     }
 }
 
@@ -371,7 +372,7 @@ fn show_image(handles: &PreviewPanelHandles, generation: u64, item: FileItem) {
                     handles_done.stack.set_visible_child_name("image");
                 }
                 Err(err) => {
-                    tracing::warn!(path = %item.path, error = %err, "failed to read image for preview");
+                    tracing::warn!(path = %veyra_core::security::log_path(&item.path), error = %err, "failed to read image for preview");
                     show_error(&handles_done, &item, &friendly_gio_error(&err));
                 }
             }
@@ -383,8 +384,11 @@ fn show_text(handles: &PreviewPanelHandles, generation: u64, item: FileItem) {
     handles.stack.set_visible_child_name("loading");
     let path = item.path.clone();
     let handles_done = handles.clone();
+    // Faz 34: the Preview page's "Preview Size Limit" setting, read fresh on
+    // every preview render rather than captured once at panel construction.
+    let cap_bytes = handles.settings.borrow().max_preview_size_kb * 1024;
     fs_async::run_blocking(
-        move || read_capped(&path, TEXT_PREVIEW_CAP_BYTES),
+        move || read_capped(&path, cap_bytes),
         move |result| {
             if !is_current(&handles_done, generation) {
                 return;
@@ -402,13 +406,16 @@ fn show_text(handles: &PreviewPanelHandles, generation: u64, item: FileItem) {
                         item.metadata.mime_type,
                     );
                     if truncated {
-                        meta.push_str("\n(showing first 512 KB only)");
+                        meta.push_str(&format!(
+                            "\n(showing first {} only)",
+                            format_size(cap_bytes as u64)
+                        ));
                     }
                     handles_done.text_meta.set_label(&meta);
                     handles_done.stack.set_visible_child_name("text");
                 }
                 Err(err) => {
-                    tracing::warn!(path = %item.path, error = %err, "failed to read text for preview");
+                    tracing::warn!(path = %veyra_core::security::log_path(&item.path), error = %err, "failed to read text for preview");
                     show_error(&handles_done, &item, &friendly_gio_error(&err));
                 }
             }
@@ -434,6 +441,23 @@ fn read_capped(path: &VeyraPath, cap: usize) -> Result<Vec<u8>, glib::Error> {
 }
 
 fn show_directory(handles: &PreviewPanelHandles, generation: u64, item: FileItem) {
+    // Faz 34: "Show Folder Item Count" — when off, skip the `read_dir` scan
+    // entirely (worth avoiding for a directory with many entries) and show
+    // the info card immediately without a child count line.
+    if !handles.settings.borrow().show_folder_count {
+        handles
+            .info_icon
+            .set_icon_name(Some(crate::views::icon_name_for(&item)));
+        handles.info_title.set_label(item.name());
+        handles.info_subtitle.set_label("Folder");
+        handles
+            .info_meta
+            .set_label(&format!("{}\n{}", item.path, modified_label(&item)));
+        handles.info_open_button.set_visible(false);
+        handles.stack.set_visible_child_name("info");
+        return;
+    }
+
     handles.stack.set_visible_child_name("loading");
     let path = item.path.clone();
     let handles_done = handles.clone();
@@ -461,7 +485,7 @@ fn show_directory(handles: &PreviewPanelHandles, generation: u64, item: FileItem
                     handles_done.stack.set_visible_child_name("info");
                 }
                 Err(err) => {
-                    tracing::warn!(path = %item.path, error = %err, "failed to read directory for preview");
+                    tracing::warn!(path = %veyra_core::security::log_path(&item.path), error = %err, "failed to read directory for preview");
                     show_error(&handles_done, &item, &friendly_fs_error(&err));
                 }
             }

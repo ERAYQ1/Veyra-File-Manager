@@ -12,6 +12,7 @@ mod archive_ops;
 mod bookmarks;
 mod breadcrumbs;
 mod command_palette;
+mod config;
 mod context_menu;
 mod devices;
 mod dialogs;
@@ -27,6 +28,7 @@ mod preview;
 mod privileged;
 mod recent;
 mod search_results;
+mod session;
 mod shortcuts;
 mod sidebar;
 mod sorting;
@@ -42,7 +44,9 @@ mod views;
 mod widgets;
 mod window;
 
+use std::cell::RefCell;
 use std::path::Path;
+use std::rc::Rc;
 
 use gtk4::glib;
 use libadwaita::prelude::*;
@@ -66,7 +70,17 @@ pub fn run(app_id: &str, start_dir: Option<VeyraPath>, cache_dir: &Path) -> glib
     let cache_dir = cache_dir.to_path_buf();
     app.connect_activate(move |app| {
         tracing::info!("activating primary window");
-        libadwaita::StyleManager::default().set_color_scheme(libadwaita::ColorScheme::Default);
+
+        // Faz 34: `VeyraSettings::load()` is the single source of truth for
+        // every user preference from here on — the theme applies before the
+        // window is even built, and the loaded value (rather than a
+        // hardcoded `ColorScheme::Default`) is what a corrupt/missing
+        // `settings.json` falls back to via `VeyraSettings::default()`.
+        let settings = config::VeyraSettings::load();
+        veyra_core::security::set_sanitize_log_paths(settings.sanitize_log_paths);
+        libadwaita::StyleManager::default().set_color_scheme(settings.color_scheme.to_adw());
+        let settings: config::SharedSettings = Rc::new(RefCell::new(settings));
+
         if let Some(display) = gtk4::gdk::Display::default() {
             let icon_theme = gtk4::IconTheme::for_display(&display);
             icon_theme.add_search_path("data/icons");
@@ -76,7 +90,7 @@ pub fn run(app_id: &str, start_dir: Option<VeyraPath>, cache_dir: &Path) -> glib
         let start_dir = start_dir
             .clone()
             .unwrap_or_else(|| VeyraPath::from_local(glib::home_dir()));
-        window::build_window(app, start_dir, &cache_dir).present();
+        window::build_window(app, start_dir, &cache_dir, settings).present();
     });
 
     // `start_dir` is already resolved above from our own arg parsing

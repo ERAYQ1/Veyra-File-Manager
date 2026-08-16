@@ -13,6 +13,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use libadwaita as adw;
 
+use crate::config::SharedSettings;
 use crate::recent::{self, RecentBannerHandles};
 use crate::tab_page::{active_tab, TabPage, TabRegistry};
 use crate::trash::{self, TrashBannerHandles};
@@ -63,6 +64,10 @@ pub(crate) struct Chrome {
     /// Trash"), revealed by `window::update_chrome` whenever this panel's
     /// active tab is showing Trash.
     pub trash_banner: TrashBannerHandles,
+    /// Faz 34: the app-wide preferences store, shared by both panels and
+    /// every tab's views (icon size, click policy, per-tab defaults) — same
+    /// sharing pattern as `privacy_mode` above.
+    pub settings: SharedSettings,
 }
 
 /// One independent panel: its own navigation chrome, its own `AdwTabView`
@@ -117,7 +122,11 @@ pub(crate) fn focused_tab(panels: &Panels, focused: &Rc<RefCell<PanelId>>) -> Op
 /// `AdwTabView`, and a status row (item count / free space). Mirrors the
 /// single-panel header bar Faz 3-7 built, just scoped to one panel instead
 /// of the whole window.
-pub(crate) fn build_panel(id: PanelId, privacy_mode: Rc<RefCell<bool>>) -> Panel {
+pub(crate) fn build_panel(
+    id: PanelId,
+    privacy_mode: Rc<RefCell<bool>>,
+    settings: SharedSettings,
+) -> Panel {
     let back_button = nav_button("go-previous-symbolic", "Go Back");
     let forward_button = nav_button("go-next-symbolic", "Go Forward");
     let up_button = nav_button("go-up-symbolic", "Go Up");
@@ -228,6 +237,7 @@ pub(crate) fn build_panel(id: PanelId, privacy_mode: Rc<RefCell<bool>>) -> Panel
         recent_banner,
         privacy_mode,
         trash_banner,
+        settings,
     };
 
     Panel {

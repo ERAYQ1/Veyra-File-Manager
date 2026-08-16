@@ -8,10 +8,11 @@ use gtk4::prelude::*;
 
 use veyra_filesystem::FileItem;
 
+use crate::config::SharedSettings;
 use crate::dnd::DndWiring;
 use crate::sorting::{SortConfig, SortKey, SortOrder};
 use crate::thumbnails::ThumbnailService;
-use crate::views::{icon_name_for, item_at};
+use crate::views::{attach_click_policy, icon_name_for, item_at};
 
 /// The tab-level sort state Details needs on top of its own columns: the
 /// shared `SortConfig` and `CustomSorter` every view sorts by, and the
@@ -48,6 +49,7 @@ pub(crate) fn build_details_view(
     is_trash: Rc<dyn Fn() -> bool>,
     thumbnails: Rc<ThumbnailService>,
     dnd_wiring: DndWiring,
+    settings: SharedSettings,
 ) -> DetailsViewHandles {
     let DetailsSortWiring {
         sort_config,
@@ -131,11 +133,25 @@ pub(crate) fn build_details_view(
     }
 
     let selection_for_activate = selection.clone();
-    column_view.connect_activate(move |_, position| {
-        if let Some(item) = item_at(&selection_for_activate, position) {
-            on_open(item);
-        }
+    let on_open: Rc<dyn Fn(FileItem)> = Rc::new(on_open);
+    let on_activate: Rc<dyn Fn(u32)> = {
+        let on_open = on_open.clone();
+        Rc::new(move |position| {
+            if let Some(item) = item_at(&selection_for_activate, position) {
+                on_open(item);
+            }
+        })
+    };
+    // Same double-click-always-wired-plus-live-gated-single-click split as
+    // `views::build_grid_view` (Faz 34): `connect_activate` covers GTK's
+    // normal double-click/Enter open regardless of the preference, and
+    // `attach_click_policy` layers single-click-to-open on top, gated on
+    // `settings` at click time.
+    column_view.connect_activate({
+        let on_activate = on_activate.clone();
+        move |_, position| on_activate(position)
     });
+    attach_click_policy(&column_view, &selection, settings, on_activate);
     crate::context_menu::attach(
         &column_view,
         &selection,

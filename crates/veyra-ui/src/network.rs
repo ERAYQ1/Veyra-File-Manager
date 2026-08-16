@@ -216,6 +216,15 @@ pub(crate) fn record_history(uri: &str) {
     }
 }
 
+/// Clears the entire recent-servers history (Faz 34 Privacy page's "Clear
+/// Recent Servers" button) — same atomic-write emptying `save_history_to`
+/// already does for a single removal, just with an empty list.
+pub(crate) fn clear_history() {
+    if let Err(err) = save_history_to(&history_path(), &[]) {
+        tracing::warn!(error = %err, "failed to clear network server history");
+    }
+}
+
 /// Removes `uri` from the real history file, if present.
 pub(crate) fn remove_history_entry(uri: &str) {
     let path = history_path();
