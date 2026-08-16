@@ -27,12 +27,13 @@ use crate::{
 };
 
 /// A single Copy/Cut clipboard slot, shared across both panels and all their
-/// tabs (Faz 5 operates on the current selection, not a multi-item marquee —
-/// see `AGENTS.md` scope note in the Faz 5 changelog entry). `cut` decides
-/// whether `win.paste` runs a Move or a Copy.
+/// tabs. Holds every path from the selection active when Copy/Cut ran (Ara
+/// Faz: Multi-Selection) — a single-item selection just produces a
+/// one-element `paths`. `cut` decides whether `win.paste` runs a Move or a
+/// Copy.
 #[derive(Clone)]
 struct ClipboardEntry {
-    path: VeyraPath,
+    paths: Vec<VeyraPath>,
     cut: bool,
 }
 
@@ -728,12 +729,10 @@ fn setup_navigation_shortcuts(
     window.add_action(&action_toggle_hidden);
     app.set_accels_for_action("win.toggle-hidden-files", &["<Primary>h"]);
 
-    // Faz 25: every view's selection model is a `GtkSingleSelection`
-    // (Faz 5 note above `ClipboardEntry` — Veyra operates on one selected
-    // item at a time, not a marquee), so "Select All" has nothing to
-    // extend into; it falls back to selecting and focusing the first item,
-    // which is still useful as a keyboard-only way to jump into an empty
-    // selection.
+    // Ara Faz (Multi-Selection): every view's selection model is now a
+    // `GtkMultiSelection`, so `Ctrl+A` selects every item currently shown
+    // in whichever view is active, instead of only ever jumping to the
+    // first one.
     let action_select_all = gio::SimpleAction::new("select-all", None);
     {
         let panels = panels.clone();
@@ -742,9 +741,7 @@ fn setup_navigation_shortcuts(
             let panel = panels.get(*focused.borrow()).clone();
             if let Some(tab) = active_tab(&panel.tab_view, &panel.registry) {
                 let selection = tab.selections.active(&tab.view_stack);
-                if selection.n_items() > 0 {
-                    selection.set_selected(0);
-                }
+                selection.select_all();
                 if let Some(widget) = tab.view_stack.visible_child() {
                     widget.grab_focus();
                 }
@@ -753,6 +750,22 @@ fn setup_navigation_shortcuts(
     }
     window.add_action(&action_select_all);
     app.set_accels_for_action("win.select-all", &["<Primary>a"]);
+
+    // Ara Faz (Multi-Selection) requirement A.3: `Escape` clears whatever is
+    // currently selected in the focused panel's active view.
+    let action_deselect_all = gio::SimpleAction::new("deselect-all", None);
+    {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_deselect_all.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            if let Some(tab) = active_tab(&panel.tab_view, &panel.registry) {
+                tab.selections.active(&tab.view_stack).unselect_all();
+            }
+        });
+    }
+    window.add_action(&action_deselect_all);
+    app.set_accels_for_action("win.deselect-all", &["Escape"]);
 }
 
 /// Registers the Faz 7 tab-management `win.*` actions and their
@@ -965,9 +978,10 @@ fn transfer_to_other_panel(
     let Some(source_tab) = active_tab(&source.tab_view, &source.registry) else {
         return;
     };
-    let Some(item) = source_tab.selections.selected(&source_tab.view_stack) else {
+    let items = source_tab.selections.selected_items(&source_tab.view_stack);
+    if items.is_empty() {
         return;
-    };
+    }
     let Some(dest_tab) = active_tab(&destination_panel.tab_view, &destination_panel.registry)
     else {
         return;
@@ -982,7 +996,7 @@ fn transfer_to_other_panel(
         ],
         progress,
         kind,
-        vec![item.path],
+        items.into_iter().map(|item| item.path).collect(),
         Some(destination),
         undo_stack,
     );
@@ -1013,11 +1027,14 @@ fn setup_operation_actions(
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
                 return;
             };
-            if let Some(item) = tab.selections.selected(&tab.view_stack) {
-                *clipboard.borrow_mut() = Some(ClipboardEntry {
-                    path: item.path,
-                    cut: false,
-                });
+            let paths: Vec<VeyraPath> = tab
+                .selections
+                .selected_items(&tab.view_stack)
+                .into_iter()
+                .map(|item| item.path)
+                .collect();
+            if !paths.is_empty() {
+                *clipboard.borrow_mut() = Some(ClipboardEntry { paths, cut: false });
             }
         });
     }
@@ -1034,11 +1051,14 @@ fn setup_operation_actions(
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
                 return;
             };
-            if let Some(item) = tab.selections.selected(&tab.view_stack) {
-                *clipboard.borrow_mut() = Some(ClipboardEntry {
-                    path: item.path,
-                    cut: true,
-                });
+            let paths: Vec<VeyraPath> = tab
+                .selections
+                .selected_items(&tab.view_stack)
+                .into_iter()
+                .map(|item| item.path)
+                .collect();
+            if !paths.is_empty() {
+                *clipboard.borrow_mut() = Some(ClipboardEntry { paths, cut: true });
             }
         });
     }
@@ -1072,7 +1092,7 @@ fn setup_operation_actions(
                 vec![(tab.state.clone(), panel.chrome.clone())],
                 &progress,
                 kind,
-                vec![entry.path],
+                entry.paths,
                 Some(destination),
                 &undo_stack,
             );
@@ -1093,13 +1113,19 @@ fn setup_operation_actions(
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
                 return;
             };
-            if let Some(item) = tab.selections.selected(&tab.view_stack) {
+            let paths: Vec<VeyraPath> = tab
+                .selections
+                .selected_items(&tab.view_stack)
+                .into_iter()
+                .map(|item| item.path)
+                .collect();
+            if !paths.is_empty() {
                 run_bulk_operation(
                     &window,
                     vec![(tab.state.clone(), panel.chrome.clone())],
                     &progress,
                     OperationKind::Trash,
-                    vec![item.path],
+                    paths,
                     None,
                     &undo_stack,
                 );
@@ -1121,23 +1147,28 @@ fn setup_operation_actions(
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
                 return;
             };
-            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+            let paths: Vec<VeyraPath> = tab
+                .selections
+                .selected_items(&tab.view_stack)
+                .into_iter()
+                .map(|item| item.path)
+                .collect();
+            if paths.is_empty() {
                 return;
-            };
+            }
             let window_for_confirm = window.clone();
             let state = tab.state.clone();
             let chrome = panel.chrome.clone();
             let progress = progress.clone();
-            let path = item.path;
-            let path_for_delete = path.clone();
+            let paths_for_delete = paths.clone();
             let undo_stack = undo_stack.clone();
-            dialogs::delete_confirm::show(&window, std::slice::from_ref(&path), move || {
+            dialogs::delete_confirm::show(&window, &paths, move || {
                 run_bulk_operation(
                     &window_for_confirm,
                     vec![(state, chrome)],
                     &progress,
                     OperationKind::Delete,
-                    vec![path_for_delete],
+                    paths_for_delete,
                     None,
                     &undo_stack,
                 );
@@ -1171,17 +1202,18 @@ fn setup_archive_actions(
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
                 return;
             };
-            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+            let items = tab.selections.selected_items(&tab.view_stack);
+            if items.is_empty() {
                 return;
-            };
-            let Some(default_stem) = item.path.file_name() else {
+            }
+            let Some(default_stem) = items[0].path.file_name() else {
                 return;
             };
             let current_dir = tab.state.borrow().current_dir.clone();
             let state = tab.state.clone();
             let chrome = panel.chrome.clone();
             let progress = progress.clone();
-            let source = item.path;
+            let sources: Vec<VeyraPath> = items.into_iter().map(|item| item.path).collect();
             let window_for_confirm = window.clone();
             dialogs::compress_dialog::show(
                 &window,
@@ -1190,7 +1222,7 @@ fn setup_archive_actions(
                 move |name, format| {
                     let output_path = child_path(&current_dir, &name);
                     let (control, receiver) =
-                        archive_ops::spawn_compress(output_path, vec![source], format);
+                        archive_ops::spawn_compress(output_path, sources, format);
                     run_archive_operation(
                         &window_for_confirm,
                         vec![(state, chrome)],

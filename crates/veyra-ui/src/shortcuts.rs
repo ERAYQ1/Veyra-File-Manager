@@ -81,6 +81,11 @@ pub(crate) fn catalog() -> Vec<ShortcutEntry> {
             category: CATEGORY_NAVIGATION,
         },
         ShortcutEntry {
+            action: "win.deselect-all",
+            label: "Deselect All",
+            category: CATEGORY_NAVIGATION,
+        },
+        ShortcutEntry {
             action: "win.copy-selection",
             label: "Copy",
             category: CATEGORY_FILE_OPERATIONS,
@@ -241,6 +246,7 @@ pub(crate) fn default_shortcuts() -> ShortcutMap {
     set("win.focus-address", &["<Primary>l"]);
     set("win.toggle-hidden-files", &["<Primary>h"]);
     set("win.select-all", &["<Primary>a"]);
+    set("win.deselect-all", &["Escape"]);
     set("win.new-tab", &["<Primary>t"]);
     set("win.close-tab", &["<Primary>w"]);
     set("win.next-tab", &["<Primary>Tab"]);

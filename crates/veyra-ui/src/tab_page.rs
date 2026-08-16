@@ -27,20 +27,20 @@ use crate::sorting::{QuickFilter, SortConfig, SortKey};
 use crate::state::SharedState;
 use crate::views::ViewMode;
 
-/// The three views' independent `GtkSingleSelection` chains, so keyboard
-/// operations (Copy/Cut/Trash/Delete) can find "the selected item" in
-/// whichever view is currently visible for a tab.
+/// The three views' independent `GtkMultiSelection` chains, so keyboard/menu
+/// operations (Copy/Cut/Trash/Delete/Compress/…) can find "the selected
+/// item(s)" in whichever view is currently visible for a tab.
 #[derive(Clone)]
 pub(crate) struct ViewSelections {
-    pub icon: gtk4::SingleSelection,
-    pub compact: gtk4::SingleSelection,
-    pub details: gtk4::SingleSelection,
+    pub icon: gtk4::MultiSelection,
+    pub compact: gtk4::MultiSelection,
+    pub details: gtk4::MultiSelection,
 }
 
 impl ViewSelections {
-    /// The `GtkSingleSelection` backing whichever of the three views is
+    /// The `GtkMultiSelection` backing whichever of the three views is
     /// currently visible in `view_stack`.
-    pub fn active(&self, view_stack: &gtk4::Stack) -> &gtk4::SingleSelection {
+    pub fn active(&self, view_stack: &gtk4::Stack) -> &gtk4::MultiSelection {
         match view_stack.visible_child_name().as_deref() {
             Some(name) if name == ViewMode::Compact.stack_name() => &self.compact,
             Some(name) if name == ViewMode::Details.stack_name() => &self.details,
@@ -48,8 +48,16 @@ impl ViewSelections {
         }
     }
 
+    /// The first selected item (ascending position order), for actions that
+    /// only ever target a single item (Open, Rename, Properties, …).
     pub fn selected(&self, view_stack: &gtk4::Stack) -> Option<FileItem> {
         crate::views::selected_item(self.active(view_stack))
+    }
+
+    /// Every selected item, for bulk actions (Copy/Cut/Trash/Delete/
+    /// Compress/panel transfer).
+    pub fn selected_items(&self, view_stack: &gtk4::Stack) -> Vec<FileItem> {
+        crate::views::selected_items(self.active(view_stack))
     }
 }
 

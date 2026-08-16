@@ -100,16 +100,16 @@ pub(crate) struct DndWiring {
     pub execute: DropExecutor,
 }
 
-/// Attaches a single-file `GtkDragSource` to `widget`. `get_source` is
-/// polled both when the drag starts (`prepare`, to build the
-/// `gdk::FileList` content) and again in `drag_begin` (to look up the drag
-/// icon) — called twice rather than cached because callers backed by a
-/// recycled `GtkListItem` factory row must re-resolve "the item this row
-/// currently shows" live, not at controller-setup time.
+/// Attaches a `GtkDragSource` to `widget`, dragging one or more files at
+/// once. `get_source` is polled both when the drag starts (`prepare`, to
+/// build the `gdk::FileList` content) and again in `drag_begin` (to look up
+/// the drag icon) — called twice rather than cached because callers backed
+/// by a recycled `GtkListItem` factory row must re-resolve "the item(s) this
+/// row's drag currently represents" live, not at controller-setup time.
 pub(crate) fn attach_drag_source(
     widget: &impl IsA<gtk4::Widget>,
     button: u32,
-    get_source: impl Fn() -> Option<(VeyraPath, &'static str)> + 'static,
+    get_source: impl Fn() -> Option<(Vec<VeyraPath>, &'static str)> + 'static,
 ) {
     let drag_source = gtk4::DragSource::new();
     drag_source.set_button(button);
@@ -127,8 +127,12 @@ pub(crate) fn attach_drag_source(
     {
         let get_source = get_source.clone();
         drag_source.connect_prepare(move |_, _, _| {
-            let (path, _) = get_source()?;
-            let file_list = gdk::FileList::from_array(&[path.to_gio_file()]);
+            let (paths, _) = get_source()?;
+            if paths.is_empty() {
+                return None;
+            }
+            let files: Vec<gio::File> = paths.iter().map(VeyraPath::to_gio_file).collect();
+            let file_list = gdk::FileList::from_array(&files);
             Some(gdk::ContentProvider::for_value(&file_list.to_value()))
         });
     }

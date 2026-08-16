@@ -1,5 +1,29 @@
 # Changelog
 
+## Ara Faz — Multi-Selection, Rubberband & Batch Context Actions (`veyra-ui`)
+
+Icon/Compact/Details görünümlerinin üçü de artık `GtkSingleSelection` yerine `GtkMultiSelection` kullanıyor: fareyle boş alandan sürükleyerek dikdörtgen (lastik bant) seçim, `Ctrl+Click` ile tekil ekle/çıkar, `Shift+Click` ile aralık seçimi ve `Ctrl+A` ile görünümdeki tüm ögeleri seçme artık çalışıyor. Sağ-tık menüsü ve Copy/Cut/Trash/Delete/Compress/Panel-transfer kısayolları artık seçili tüm dosyalara topluca uygulanıyor.
+
+### Eklenenler
+- **`GtkMultiSelection` geçişi (`views/mod.rs`, `views/icon_view.rs`, `views/compact_view.rs`, `views/details_view.rs`):** `build_selection` artık `MultiSelection` döndürüyor; `selected_item` (ilk seçili öge, tek hedefli eylemler için) ve `selected_items` (seçili tüm ögeler, toplu eylemler için) yardımcı fonksiyonları eklendi. `GtkGridView` ve `GtkColumnView` üzerinde `set_enable_rubberband(true)` aktif edildi.
+- **Klavye ile çoklu seçim:** `win.select-all` (`Ctrl+A`) artık `selection.select_all()` çağırıyor (önceden yalnızca ilk ögeyi seçiyordu). Yeni `win.deselect-all` eylemi (`Escape`) aktif görünümün seçimini temizliyor — `shortcuts.rs` kataloğuna ve varsayılanlarına eklendi.
+- **Dinamik sağ-tık menüsü (`context_menu.rs`):** `build_item_menu` artık `&[FileItem]` alıyor; 1 ögede önceki davranışın aynısı, 2+ ögede yalnızca toplu-uyumlu eylemler ("Copy (3 items)", "Cut (3 items)", "Move 3 items to Trash", "Delete 3 items Permanently", "Compress 3 items…", panel transferi) gösteriliyor — Open/Rename/Bookmarks/Properties gibi tekil-hedefli girdiler yanıltıcı olmaması için çoklu seçimde gizleniyor. Seçimin korunması (seçili bir ögeye sağ tıklamak seçimi bozmuyor) GTK4'ün `GtkListView` ailesinin kendi tıklama davranışına dayanıyor: soldaki tıklama gibi sağ tıklama da zaten-seçili bir satırın üzerindeyse seçim değişmiyor.
+- **Toplu pano/işlemler (`window.rs`):** `ClipboardEntry` artık tek `path` yerine `paths: Vec<VeyraPath>` tutuyor; `copy-selection`/`cut-selection`/`paste` buna göre güncellendi. `trash-selection`, `delete-selection` (onay diyaloğu dahil), `compress-selected` ve panel-arası `transfer_to_other_panel` (Copy/Move to Other Panel) artık `tab.selections.selected_items(...)` ile toplanan tüm seçili yolları tek bir `run_bulk_operation`/`spawn_compress` çağrısına gönderiyor — alt yapı (`OperationRequest::sources: Vec<VeyraPath>`, DND'nin `DropExecutor`) zaten çoklu kaynak destekliyordu, yeni olan yalnızca seçim tarafındaki toplama.
+- **Çoklu sürükle-bırak (`dnd.rs`, `views/mod.rs`):** `attach_drag_source`'ın `get_source` imzası tek `VeyraPath` yerine `Vec<VeyraPath>` döndürüyor; `attach_row_dnd` artık `selection` parametresi alıyor ve sürüklenen satır geçerli çoklu seçimin bir parçasıysa (`selection.is_selected(position) && selection.selection().size() > 1`) seçili tüm ögelerin yollarını, değilse yalnızca o satırınkini sürüklüyor.
+
+### Kapsam kararları
+- Open/Open With/Open in New Tab-Window/Rename/Add to Bookmarks/Analyze Disk/Extract Here-to/Copy Path/Copy Location/Open Terminal/Properties/Restore from Trash tekil-hedefli kalmaya devam ediyor (spec bunları toplu istemiyordu) — çoklu seçimde bunlar sağ-tık menüsünden kaldırılıyor ama `win.*` eylemleri hâlâ ilk seçili ögeyi hedefliyor, böylece Command Palette/kısayoldan tetiklenirlerse önceki davranışlarını koruyorlar.
+- Sağ-tık "seçimi koru" davranışı için GTK'nin `GtkListItemWidget` iç tıklama mantığına güvenildi (zaten-seçili bir satıra düz tıklama basışta seçimi bozmuyor); ekstra bir capture-phase gesture eklenmedi çünkü mevcut mimari (view başına tek `GestureClick`, bubble phase) bunu gerektirmeden doğru sonucu veriyor.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: tamamı geçti (`veyra-ui`: 172 → 176, yeni: `context_menu` modülüne 4 test — `count_label`/`move_count_label`/`trash_count_label`).
+- GTK gerektiren rubberband/multi-select/right-click-preserve etkileşimleri bu ortamda ekranı olan bir oturumda manuel doğrulanmadı (headless sandbox) — yalnızca derleme/birim testi seviyesinde doğrulandı.
+
+### Sıradaki Faz
+Faz 34 — Batch Rename (Toplu Yeniden Adlandırma).
+
 ## Faz 33 — Undo / Redo Engine (Geri Al / Yinele Motoru) (`veyra-filesystem`, `veyra-ui`)
 
 Rename, Move, Copy, Trash, Create Folder/File işlemlerinin tamamı artık `Ctrl+Z` ile geri alınabiliyor, `Ctrl+Shift+Z`/`Ctrl+Y` ile yinelenebiliyor. Kalıcı silme (`Shift+Delete`) hâlâ geri alınamaz (Kural #39) ve gerçekleştiğinde bekleyen kayıtları yığından temizliyor.

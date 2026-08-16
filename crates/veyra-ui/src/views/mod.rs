@@ -44,10 +44,32 @@ pub(crate) fn item_at(model: &impl IsA<gio::ListModel>, position: u32) -> Option
     Some(cloned)
 }
 
-/// The currently selected item in `selection`, if any (`GTK_INVALID_LIST_POSITION`
-/// when nothing is selected, which `item_at` already treats as "no item").
-pub(crate) fn selected_item(selection: &gtk4::SingleSelection) -> Option<FileItem> {
-    item_at(selection, selection.selected())
+/// The first selected item in `selection` (in ascending position order), if
+/// any — used where exactly one target is expected (Open, Rename,
+/// Properties, …) even though the underlying model may hold a larger
+/// multi-selection.
+pub(crate) fn selected_item(selection: &gtk4::MultiSelection) -> Option<FileItem> {
+    let bitset = selection.selection();
+    if bitset.is_empty() {
+        return None;
+    }
+    item_at(selection, bitset.nth(0))
+}
+
+/// Every selected item in `selection`, in ascending position order — the
+/// full set a bulk action (Copy/Cut/Trash/Delete/Compress/…) should apply
+/// to.
+pub(crate) fn selected_items(selection: &gtk4::MultiSelection) -> Vec<FileItem> {
+    let bitset = selection.selection();
+    let count = bitset.size();
+    let mut items = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let position = bitset.nth(i as u32);
+        if let Some(item) = item_at(selection, position) {
+            items.push(item);
+        }
+    }
+    items
 }
 
 /// Builds the shared filter → sort → selection chain every view wraps the
@@ -59,16 +81,16 @@ pub(crate) fn build_selection(
     model: &gio::ListStore,
     filter: &gtk4::CustomFilter,
     sorter: Option<impl IsA<gtk4::Sorter>>,
-) -> gtk4::SingleSelection {
+) -> gtk4::MultiSelection {
     let filtered = gtk4::FilterListModel::new(Some(model.clone()), Some(filter.clone()));
     let sorted = gtk4::SortListModel::new(Some(filtered), sorter);
-    gtk4::SingleSelection::new(Some(sorted))
+    gtk4::MultiSelection::new(Some(sorted))
 }
 
 /// Shared `GtkGridView` builder behind the Icon and Compact views: only the
 /// icon pixel size and item layout orientation differ between them.
 pub(crate) fn build_grid_view(
-    selection: &gtk4::SingleSelection,
+    selection: &gtk4::MultiSelection,
     icon_size: i32,
     horizontal_item: bool,
     thumbnails: Rc<ThumbnailService>,
@@ -79,6 +101,7 @@ pub(crate) fn build_grid_view(
 
     {
         let dnd_wiring = dnd_wiring.clone();
+        let selection = selection.clone();
         factory.connect_setup(move |_, list_item| {
             let list_item = list_item
                 .downcast_ref::<gtk4::ListItem>()
@@ -111,7 +134,7 @@ pub(crate) fn build_grid_view(
 
             list_item.set_child(Some(&item_box));
 
-            attach_row_dnd(&item_box, list_item, &dnd_wiring);
+            attach_row_dnd(&item_box, list_item, &dnd_wiring, &selection);
         });
     }
 
@@ -175,21 +198,24 @@ pub(crate) fn build_grid_view(
     }
 
     let grid_view = gtk4::GridView::new(Some(selection.clone()), Some(factory));
+    grid_view.set_enable_rubberband(true);
     grid_view.connect_activate(move |_, position| on_activate(position));
     attach_background_drop(&grid_view, &dnd_wiring);
     grid_view
 }
 
-/// Attaches a drag source (so `row` can be dragged out, single-file, since
-/// selection app-wide is `GtkSingleSelection`) and a folder-only drop target
-/// to a recycled list-item row. Both callbacks re-resolve "the item this row
-/// currently shows" live via `list_item.item()` rather than capturing the
-/// `FileItem` at setup time, since `connect_bind` swaps it out from under
-/// the same row as the list scrolls.
+/// Attaches a drag source (so `row` can be dragged out — the whole current
+/// multi-selection if `row`'s own item is part of it, otherwise just that
+/// one item, matching Faz "Ara Faz" B/C multi-drag) and a folder-only drop
+/// target to a recycled list-item row. Both callbacks re-resolve "the item
+/// this row currently shows" live via `list_item.item()` rather than
+/// capturing the `FileItem` at setup time, since `connect_bind` swaps it out
+/// from under the same row as the list scrolls.
 pub(crate) fn attach_row_dnd(
     row: &impl IsA<gtk4::Widget>,
     list_item: &gtk4::ListItem,
     dnd_wiring: &DndWiring,
+    selection: &gtk4::MultiSelection,
 ) {
     let current_item = {
         let weak = list_item.downgrade();
@@ -201,22 +227,36 @@ pub(crate) fn attach_row_dnd(
         }
     };
 
-    {
+    // If the row being dragged is part of a larger current multi-selection,
+    // drag every selected item's path; otherwise just this row's own item.
+    let drag_paths = {
         let current_item = current_item.clone();
-        dnd::attach_drag_source(row, gdk::BUTTON_PRIMARY, move || {
+        let list_item = list_item.downgrade();
+        let selection = selection.clone();
+        move || -> Option<(Vec<veyra_filesystem::VeyraPath>, &'static str)> {
             let item = current_item()?;
             let icon = icon_name_for(&item);
-            Some((item.path, icon))
-        });
-    }
+            let position = list_item.upgrade().map(|li| li.position());
+            let is_multi = position
+                .map(|pos| selection.is_selected(pos) && selection.selection().size() > 1)
+                .unwrap_or(false);
+            let paths = if is_multi {
+                selected_items(&selection)
+                    .into_iter()
+                    .map(|i| i.path)
+                    .collect()
+            } else {
+                vec![item.path]
+            };
+            Some((paths, icon))
+        }
+    };
+
     {
-        let current_item = current_item.clone();
-        dnd::attach_drag_source(row, gdk::BUTTON_SECONDARY, move || {
-            let item = current_item()?;
-            let icon = icon_name_for(&item);
-            Some((item.path, icon))
-        });
+        let drag_paths = drag_paths.clone();
+        dnd::attach_drag_source(row, gdk::BUTTON_PRIMARY, drag_paths);
     }
+    dnd::attach_drag_source(row, gdk::BUTTON_SECONDARY, drag_paths);
 
     let accept = {
         let current_item = current_item.clone();

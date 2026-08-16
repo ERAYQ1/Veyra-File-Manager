@@ -27,7 +27,7 @@ pub(crate) struct DetailsSortWiring {
 /// `SortConfig` onto the column headers (see `TabPage::resort`).
 pub(crate) struct DetailsViewHandles {
     pub widget: gtk4::Widget,
-    pub selection: gtk4::SingleSelection,
+    pub selection: gtk4::MultiSelection,
     pub column_view: gtk4::ColumnView,
     pub sort_columns: Rc<Vec<(SortKey, gtk4::ColumnViewColumn)>>,
 }
@@ -54,10 +54,15 @@ pub(crate) fn build_details_view(
         sorter,
         sync_guard,
     } = sort;
-    let column_view = gtk4::ColumnView::new(None::<gtk4::SingleSelection>);
+    let column_view = gtk4::ColumnView::new(None::<gtk4::MultiSelection>);
     column_view.set_show_row_separators(true);
+    column_view.set_enable_rubberband(true);
 
-    let name_col = name_column(thumbnails, dnd_wiring.clone());
+    let filtered = gtk4::FilterListModel::new(Some(model.clone()), Some(filter.clone()));
+    let sort_model = gtk4::SortListModel::new(Some(filtered), Some(sorter.clone()));
+    let selection = gtk4::MultiSelection::new(Some(sort_model));
+
+    let name_col = name_column(thumbnails, dnd_wiring.clone(), selection.clone());
     column_view.append_column(&name_col);
     let size_col = text_column("Size", 100, size_label, |a, b| {
         a.metadata.size_bytes.cmp(&b.metadata.size_bytes)
@@ -87,9 +92,6 @@ pub(crate) fn build_details_view(
         (SortKey::Modified, modified_col),
     ]);
 
-    let filtered = gtk4::FilterListModel::new(Some(model.clone()), Some(filter.clone()));
-    let sort_model = gtk4::SortListModel::new(Some(filtered), Some(sorter.clone()));
-    let selection = gtk4::SingleSelection::new(Some(sort_model));
     column_view.set_model(Some(&selection));
 
     // GtkColumnView's own header-click sorter (`ColumnViewSorter`) is kept
@@ -156,7 +158,11 @@ pub(crate) fn build_details_view(
     }
 }
 
-fn name_column(thumbnails: Rc<ThumbnailService>, dnd_wiring: DndWiring) -> gtk4::ColumnViewColumn {
+fn name_column(
+    thumbnails: Rc<ThumbnailService>,
+    dnd_wiring: DndWiring,
+    selection: gtk4::MultiSelection,
+) -> gtk4::ColumnViewColumn {
     let factory = gtk4::SignalListItemFactory::new();
     let thumbnails_for_unbind = thumbnails.clone();
 
@@ -181,7 +187,7 @@ fn name_column(thumbnails: Rc<ThumbnailService>, dnd_wiring: DndWiring) -> gtk4:
 
         list_item.set_child(Some(&row));
 
-        crate::views::attach_row_dnd(&row, list_item, &dnd_wiring);
+        crate::views::attach_row_dnd(&row, list_item, &dnd_wiring, &selection);
     });
 
     factory.connect_bind(move |_, list_item| {

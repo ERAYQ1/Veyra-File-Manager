@@ -23,7 +23,7 @@ pub(crate) fn build_compact_view(
     is_trash: Rc<dyn Fn() -> bool>,
     thumbnails: Rc<ThumbnailService>,
     dnd_wiring: DndWiring,
-) -> (gtk4::Widget, gtk4::SingleSelection) {
+) -> (gtk4::Widget, gtk4::MultiSelection) {
     let selection = build_selection(model, filter, Some(sorter.clone()));
     let selection_for_activate = selection.clone();
 
