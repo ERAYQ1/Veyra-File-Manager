@@ -13,9 +13,11 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use crate::config::{
-    AccentColorPref, ClickPolicy, ColorSchemePref, DefaultViewMode, IconSizePref, SharedSettings,
-    MAX_PREVIEW_SIZE_CHOICES_KB, STREAM_CHUNK_SIZE_CHOICES, THUMBNAIL_CACHE_CAPACITY_CHOICES,
+    AccentColorPref, ClickPolicy, ColorSchemePref, DefaultViewMode, IconSizePref, LanguagePref,
+    SharedSettings, MAX_PREVIEW_SIZE_CHOICES_KB, STREAM_CHUNK_SIZE_CHOICES,
+    THUMBNAIL_CACHE_CAPACITY_CHOICES,
 };
+use crate::i18n::{t, t_plural};
 use crate::network;
 use crate::recent;
 use crate::thumbnails::ThumbnailService;
@@ -37,7 +39,7 @@ pub(crate) fn show(
     preview_widget: gtk4::Widget,
 ) {
     let dialog = adw::PreferencesDialog::builder()
-        .title("Preferences")
+        .title(t("prefs.dialog.title"))
         .content_width(560)
         .content_height(600)
         .search_enabled(true)
@@ -113,16 +115,20 @@ fn appearance_page(
     refresh_all_tabs: &Rc<dyn Fn()>,
 ) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Appearance")
+        .title(t("prefs.page.appearance"))
         .icon_name("preferences-desktop-theme-symbolic")
         .name("appearance")
         .build();
-    let g = group("Theme & Icons");
+    let g = group(t("prefs.appearance.group.theme_icons"));
 
     let current = settings.borrow().color_scheme;
     let theme_row = combo_row(
-        "Theme",
-        &["System Default", "Light", "Dark"],
+        t("prefs.appearance.theme.title"),
+        &[
+            t("prefs.common.system_default"),
+            t("prefs.appearance.theme.light"),
+            t("prefs.appearance.theme.dark"),
+        ],
         match current {
             ColorSchemePref::System => 0,
             ColorSchemePref::Light => 1,
@@ -150,7 +156,7 @@ fn appearance_page(
     let accent_labels: Vec<&str> = accent_choices.iter().map(|c| c.label()).collect();
     let current = settings.borrow().accent_color;
     let accent_row = combo_row(
-        "Accent Color",
+        t("prefs.appearance.accent_color.title"),
         &accent_labels,
         accent_choices
             .iter()
@@ -175,7 +181,7 @@ fn appearance_page(
     let current = settings.borrow().icon_size;
     let icon_size_labels: Vec<&str> = IconSizePref::ALL.iter().map(|s| s.label()).collect();
     let icon_size_row = combo_row(
-        "Icon Size",
+        t("prefs.appearance.icon_size.title"),
         &icon_size_labels,
         IconSizePref::ALL
             .iter()
@@ -197,22 +203,50 @@ fn appearance_page(
     }
     g.add(&icon_size_row);
 
+    let language_choices = LanguagePref::ALL;
+    let language_labels: Vec<&str> = language_choices.iter().map(|l| l.label()).collect();
+    let current = settings.borrow().language;
+    let language_row = combo_row(
+        t("prefs.language.title"),
+        &language_labels,
+        language_choices
+            .iter()
+            .position(|l| *l == current)
+            .unwrap_or(0),
+    );
+    language_row.set_subtitle(t("prefs.language.subtitle"));
+    {
+        let settings = settings.clone();
+        language_row.connect_selected_notify(move |row| {
+            let language = language_choices
+                .get(row.selected() as usize)
+                .copied()
+                .unwrap_or_default();
+            settings.borrow_mut().language = language;
+            persist(&settings);
+        });
+    }
+    g.add(&language_row);
+
     page.add(&g);
     page
 }
 
 fn navigation_page(settings: &SharedSettings) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Navigation")
+        .title(t("prefs.page.navigation"))
         .icon_name("go-next-symbolic")
         .name("navigation")
         .build();
 
-    let g = group("Opening Items");
+    let g = group(t("prefs.navigation.group.opening_items"));
     let current = settings.borrow().click_policy;
     let click_row = combo_row(
-        "Click Policy",
-        &["Double-Click to Open", "Single-Click to Open"],
+        t("prefs.navigation.click_policy.title"),
+        &[
+            t("prefs.navigation.click_policy.double"),
+            t("prefs.navigation.click_policy.single"),
+        ],
         match current {
             ClickPolicy::DoubleClick => 0,
             ClickPolicy::SingleClick => 1,
@@ -232,8 +266,8 @@ fn navigation_page(settings: &SharedSettings) -> adw::PreferencesPage {
     g.add(&click_row);
 
     let open_new_tab_row = switch_row(
-        "Open Folders in New Tab",
-        "Middle-click and sidebar navigation already do this; applies here too on your next launch",
+        t("prefs.navigation.open_new_tab.title"),
+        t("prefs.navigation.open_new_tab.subtitle"),
         settings.borrow().open_folders_in_new_tab,
     );
     {
@@ -246,10 +280,10 @@ fn navigation_page(settings: &SharedSettings) -> adw::PreferencesPage {
     g.add(&open_new_tab_row);
     page.add(&g);
 
-    let tabs_group = group("Tabs");
+    let tabs_group = group(t("prefs.navigation.group.tabs"));
     let restore_row = switch_row(
-        "Restore Previous Tabs on Startup",
-        "Reopen every tab that was open when Veyra last closed",
+        t("prefs.navigation.restore_tabs.title"),
+        t("prefs.navigation.restore_tabs.subtitle"),
         settings.borrow().restore_tabs_on_startup,
     );
     {
@@ -267,19 +301,17 @@ fn navigation_page(settings: &SharedSettings) -> adw::PreferencesPage {
 
 fn files_page(settings: &SharedSettings) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Files")
+        .title(t("prefs.page.files"))
         .icon_name("folder-symbolic")
         .name("files")
         .build();
 
-    let display_group = group("Display Defaults");
-    display_group.set_description(Some(
-        "Applies to newly opened tabs; open tabs keep their own setting.",
-    ));
+    let display_group = group(t("prefs.files.group.display_defaults"));
+    display_group.set_description(Some(t("prefs.files.group.display_defaults.description")));
 
     let hidden_row = switch_row(
-        "Show Hidden Files",
-        "New tabs start with hidden files visible",
+        t("prefs.files.show_hidden.title"),
+        t("prefs.files.show_hidden.subtitle"),
         settings.borrow().show_hidden,
     );
     {
@@ -292,8 +324,8 @@ fn files_page(settings: &SharedSettings) -> adw::PreferencesPage {
     display_group.add(&hidden_row);
 
     let folders_first_row = switch_row(
-        "Folders First",
-        "New tabs list folders before files",
+        t("prefs.files.folders_first.title"),
+        t("prefs.files.folders_first.subtitle"),
         settings.borrow().folders_first,
     );
     {
@@ -307,8 +339,12 @@ fn files_page(settings: &SharedSettings) -> adw::PreferencesPage {
 
     let current = settings.borrow().default_view_mode;
     let view_mode_row = combo_row(
-        "Default View Mode",
-        &["Icons", "Compact", "Details"],
+        t("prefs.files.default_view_mode.title"),
+        &[
+            t("prefs.files.default_view_mode.icons"),
+            t("prefs.files.default_view_mode.compact"),
+            t("prefs.files.default_view_mode.details"),
+        ],
         match current {
             DefaultViewMode::Icon => 0,
             DefaultViewMode::Compact => 1,
@@ -329,9 +365,9 @@ fn files_page(settings: &SharedSettings) -> adw::PreferencesPage {
     display_group.add(&view_mode_row);
     page.add(&display_group);
 
-    let confirm_group = group("Confirmations");
+    let confirm_group = group(t("prefs.files.group.confirmations"));
     let confirm_trash_row = switch_row(
-        "Confirm Before Emptying Trash",
+        t("prefs.files.confirm_trash.title"),
         "",
         settings.borrow().confirm_trash_empty,
     );
@@ -345,7 +381,7 @@ fn files_page(settings: &SharedSettings) -> adw::PreferencesPage {
     confirm_group.add(&confirm_trash_row);
 
     let confirm_delete_row = switch_row(
-        "Confirm Before Permanently Deleting",
+        t("prefs.files.confirm_delete.title"),
         "",
         settings.borrow().confirm_permanent_delete,
     );
@@ -367,15 +403,15 @@ fn search_page(
     rebuild_search_index: &Rc<dyn Fn()>,
 ) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Search")
+        .title(t("prefs.page.search"))
         .icon_name("system-search-symbolic")
         .name("search")
         .build();
-    let g = group("Indexing");
+    let g = group(t("prefs.search.group.indexing"));
 
     let enable_row = switch_row(
-        "Enable Fast Search Indexer",
-        "SQLite + FTS5 index backing name:/type:/size:/modified: searches",
+        t("prefs.search.enable.title"),
+        t("prefs.search.enable.subtitle"),
         settings.borrow().enable_fts_index,
     );
     {
@@ -393,7 +429,7 @@ fn search_page(
     g.add(&enable_row);
 
     let max_results_row = adw::SpinRow::with_range(50.0, 5000.0, 50.0);
-    max_results_row.set_title("Max Search Results");
+    max_results_row.set_title(t("prefs.search.max_results.title"));
     max_results_row.set_value(settings.borrow().max_search_results as f64);
     {
         let settings = settings.clone();
@@ -405,9 +441,9 @@ fn search_page(
     g.add(&max_results_row);
 
     let (rebuild_row, rebuild_button) = action_row_button(
-        "Rebuild Search Index",
-        "Re-scans your home directory from scratch",
-        "Rebuild",
+        t("prefs.search.rebuild.title"),
+        t("prefs.search.rebuild.subtitle"),
+        t("prefs.search.rebuild.button"),
     );
     {
         let rebuild_search_index = rebuild_search_index.clone();
@@ -421,14 +457,14 @@ fn search_page(
 
 fn preview_page(settings: &SharedSettings, preview_widget: &gtk4::Widget) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Preview")
+        .title(t("prefs.page.preview"))
         .icon_name("view-reveal-symbolic")
         .name("preview")
         .build();
-    let g = group("Preview Panel");
+    let g = group(t("prefs.preview.group.panel"));
 
     let enable_row = switch_row(
-        "Enable Preview Panel",
+        t("prefs.preview.enable.title"),
         "",
         settings.borrow().enable_preview_panel,
     );
@@ -451,7 +487,7 @@ fn preview_page(settings: &SharedSettings, preview_widget: &gtk4::Widget) -> adw
         .collect();
     let size_labels_ref: Vec<&str> = size_labels.iter().map(String::as_str).collect();
     let size_row = combo_row(
-        "Preview Size Limit",
+        t("prefs.preview.size_limit.title"),
         &size_labels_ref,
         MAX_PREVIEW_SIZE_CHOICES_KB
             .iter()
@@ -470,7 +506,7 @@ fn preview_page(settings: &SharedSettings, preview_widget: &gtk4::Widget) -> adw
     g.add(&size_row);
 
     let folder_count_row = switch_row(
-        "Show Folder Item Count",
+        t("prefs.preview.folder_count.title"),
         "",
         settings.borrow().show_folder_count,
     );
@@ -493,20 +529,26 @@ fn performance_page(
     refresh_all_tabs: &Rc<dyn Fn()>,
 ) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Performance")
+        .title(t("prefs.page.performance"))
         .icon_name("speedometer-symbolic")
         .name("performance")
         .build();
-    let g = group("Directory Loading");
+    let g = group(t("prefs.performance.group.directory_loading"));
 
     let current = settings.borrow().stream_chunk_size;
     let chunk_labels: Vec<String> = STREAM_CHUNK_SIZE_CHOICES
         .iter()
-        .map(|n| format!("{n} files"))
+        .map(|n| {
+            t_plural(
+                "prefs.performance.chunk_size.unit",
+                *n as i64,
+                &[("n", &n.to_string())],
+            )
+        })
         .collect();
     let chunk_labels_ref: Vec<&str> = chunk_labels.iter().map(String::as_str).collect();
     let chunk_row = combo_row(
-        "Directory Stream Chunk Size",
+        t("prefs.performance.chunk_size.title"),
         &chunk_labels_ref,
         STREAM_CHUNK_SIZE_CHOICES
             .iter()
@@ -529,11 +571,17 @@ fn performance_page(
     let current = settings.borrow().thumbnail_cache_capacity;
     let cache_labels: Vec<String> = THUMBNAIL_CACHE_CAPACITY_CHOICES
         .iter()
-        .map(|n| format!("{n} thumbnails"))
+        .map(|n| {
+            t_plural(
+                "prefs.performance.cache_capacity.unit",
+                *n as i64,
+                &[("n", &n.to_string())],
+            )
+        })
         .collect();
     let cache_labels_ref: Vec<&str> = cache_labels.iter().map(String::as_str).collect();
     let cache_row = combo_row(
-        "Thumbnail Cache Capacity",
+        t("prefs.performance.cache_capacity.title"),
         &cache_labels_ref,
         THUMBNAIL_CACHE_CAPACITY_CHOICES
             .iter()
@@ -559,16 +607,16 @@ fn performance_page(
 
 fn shortcuts_page(window: &adw::ApplicationWindow) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Shortcuts")
+        .title(t("prefs.page.shortcuts"))
         .icon_name("input-keyboard-symbolic")
         .name("shortcuts")
         .build();
-    let g = group("Keyboard Shortcuts");
+    let g = group(t("prefs.shortcuts.group.keyboard_shortcuts"));
 
     let (view_row, view_button) = action_row_button(
-        "View All Shortcuts",
-        "Every action and its current key binding",
-        "View",
+        t("prefs.shortcuts.view_all.title"),
+        t("prefs.shortcuts.view_all.subtitle"),
+        t("prefs.shortcuts.view_all.button"),
     );
     {
         let window = window.clone();
@@ -579,9 +627,9 @@ fn shortcuts_page(window: &adw::ApplicationWindow) -> adw::PreferencesPage {
     g.add(&view_row);
 
     let (reset_row, reset_button) = action_row_button(
-        "Reset Shortcuts to Default",
-        "Discards any customization in shortcuts.json",
-        "Reset",
+        t("prefs.shortcuts.reset.title"),
+        t("prefs.shortcuts.reset.subtitle"),
+        t("prefs.shortcuts.reset.button"),
     );
     {
         let window = window.clone();
@@ -601,16 +649,16 @@ fn shortcuts_page(window: &adw::ApplicationWindow) -> adw::PreferencesPage {
 
 fn privacy_page(settings: &SharedSettings) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Privacy")
+        .title(t("prefs.page.privacy"))
         .icon_name("security-high-symbolic")
         .name("privacy")
         .build();
 
-    let history_group = group("History");
+    let history_group = group(t("prefs.privacy.group.history"));
     let (clear_files_row, clear_files_button) = action_row_button(
-        "Clear Recent Files History",
-        "Empties the XDG recently-used registry",
-        "Clear",
+        t("prefs.privacy.clear_files.title"),
+        t("prefs.privacy.clear_files.subtitle"),
+        t("prefs.privacy.clear.button"),
     );
     {
         clear_files_button.connect_clicked(move |button| {
@@ -622,9 +670,9 @@ fn privacy_page(settings: &SharedSettings) -> adw::PreferencesPage {
     history_group.add(&clear_files_row);
 
     let (clear_servers_row, clear_servers_button) = action_row_button(
-        "Clear Recent Servers",
-        "Empties the \"Connect to Server\" address history",
-        "Clear",
+        t("prefs.privacy.clear_servers.title"),
+        t("prefs.privacy.clear_servers.subtitle"),
+        t("prefs.privacy.clear.button"),
     );
     clear_servers_button.connect_clicked(move |_| {
         network::clear_history();
@@ -632,8 +680,8 @@ fn privacy_page(settings: &SharedSettings) -> adw::PreferencesPage {
     history_group.add(&clear_servers_row);
 
     let remember_row = switch_row(
-        "Remember Recently Used Files",
-        "Off also disables the Recent Files history above",
+        t("prefs.privacy.remember_files.title"),
+        t("prefs.privacy.remember_files.subtitle"),
         settings.borrow().store_recent_files,
     );
     {
@@ -646,10 +694,10 @@ fn privacy_page(settings: &SharedSettings) -> adw::PreferencesPage {
     history_group.add(&remember_row);
     page.add(&history_group);
 
-    let logging_group = group("Logging");
+    let logging_group = group(t("prefs.privacy.group.logging"));
     let sanitize_row = switch_row(
-        "Sanitize File Paths in Logs",
-        "Log only file names instead of full paths",
+        t("prefs.privacy.sanitize_logs.title"),
+        t("prefs.privacy.sanitize_logs.subtitle"),
         settings.borrow().sanitize_log_paths,
     );
     {
@@ -664,10 +712,10 @@ fn privacy_page(settings: &SharedSettings) -> adw::PreferencesPage {
     logging_group.add(&sanitize_row);
     page.add(&logging_group);
 
-    let telemetry_group = group("Telemetry");
+    let telemetry_group = group(t("prefs.privacy.group.telemetry"));
     let telemetry_row = adw::ActionRow::builder()
-        .title("Zero Telemetry")
-        .subtitle("Veyra never sends usage data or file contents anywhere (Kural #24)")
+        .title(t("prefs.privacy.telemetry.title"))
+        .subtitle(t("prefs.privacy.telemetry.subtitle"))
         .build();
     telemetry_row.add_prefix(&gtk4::Image::from_icon_name("emblem-ok-symbolic"));
     telemetry_group.add(&telemetry_row);
@@ -684,16 +732,16 @@ fn advanced_page(
     refresh_all_tabs: &Rc<dyn Fn()>,
 ) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
-        .title("Advanced")
+        .title(t("prefs.page.advanced"))
         .icon_name("applications-engineering-symbolic")
         .name("advanced")
         .build();
-    let g = group("Reset");
+    let g = group(t("prefs.advanced.group.reset"));
 
     let (reset_row, reset_button) = action_row_button(
-        "Reset All Settings to Default",
-        "Restores every page on this dialog to its default value",
-        "Reset All",
+        t("prefs.advanced.reset_all.title"),
+        t("prefs.advanced.reset_all.subtitle"),
+        t("prefs.advanced.reset_all.button"),
     );
     reset_button.add_css_class("destructive-action");
     {
@@ -709,10 +757,13 @@ fn advanced_page(
             let preview_widget = preview_widget.clone();
             let refresh_all_tabs = refresh_all_tabs.clone();
             let confirm = adw::AlertDialog::builder()
-                .heading("Reset all settings to default?")
-                .body("Every Preferences page reverts to its default value. This cannot be undone.")
+                .heading(t("prefs.advanced.reset_all.confirm_heading"))
+                .body(t("prefs.advanced.reset_all.confirm_body"))
                 .build();
-            confirm.add_responses(&[("cancel", "Cancel"), ("reset", "Reset All")]);
+            confirm.add_responses(&[
+                ("cancel", t("prefs.advanced.reset_all.cancel")),
+                ("reset", t("prefs.advanced.reset_all.button")),
+            ]);
             confirm.set_response_appearance("reset", adw::ResponseAppearance::Destructive);
             confirm.set_default_response(Some("cancel"));
             confirm.set_close_response("cancel");

@@ -13,6 +13,7 @@ use veyra_filesystem::{FileItem, OperationControl, OperationKind, OperationReque
 use veyra_search::SearchIndex;
 
 use crate::dnd;
+use crate::i18n::{t, t_plural};
 use crate::operations::OperationEvent;
 use crate::preview::{self, PreviewPanelHandles};
 use crate::split_view::{self, Chrome, Panel, PanelId, Panels};
@@ -235,7 +236,7 @@ pub(crate) fn build_window(
         })
     };
 
-    let content_page = adw::NavigationPage::new(&content_paned, "Files");
+    let content_page = adw::NavigationPage::new(&content_paned, t("panel.files_page_title"));
     let sidebar_widget = sidebar::build(
         &window,
         navigate.clone(),
@@ -243,7 +244,7 @@ pub(crate) fn build_window(
         thumbnails.clone(),
         dnd_execute.clone(),
     );
-    let sidebar_page = adw::NavigationPage::new(&sidebar_widget, "Sidebar");
+    let sidebar_page = adw::NavigationPage::new(&sidebar_widget, t("panel.sidebar_page_title"));
 
     let sidebar_split = adw::NavigationSplitView::builder()
         .sidebar(&sidebar_page)
@@ -1357,7 +1358,7 @@ fn setup_archive_actions(
                         &window_for_confirm,
                         vec![(state, chrome)],
                         &progress,
-                        "Compressing",
+                        t("toast.compressing"),
                         control,
                         receiver,
                     );
@@ -1399,7 +1400,7 @@ fn setup_archive_actions(
                 &window,
                 vec![(tab.state.clone(), panel.chrome.clone())],
                 &progress,
-                "Extracting",
+                t("toast.extracting"),
                 control,
                 receiver,
             );
@@ -1445,7 +1446,7 @@ fn setup_archive_actions(
                         &window_for_result,
                         vec![(state, chrome)],
                         &progress,
-                        "Extracting",
+                        t("toast.extracting"),
                         control,
                         receiver,
                     );
@@ -3060,7 +3061,7 @@ fn run_archive_operation(
                     };
                     match result {
                         Ok(outcome) if outcome.cancelled => {
-                            chrome.status_left.set_label("Cancelled");
+                            chrome.status_left.set_label(t("status.cancelled"));
                         }
                         Ok(outcome) => {
                             for (name, err) in &outcome.errors {
@@ -3085,7 +3086,7 @@ fn run_archive_operation(
                         }
                         Err(err) => {
                             tracing::warn!(error = %err, "archive operation failed");
-                            chrome.status_left.set_label("Archive failed");
+                            chrome.status_left.set_label(t("status.archive_failed"));
                             show_error_dialog(&window, &format!("{verb} Failed"), &err.to_string());
                         }
                     }
@@ -3311,7 +3312,7 @@ fn load_directory(state: &SharedState, chrome: &Chrome, path: VeyraPath) {
         previous.cancel();
     }
 
-    chrome.status_left.set_label("Loading…");
+    chrome.status_left.set_label(t("status.loading"));
 
     let state_for_done = state.clone();
     let chrome_for_done = chrome.clone();
@@ -3452,11 +3453,11 @@ fn on_directory_loaded(
 }
 
 fn count_label(count: u32) -> String {
-    if count == 1 {
-        "1 item".to_string()
-    } else {
-        format!("{count} items")
-    }
+    t_plural(
+        "status.items_count",
+        count as i64,
+        &[("count", &count.to_string())],
+    )
 }
 
 fn update_free_space(state: &SharedState, chrome: &Chrome) {
@@ -3481,9 +3482,9 @@ fn query_free_space(path: &VeyraPath) -> Option<String> {
         return None;
     }
     let free_bytes = info.attribute_uint64("filesystem::free");
-    Some(format!(
-        "{} free",
-        veyra_filesystem::format_size(free_bytes)
+    Some(crate::i18n::t_fmt(
+        "status.free_space",
+        &[("size", &veyra_filesystem::format_size(free_bytes))],
     ))
 }
 

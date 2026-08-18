@@ -21,6 +21,7 @@ mod file_associations;
 mod fs_async;
 mod headerbar;
 mod history;
+mod i18n;
 mod network;
 mod open_with;
 mod operations;
@@ -78,6 +79,7 @@ pub fn run(app_id: &str, start_dir: Option<VeyraPath>, cache_dir: &Path) -> glib
         // `settings.json` falls back to via `VeyraSettings::default()`.
         let settings = config::VeyraSettings::load();
         veyra_core::security::set_sanitize_log_paths(settings.sanitize_log_paths);
+        i18n::set_locale(settings.language.resolve());
         libadwaita::StyleManager::default().set_color_scheme(settings.color_scheme.to_adw());
         config::apply_accent_color(settings.accent_color);
         let settings: config::SharedSettings = Rc::new(RefCell::new(settings));

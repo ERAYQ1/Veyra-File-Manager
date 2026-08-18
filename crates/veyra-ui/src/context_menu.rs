@@ -29,6 +29,7 @@ use gtk4::{gdk, gio};
 
 use veyra_filesystem::{ArchiveFormat, FileItem};
 
+use crate::i18n::{t, t_plural};
 use crate::open_with;
 use crate::views::selected_items;
 
@@ -100,35 +101,12 @@ pub(crate) fn attach<V: IsA<gtk4::Widget> + Clone>(
     view.add_controller(gesture);
 }
 
-/// `"Copy"` for a single selected item, `"Copy (3 items)"` for a multi
-/// selection — the count suffix every bulk-capable menu entry in
-/// `build_item_menu` uses.
-fn count_label(base: &str, count: usize) -> String {
-    if count <= 1 {
-        base.to_string()
-    } else {
-        format!("{base} ({count} items)")
-    }
-}
-
-/// `"Move to Trash"` / `"Move 3 items to Trash"` phrasing — `verb` reads
-/// naturally with "N items" inserted mid-sentence, unlike `count_label`'s
-/// trailing-parenthetical form.
-fn move_count_label(verb: &str, noun: &str, count: usize) -> String {
-    if count <= 1 {
-        format!("{verb} {noun}")
-    } else {
-        format!("{verb} {count} items {noun}")
-    }
-}
-
-/// `"Delete Permanently"` / `"Delete 3 items Permanently"`.
-fn trash_count_label(count: usize) -> String {
-    if count <= 1 {
-        "Delete Permanently".to_string()
-    } else {
-        format!("Delete {count} items Permanently")
-    }
+/// Translates the plural-keyed catalog entry `key` (`"{key}.one"`/
+/// `"{key}.other"`) for `count`, the shared plural-label lookup every
+/// bulk-capable menu entry in `build_item_menu` uses — e.g. `count_label
+/// ("menu.copy", 3)` -> `"Copy (3 items)"` / `"Kopyala (3 öge)"`.
+fn count_label(key: &str, count: usize) -> String {
+    t_plural(key, count as i64, &[("count", &count.to_string())])
 }
 
 /// Builds the per-item menu for `trash:///`: only actions that make sense on
@@ -144,17 +122,17 @@ fn build_trash_item_menu(count: usize) -> gio::Menu {
 
     let restore_section = gio::Menu::new();
     if count <= 1 {
-        restore_section.append(Some("Restore"), Some("win.restore-selected"));
+        restore_section.append(Some(t("menu.restore")), Some("win.restore-selected"));
     }
     restore_section.append(
-        Some(&trash_count_label(count)),
+        Some(&count_label("menu.delete_permanently", count)),
         Some("win.delete-selection"),
     );
     menu.append_section(None, &restore_section);
 
     if count <= 1 {
         let properties_section = gio::Menu::new();
-        properties_section.append(Some("Properties"), Some("win.properties-selected"));
+        properties_section.append(Some(t("menu.properties")), Some("win.properties-selected"));
         menu.append_section(None, &properties_section);
     }
 
@@ -166,11 +144,11 @@ fn build_trash_background_menu() -> gio::Menu {
     let menu = gio::Menu::new();
 
     let empty_section = gio::Menu::new();
-    empty_section.append(Some("Empty Trash"), Some("win.empty-trash"));
+    empty_section.append(Some(t("menu.empty_trash")), Some("win.empty-trash"));
     menu.append_section(None, &empty_section);
 
     let properties_section = gio::Menu::new();
-    properties_section.append(Some("Properties"), Some("win.properties-current"));
+    properties_section.append(Some(t("menu.properties")), Some("win.properties-current"));
     menu.append_section(None, &properties_section);
 
     menu
@@ -200,15 +178,15 @@ fn build_item_menu(items: &[FileItem], is_split_active: bool) -> gio::Menu {
 
     if count == 1 {
         let open_section = gio::Menu::new();
-        open_section.append(Some("Open"), Some("win.open-selected"));
-        open_section.append_submenu(Some("Open With"), &build_open_with_submenu(item));
+        open_section.append(Some(t("menu.open")), Some("win.open-selected"));
+        open_section.append_submenu(Some(t("menu.open_with")), &build_open_with_submenu(item));
         if is_dir {
             open_section.append(
-                Some("Open in New Tab"),
+                Some(t("menu.open_in_new_tab")),
                 Some("win.open-in-new-tab-selected"),
             );
             open_section.append(
-                Some("Open in New Window"),
+                Some(t("menu.open_in_new_window")),
                 Some("win.open-in-new-window-selected"),
             );
         }
@@ -217,14 +195,14 @@ fn build_item_menu(items: &[FileItem], is_split_active: bool) -> gio::Menu {
         if is_dir {
             let bookmark_section = gio::Menu::new();
             bookmark_section.append(
-                Some("Add to Bookmarks"),
+                Some(t("menu.add_to_bookmarks")),
                 Some("win.add-to-bookmarks-selected"),
             );
             menu.append_section(None, &bookmark_section);
 
             let analyze_section = gio::Menu::new();
             analyze_section.append(
-                Some("Analyze Disk Usage…"),
+                Some(t("menu.analyze_disk")),
                 Some("win.analyze-disk-selected"),
             );
             menu.append_section(None, &analyze_section);
@@ -233,20 +211,23 @@ fn build_item_menu(items: &[FileItem], is_split_active: bool) -> gio::Menu {
 
     let clipboard_section = gio::Menu::new();
     clipboard_section.append(
-        Some(&count_label("Copy", count)),
+        Some(&count_label("menu.copy", count)),
         Some("win.copy-selection"),
     );
-    clipboard_section.append(Some(&count_label("Cut", count)), Some("win.cut-selection"));
+    clipboard_section.append(
+        Some(&count_label("menu.cut", count)),
+        Some("win.cut-selection"),
+    );
     menu.append_section(None, &clipboard_section);
 
     if is_split_active {
         let panel_section = gio::Menu::new();
         panel_section.append(
-            Some(&count_label("Copy to Other Panel", count)),
+            Some(&count_label("menu.copy_to_other_panel", count)),
             Some("win.copy-to-other-panel-selected"),
         );
         panel_section.append(
-            Some(&count_label("Move to Other Panel", count)),
+            Some(&count_label("menu.move_to_other_panel", count)),
             Some("win.move-to-other-panel-selected"),
         );
         menu.append_section(None, &panel_section);
@@ -254,49 +235,51 @@ fn build_item_menu(items: &[FileItem], is_split_active: bool) -> gio::Menu {
 
     let mutate_section = gio::Menu::new();
     if count == 1 {
-        mutate_section.append(Some("Rename"), Some("win.rename-selected"));
+        mutate_section.append(Some(t("menu.rename")), Some("win.rename-selected"));
     }
     mutate_section.append(
-        Some(&move_count_label("Move", "to Trash", count)),
+        Some(&count_label("menu.move_to_trash", count)),
         Some("win.trash-selection"),
     );
     mutate_section.append(
-        Some(&trash_count_label(count)),
+        Some(&count_label("menu.delete_permanently", count)),
         Some("win.delete-selection"),
     );
     menu.append_section(None, &mutate_section);
 
     let archive_section = gio::Menu::new();
-    let compress_label = if count <= 1 {
-        "Compress…".to_string()
-    } else {
-        format!("Compress {count} items…")
-    };
+    let compress_label = count_label("menu.compress", count);
     archive_section.append(Some(&compress_label), Some("win.compress-selected"));
     if count == 1 && is_archive {
-        archive_section.append(Some("Extract Here"), Some("win.extract-here-selected"));
-        archive_section.append(Some("Extract to…"), Some("win.extract-to-selected"));
+        archive_section.append(
+            Some(t("menu.extract_here")),
+            Some("win.extract-here-selected"),
+        );
+        archive_section.append(Some(t("menu.extract_to")), Some("win.extract-to-selected"));
     }
     menu.append_section(None, &archive_section);
 
     if count == 1 {
         let path_section = gio::Menu::new();
         path_section.append(
-            Some("Open Terminal Here"),
+            Some(t("menu.open_terminal_here")),
             Some("win.open-terminal-here-selected"),
         );
         if is_dir {
             path_section.append(
-                Some("Open in Terminal as Root"),
+                Some(t("menu.open_terminal_as_root")),
                 Some("win.open-terminal-as-root-selected"),
             );
         }
-        path_section.append(Some("Copy Path"), Some("win.copy-path-selected"));
-        path_section.append(Some("Copy Location"), Some("win.copy-location-selected"));
+        path_section.append(Some(t("menu.copy_path")), Some("win.copy-path-selected"));
+        path_section.append(
+            Some(t("menu.copy_location")),
+            Some("win.copy-location-selected"),
+        );
         menu.append_section(None, &path_section);
 
         let properties_section = gio::Menu::new();
-        properties_section.append(Some("Properties"), Some("win.properties-selected"));
+        properties_section.append(Some(t("menu.properties")), Some("win.properties-selected"));
         menu.append_section(None, &properties_section);
     }
 
@@ -310,8 +293,8 @@ fn build_background_menu(has_clipboard: bool) -> gio::Menu {
     let menu = gio::Menu::new();
 
     let create_section = gio::Menu::new();
-    create_section.append(Some("New Folder"), Some("win.create-folder"));
-    create_section.append(Some("New Document"), Some("win.create-document"));
+    create_section.append(Some(t("menu.new_folder")), Some("win.create-folder"));
+    create_section.append(Some(t("menu.new_document")), Some("win.create-document"));
     menu.append_section(None, &create_section);
 
     let paste_section = gio::Menu::new();
@@ -320,26 +303,26 @@ fn build_background_menu(has_clipboard: bool) -> gio::Menu {
     } else {
         "win.not-implemented"
     };
-    paste_section.append(Some("Paste"), Some(paste_action));
+    paste_section.append(Some(t("menu.paste")), Some(paste_action));
     menu.append_section(None, &paste_section);
 
     let misc_section = gio::Menu::new();
     misc_section.append(
-        Some("Open Terminal Here"),
+        Some(t("menu.open_terminal_here")),
         Some("win.open-terminal-here-current"),
     );
     misc_section.append(
-        Some("Open in Terminal as Root"),
+        Some(t("menu.open_terminal_as_root")),
         Some("win.open-terminal-as-root-current"),
     );
     misc_section.append(
-        Some("Analyze Disk Usage…"),
+        Some(t("menu.analyze_disk")),
         Some("win.analyze-disk-current"),
     );
     menu.append_section(None, &misc_section);
 
     let properties_section = gio::Menu::new();
-    properties_section.append(Some("Properties"), Some("win.properties-current"));
+    properties_section.append(Some(t("menu.properties")), Some("win.properties-current"));
     menu.append_section(None, &properties_section);
 
     menu
@@ -370,7 +353,10 @@ fn build_open_with_submenu(item: &FileItem) -> gio::Menu {
     }
 
     let other_section = gio::Menu::new();
-    other_section.append(Some("Other Application…"), Some("win.open-with-selected"));
+    other_section.append(
+        Some(t("menu.open_with_other")),
+        Some("win.open-with-selected"),
+    );
     submenu.append_section(None, &other_section);
 
     submenu
@@ -406,29 +392,34 @@ mod tests {
 
     #[test]
     fn count_label_omits_suffix_for_a_single_item() {
-        assert_eq!(count_label("Copy", 1), "Copy");
-        assert_eq!(count_label("Copy", 0), "Copy");
+        assert_eq!(count_label("menu.copy", 1), "Copy");
     }
 
     #[test]
     fn count_label_appends_count_for_multiple_items() {
-        assert_eq!(count_label("Copy", 3), "Copy (3 items)");
-        assert_eq!(count_label("Cut", 2), "Cut (2 items)");
+        assert_eq!(count_label("menu.copy", 3), "Copy (3 items)");
+        assert_eq!(count_label("menu.cut", 2), "Cut (2 items)");
     }
 
     #[test]
-    fn move_count_label_reads_naturally_in_both_forms() {
-        assert_eq!(move_count_label("Move", "to Trash", 1), "Move to Trash");
+    fn count_label_move_to_trash_reads_naturally_in_both_forms() {
+        assert_eq!(count_label("menu.move_to_trash", 1), "Move to Trash");
         assert_eq!(
-            move_count_label("Move", "to Trash", 3),
+            count_label("menu.move_to_trash", 3),
             "Move 3 items to Trash"
         );
     }
 
     #[test]
-    fn trash_count_label_matches_spec_phrasing() {
-        assert_eq!(trash_count_label(1), "Delete Permanently");
-        assert_eq!(trash_count_label(3), "Delete 3 items Permanently");
+    fn count_label_delete_permanently_matches_spec_phrasing() {
+        assert_eq!(
+            count_label("menu.delete_permanently", 1),
+            "Delete Permanently"
+        );
+        assert_eq!(
+            count_label("menu.delete_permanently", 3),
+            "Delete 3 items Permanently"
+        );
     }
 
     #[test]

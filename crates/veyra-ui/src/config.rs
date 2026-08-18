@@ -88,16 +88,16 @@ impl AccentColorPref {
 
     pub(crate) fn label(self) -> &'static str {
         match self {
-            AccentColorPref::System => "System Default",
-            AccentColorPref::Blue => "Blue",
-            AccentColorPref::Teal => "Teal",
-            AccentColorPref::Green => "Green",
-            AccentColorPref::Yellow => "Yellow",
-            AccentColorPref::Orange => "Orange",
-            AccentColorPref::Red => "Red",
-            AccentColorPref::Purple => "Purple",
-            AccentColorPref::Pink => "Pink",
-            AccentColorPref::Slate => "Slate",
+            AccentColorPref::System => crate::i18n::t("prefs.common.system_default"),
+            AccentColorPref::Blue => crate::i18n::t("prefs.appearance.accent_color.blue"),
+            AccentColorPref::Teal => crate::i18n::t("prefs.appearance.accent_color.teal"),
+            AccentColorPref::Green => crate::i18n::t("prefs.appearance.accent_color.green"),
+            AccentColorPref::Yellow => crate::i18n::t("prefs.appearance.accent_color.yellow"),
+            AccentColorPref::Orange => crate::i18n::t("prefs.appearance.accent_color.orange"),
+            AccentColorPref::Red => crate::i18n::t("prefs.appearance.accent_color.red"),
+            AccentColorPref::Purple => crate::i18n::t("prefs.appearance.accent_color.purple"),
+            AccentColorPref::Pink => crate::i18n::t("prefs.appearance.accent_color.pink"),
+            AccentColorPref::Slate => crate::i18n::t("prefs.appearance.accent_color.slate"),
         }
     }
 
@@ -177,6 +177,57 @@ pub(crate) fn apply_accent_color(pref: AccentColorPref) {
     ACCENT_PROVIDER.with(|cell| *cell.borrow_mut() = Some(provider));
 }
 
+/// Faz 37: the persisted UI-language preference. `System` (the default)
+/// means "resolve via `i18n::detect_system_locale()` at startup"; `En`/`Tr`
+/// are an explicit override that always wins regardless of what the OS is
+/// set to. Deliberately a distinct type from `i18n::Locale` (which has no
+/// `System` variant) — see that module's doc comment for why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub(crate) enum LanguagePref {
+    #[default]
+    System,
+    En,
+    Tr,
+}
+
+impl LanguagePref {
+    pub(crate) const ALL: [LanguagePref; 3] =
+        [LanguagePref::System, LanguagePref::En, LanguagePref::Tr];
+
+    /// `None` for `System` (caller falls back to `i18n::detect_system_locale()`).
+    pub(crate) fn to_locale(self) -> Option<crate::i18n::Locale> {
+        match self {
+            LanguagePref::System => None,
+            LanguagePref::En => Some(crate::i18n::Locale::En),
+            LanguagePref::Tr => Some(crate::i18n::Locale::Tr),
+        }
+    }
+
+    /// The label a Preferences `ComboRow` shows for this choice — `System`
+    /// is itself translated (it's chrome around the language picker, not a
+    /// language name), while `En`/`Tr` show `Locale::label()`'s
+    /// always-in-itself name so a user can find their language regardless
+    /// of what's currently selected.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            LanguagePref::System => crate::i18n::t("prefs.common.system_default"),
+            LanguagePref::En => crate::i18n::Locale::En.label(),
+            LanguagePref::Tr => crate::i18n::Locale::Tr.label(),
+        }
+    }
+
+    /// The effective locale this preference resolves to right now —
+    /// `System` consults `i18n::detect_system_locale()` fresh each call
+    /// rather than caching, so a changed `$LANG` between two Preferences-
+    /// dialog opens would (if Veyra were restarted, which is when this
+    /// actually gets re-read) reflect the new system language rather than
+    /// a stale detection from process start.
+    pub(crate) fn resolve(self) -> crate::i18n::Locale {
+        self.to_locale()
+            .unwrap_or_else(crate::i18n::detect_system_locale)
+    }
+}
+
 /// Grid/Compact view icon pixel size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) enum IconSizePref {
@@ -207,10 +258,10 @@ impl IconSizePref {
 
     pub(crate) fn label(self) -> &'static str {
         match self {
-            IconSizePref::Small => "Small (48px)",
-            IconSizePref::Normal => "Medium (64px)",
-            IconSizePref::Large => "Large (96px)",
-            IconSizePref::ExtraLarge => "Extra Large (128px)",
+            IconSizePref::Small => crate::i18n::t("prefs.appearance.icon_size.small"),
+            IconSizePref::Normal => crate::i18n::t("prefs.appearance.icon_size.normal"),
+            IconSizePref::Large => crate::i18n::t("prefs.appearance.icon_size.large"),
+            IconSizePref::ExtraLarge => crate::i18n::t("prefs.appearance.icon_size.extra_large"),
         }
     }
 }
@@ -253,6 +304,8 @@ pub(crate) struct VeyraSettings {
     pub color_scheme: ColorSchemePref,
     #[serde(default)]
     pub accent_color: AccentColorPref,
+    #[serde(default)]
+    pub language: LanguagePref,
     #[serde(default)]
     pub icon_size: IconSizePref,
 
@@ -328,6 +381,7 @@ impl Default for VeyraSettings {
         VeyraSettings {
             color_scheme: ColorSchemePref::default(),
             accent_color: AccentColorPref::default(),
+            language: LanguagePref::default(),
             icon_size: IconSizePref::default(),
             click_policy: ClickPolicy::default(),
             open_folders_in_new_tab: false,

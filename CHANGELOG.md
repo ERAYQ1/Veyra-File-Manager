@@ -1,5 +1,32 @@
 # Changelog
 
+## Faz 37 — Internationalization & Localization (`veyra-ui`)
+
+Yeni `i18n.rs`: bağımlılıksız (ne `gettext` ne `fluent`) bir çeviri motoru — `en` (varsayılan/fallback) ve `tr` katalogları, `System`/`En`/`Tr` kalıcı tercih, sistem dili algılama ve çoğul desteğiyle. `config.rs`, `preferences_dialog.rs`, `headerbar.rs`, `split_view.rs`, `context_menu.rs`, `widgets/progress_toast.rs` ve `window.rs`'in temsilci bir kesiti bu motora bağlandı.
+
+### Eklenenler
+- **`crates/veyra-ui/src/i18n.rs` (yeni modül):** `Locale` (`En`/`Tr`, `System` yok — bkz. modül dokümanı) ve iki düz `const &[(&str, &str)]` katalog tablosu (`EN`/`TR`, ~190 anahtar). `t(key)`, parametreli `t_fmt(key, &[(name, value)])` (`{name}` yer tutucu değişimi) ve çoğul-duyarlı `t_plural(key, n, params)` (`"{key}.one"`/`"{key}.other"` — İngilizce ve Türkçe şu an aynı iki-kategorili CLDR kuralını kullanıyor, yeni bir dilin farklı kural sayısına ihtiyaç duyması `plural_category`'ye tek bir `match` kolu eklemek). `detect_system_locale()` `glib::language_names()` üzerinden (`LANGUAGE`/`LC_ALL`/`LC_MESSAGES`/`LANG`'i zaten kendi içinde çözümlüyor) ilk desteklenen dil önekini bulur, hiçbiri eşleşmezse (ör. `C`/`POSIX` yerel ayarı) sessizce `En`'e düşer (Kural #15). Eksik bir anahtar `t`'de `En`'e, o da yoksa anahtarın kendisine düşer — asla panik yok. `de`/`fr`/`es`/`ru`/`ar`/`zh`/`ja` eklemek: `Locale`'e bir varyant, kendi `const TABLE`'ı, `Locale::ALL`'a ekleme — tamlık testleri yeni tablodaki eksik anahtarı derleme zamanında değil ama ilk `cargo test`'te hemen yakalar.
+- **`config.rs`:** `LanguagePref` (`System`/`En`/`Tr`), `VeyraSettings.language` alanı (`#[serde(default)]`, eski `settings.json` ile geriye dönük uyumlu). `AccentColorPref::label()` ve `IconSizePref::label()` artık kendi katalog anahtarlarından okuyor (Faz 35/34'ten kalma sabit İngilizce metin yerine).
+- **`preferences_dialog.rs`:** Appearance sayfasına Theme/Accent Color/Icon Size'ın hemen altına "Language" `ComboRow`'u eklendi (`System Default`/`English (US)`/`Türkçe (TR)`) — alt yazı bunun bir sonraki başlatmada uygulanacağını belirtiyor (canlı yeniden çeviri, zaten kurulmuş ~30 widget'lık pencere ağacının tamamını yeniden kurmayı gerektireceğinden bu fazın kapsamı dışında bırakıldı, `restore_tabs_on_startup`'ın Faz 34'teki "sonraki başlatmada" deseniyle aynı). Dosyadaki her 9 sayfanın başlığı, her grup başlığı ve her satır başlığı/alt başlığı/düğme metni katalogdan okunacak şekilde değiştirildi.
+- **`headerbar.rs` / `split_view.rs`:** Arama/Bölünmüş Görünüm/Önizleme düğmelerinin ipucu+erişilebilir etiketleri, Icon/Compact/Details görünüm anahtarlayıcısı, Sırala ve Süz menüsünün tüm metinleri; panel gezinme düğmeleri (Geri/İleri/Yukarı/Ana Dizin/Yenile — ipuçları artık kısayolu da gösteriyor) ve adres girişi katalogdan okunuyor.
+- **`context_menu.rs`:** Tüm sağ-tık menü girdileri (Aç, Birlikte Aç, Kes, Kopyala, Yapıştır, Yeniden Adlandır, Çöpe At, Kalıcı Sil, Sıkıştır, Arşivi Aç, Özellikler, Burada Terminal Aç, vb.) katalogdan okunuyor. Eski `count_label`/`move_count_label`/`trash_count_label` (üç ayrı elle-yazılmış eşiksel fonksiyon) tek bir `count_label(key, count)`'a birleşti — gerçek CLDR `t_plural` kuralını kullanıyor.
+- **`widgets/progress_toast.rs`:** İşlem satırlarının fiilleri ("Copying"/"Moving"/"Moving to Trash"/"Deleting") ve Duraklat/Devam Ettir/İptal düğmeleri katalogdan.
+- **`window.rs` (sınırlı kapsam — aşağıya bakın):** İki `AdwNavigationPage` başlığı ("Files"/"Sidebar"), Sıkıştırma/Ayıklama işlem fiilleri, durum çubuğunun "Cancelled"/"Archive failed"/"Loading…" metinleri, öge sayacı (`count_label`, artık `t_plural` destekli) ve boş disk alanı (`"{size} free"`) katalogdan.
+
+### Kapsam kararları
+- Spesifikasyonun listelediği 5 dosya (`config.rs`, `preferences_dialog.rs`, `headerbar.rs`, `context_menu.rs`, `window.rs`) tam bağlandı; `window.rs` özelinde yalnızca spesifikasyonun B4'te açıkça saydığı durum çubuğu/aktarım bildirimi metinleri ve panel başlıkları — dosya 3500+ satır ve içinde onlarca dağınık hata/onay diyaloğu metni var; bunların tamamının denetimi ve çevirisi başlı başına bir faz gerektirir (Kural #2 — tek seferde dev bir sıçrama yapma). `split_view.rs`/`widgets/progress_toast.rs` da dahil edildi çünkü spesifikasyonun örneklediği tam metinler ("Geri", "Kopyalanıyor…") fiilen bu dosyalarda yaşıyor.
+- Diğer diyalog dosyaları (`rename_dialog.rs`, `compress_dialog.rs`, `connect_server_dialog.rs`, `disk_analyzer_dialog.rs`, `properties_dialog.rs`, vb.) bu fazda katalogdan okumuyor — kapsam dışı, sıradaki bir i18n fazına bırakıldı.
+- Dil değişikliği canlı değil, bir sonraki başlatmada uygulanıyor — zaten kurulmuş widget ağacının metinlerini yeniden yazmak (her `ComboRow`/`Label`/menü/tooltip'i canlı yeniden oluşturmak) bu fazın "motoru kur ve temsilci bir kesiti bağla" hedefinin çok ötesinde bir iş; `apply_accent_color`/`StyleManager::set_color_scheme`'in aksine, çevrilmiş metin GTK widget'larına inşa anında gömülüyor, bir canlı-uygulama kancası yok.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 389 → 402 (yeni: `i18n` 13 test — `en`/`tr` katalog tamlığı [her iki yönde], boş girdi yok, tekrarlanan anahtar yok, her `.one` anahtarının `.other` karşılığı, `t`'nin `en`'e düşmesi, `t_fmt` yer tutucu değişimi, `t_plural`'ın tekil/çoğul ayrımı ve Türkçe tablo kullanımı, sistem dili algılamanın `en`'e düşmesi; `context_menu`/`window` mevcut testleri yeni imzaya güncellendi), tamamı geçti.
+- `cargo build --workspace`: temiz, 0 warning (ölü kod uyarısı yok — `t_fmt` dahil her fonksiyon en az bir gerçek çağrı sitesinde kullanılıyor).
+
+### Sıradaki Faz
+Faz 38 — onay bekleniyor.
+
 ## Faz 36 — Accessibility & Inclusive Design (`veyra-ui`)
 
 Ekran okuyucular (Orca/AT-SPI), yalnızca klavye kullanan kullanıcılar ve yüksek kontrast/büyük metin ölçeklendirmesi için tüm arayüz katmanları gözden geçirildi (Kural #28/#29).

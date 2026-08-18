@@ -9,6 +9,7 @@ use veyra_filesystem::VeyraPath;
 use veyra_search::SearchIndex;
 
 use crate::config::SharedSettings;
+use crate::i18n::t;
 use crate::search_results;
 use crate::sorting::{QuickFilter, SortKey, SortOrder};
 use crate::split_view::{focused_tab, PanelId, Panels};
@@ -98,8 +99,10 @@ pub(crate) fn build(
 
     let search_toggle = gtk4::ToggleButton::new();
     search_toggle.set_icon_name("system-search-symbolic");
-    search_toggle.set_tooltip_text(Some("Search Focused Panel (Ctrl+F)"));
-    search_toggle.update_property(&[gtk4::accessible::Property::Label("Search Directory")]);
+    search_toggle.set_tooltip_text(Some(t("headerbar.search.tooltip")));
+    search_toggle.update_property(&[gtk4::accessible::Property::Label(t(
+        "headerbar.search.accessible_label",
+    ))]);
     {
         let widget = widget.clone();
         let search_column = search_column(&search_entry, &results);
@@ -123,15 +126,19 @@ pub(crate) fn build(
 
     let split_toggle_button = gtk4::ToggleButton::new();
     split_toggle_button.set_icon_name("sidebar-show-right-symbolic");
-    split_toggle_button.set_tooltip_text(Some("Toggle Split View (F3)"));
-    split_toggle_button.update_property(&[gtk4::accessible::Property::Label("Toggle Split View")]);
+    split_toggle_button.set_tooltip_text(Some(t("headerbar.split.tooltip")));
+    split_toggle_button.update_property(&[gtk4::accessible::Property::Label(t(
+        "headerbar.split.accessible_label",
+    ))]);
     split_toggle_button.set_action_name(Some("win.toggle-split-view"));
     widget.pack_start(&split_toggle_button);
 
     let preview_toggle_button = gtk4::ToggleButton::new();
     preview_toggle_button.set_icon_name("view-preview-symbolic");
-    preview_toggle_button.set_tooltip_text(Some("Toggle Preview (F9)"));
-    preview_toggle_button.update_property(&[gtk4::accessible::Property::Label("Toggle Preview")]);
+    preview_toggle_button.set_tooltip_text(Some(t("headerbar.preview.tooltip")));
+    preview_toggle_button.update_property(&[gtk4::accessible::Property::Label(t(
+        "headerbar.preview.accessible_label",
+    ))]);
     preview_toggle_button.set_action_name(Some("win.toggle-preview"));
     widget.pack_end(&preview_toggle_button);
 
@@ -168,13 +175,13 @@ fn view_switcher(
     box_.add_css_class("linked");
 
     let modes = [
-        (ViewMode::Icon, "view-grid-symbolic", "Icon View"),
+        (ViewMode::Icon, "view-grid-symbolic", t("view.icon")),
         (
             ViewMode::Compact,
             "view-continuous-symbolic",
-            "Compact View",
+            t("view.compact"),
         ),
-        (ViewMode::Details, "view-list-symbolic", "Details View"),
+        (ViewMode::Details, "view-list-symbolic", t("view.details")),
     ];
 
     let mut buttons = Vec::with_capacity(modes.len());
@@ -223,8 +230,10 @@ fn view_switcher(
 fn build_sort_filter_button(panels: &Panels, focused: Rc<RefCell<PanelId>>) -> gtk4::MenuButton {
     let button = gtk4::MenuButton::new();
     button.set_icon_name("view-sort-ascending-symbolic");
-    button.set_tooltip_text(Some("Sort & Filter"));
-    button.update_property(&[gtk4::accessible::Property::Label("Sort and Filter Options")]);
+    button.set_tooltip_text(Some(t("sort.button.tooltip")));
+    button.update_property(&[gtk4::accessible::Property::Label(t(
+        "sort.button.accessible_label",
+    ))]);
 
     // Guards the toggle handlers below while the popover's widget states are
     // being programmatically synced from the focused tab's state on open,
@@ -238,7 +247,7 @@ fn build_sort_filter_button(panels: &Panels, focused: Rc<RefCell<PanelId>>) -> g
     content.set_margin_end(8);
     content.set_width_request(220);
 
-    content.append(&section_label("Sort By"));
+    content.append(&section_label(t("sort.section.sort_by")));
     let mut sort_key_buttons = Vec::with_capacity(SortKey::ALL.len());
     let mut group_leader: Option<gtk4::CheckButton> = None;
     for key in SortKey::ALL {
@@ -268,9 +277,9 @@ fn build_sort_filter_button(panels: &Panels, focused: Rc<RefCell<PanelId>>) -> g
     }
 
     content.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
-    content.append(&section_label("Direction"));
-    let ascending_check = gtk4::CheckButton::with_label("Ascending");
-    let descending_check = gtk4::CheckButton::with_label("Descending");
+    content.append(&section_label(t("sort.section.direction")));
+    let ascending_check = gtk4::CheckButton::with_label(t("sort.ascending"));
+    let descending_check = gtk4::CheckButton::with_label(t("sort.descending"));
     descending_check.set_group(Some(&ascending_check));
     for (order, check) in [
         (SortOrder::Ascending, &ascending_check),
@@ -292,7 +301,7 @@ fn build_sort_filter_button(panels: &Panels, focused: Rc<RefCell<PanelId>>) -> g
     }
 
     content.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
-    let folders_first_check = gtk4::CheckButton::with_label("Folders First");
+    let folders_first_check = gtk4::CheckButton::with_label(t("sort.folders_first"));
     {
         let panels = panels.clone();
         let focused = focused.clone();
@@ -310,7 +319,7 @@ fn build_sort_filter_button(panels: &Panels, focused: Rc<RefCell<PanelId>>) -> g
     content.append(&folders_first_check);
 
     content.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
-    content.append(&section_label("Filter By"));
+    content.append(&section_label(t("sort.section.filter_by")));
     let mut quick_filter_buttons = Vec::with_capacity(QuickFilter::ALL.len());
     let mut group_leader: Option<gtk4::CheckButton> = None;
     for quick_filter in QuickFilter::ALL {

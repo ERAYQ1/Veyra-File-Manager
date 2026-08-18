@@ -14,6 +14,7 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 
 use crate::config::SharedSettings;
+use crate::i18n::t;
 use crate::recent::{self, RecentBannerHandles};
 use crate::tab_page::{active_tab, TabPage, TabRegistry};
 use crate::trash::{self, TrashBannerHandles};
@@ -127,11 +128,19 @@ pub(crate) fn build_panel(
     privacy_mode: Rc<RefCell<bool>>,
     settings: SharedSettings,
 ) -> Panel {
-    let back_button = nav_button("go-previous-symbolic", "Go Back (Alt+Left)");
-    let forward_button = nav_button("go-next-symbolic", "Go Forward (Alt+Right)");
-    let up_button = nav_button("go-up-symbolic", "Go Up (Alt+Up)");
-    let home_button = nav_button("go-home-symbolic", "Go Home");
-    let refresh_button = nav_button("view-refresh-symbolic", "Refresh (F5)");
+    let back_button = nav_button("go-previous-symbolic", t("nav.back"), t("nav.back.tooltip"));
+    let forward_button = nav_button(
+        "go-next-symbolic",
+        t("nav.forward"),
+        t("nav.forward.tooltip"),
+    );
+    let up_button = nav_button("go-up-symbolic", t("nav.up"), t("nav.up.tooltip"));
+    let home_button = nav_button("go-home-symbolic", t("nav.home"), t("nav.home"));
+    let refresh_button = nav_button(
+        "view-refresh-symbolic",
+        t("nav.refresh"),
+        t("nav.refresh.tooltip"),
+    );
 
     let nav_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     nav_box.add_css_class("linked");
@@ -153,8 +162,10 @@ pub(crate) fn build_panel(
     address_entry.set_hexpand(true);
     address_entry.set_margin_start(4);
     address_entry.set_margin_end(4);
-    address_entry.set_tooltip_text(Some("Enter Location (Enter to go, Esc to cancel)"));
-    address_entry.update_property(&[gtk4::accessible::Property::Label("Address")]);
+    address_entry.set_tooltip_text(Some(t("nav.address.tooltip")));
+    address_entry.update_property(&[gtk4::accessible::Property::Label(t(
+        "nav.address.accessible_label",
+    ))]);
 
     let title_stack = gtk4::Stack::new();
     title_stack.set_hexpand(true);
@@ -249,10 +260,10 @@ pub(crate) fn build_panel(
     }
 }
 
-fn nav_button(icon_name: &str, tooltip: &str) -> gtk4::Button {
+fn nav_button(icon_name: &str, accessible_label: &str, tooltip: &str) -> gtk4::Button {
     let button = gtk4::Button::from_icon_name(icon_name);
     button.set_tooltip_text(Some(tooltip));
-    button.update_property(&[gtk4::accessible::Property::Label(tooltip)]);
+    button.update_property(&[gtk4::accessible::Property::Label(accessible_label)]);
     button
 }
 

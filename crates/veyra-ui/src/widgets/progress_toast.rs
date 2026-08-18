@@ -16,6 +16,8 @@ use gtk4::prelude::*;
 
 use veyra_filesystem::{format_size, OperationControl, OperationKind, Progress};
 
+use crate::i18n::t;
+
 /// Identifies one row/operation for the lifetime of `begin`..`finish`.
 pub(crate) type OperationId = u64;
 
@@ -59,10 +61,10 @@ pub(crate) fn build() -> ProgressToastHandles {
 
 fn verb(kind: OperationKind) -> &'static str {
     match kind {
-        OperationKind::Copy => "Copying",
-        OperationKind::Move => "Moving",
-        OperationKind::Trash => "Moving to Trash",
-        OperationKind::Delete => "Deleting",
+        OperationKind::Copy => t("toast.copying"),
+        OperationKind::Move => t("toast.moving"),
+        OperationKind::Trash => t("toast.moving_to_trash"),
+        OperationKind::Delete => t("toast.deleting"),
     }
 }
 
@@ -110,8 +112,8 @@ pub(crate) fn begin_with_verb(
     text_box.append(&detail_label);
 
     let pause_button = gtk4::Button::from_icon_name("media-playback-pause-symbolic");
-    pause_button.set_tooltip_text(Some("Pause"));
-    pause_button.update_property(&[gtk4::accessible::Property::Label("Pause")]);
+    pause_button.set_tooltip_text(Some(t("toast.pause")));
+    pause_button.update_property(&[gtk4::accessible::Property::Label(t("toast.pause"))]);
     {
         let control = control.clone();
         let pause_button_handle = pause_button.clone();
@@ -119,18 +121,18 @@ pub(crate) fn begin_with_verb(
             if control.is_paused() {
                 control.resume();
                 pause_button_handle.set_icon_name("media-playback-pause-symbolic");
-                pause_button_handle.set_tooltip_text(Some("Pause"));
+                pause_button_handle.set_tooltip_text(Some(t("toast.pause")));
             } else {
                 control.pause();
                 pause_button_handle.set_icon_name("media-playback-start-symbolic");
-                pause_button_handle.set_tooltip_text(Some("Resume"));
+                pause_button_handle.set_tooltip_text(Some(t("toast.resume")));
             }
         });
     }
 
     let cancel_button = gtk4::Button::from_icon_name("process-stop-symbolic");
-    cancel_button.set_tooltip_text(Some("Cancel"));
-    cancel_button.update_property(&[gtk4::accessible::Property::Label("Cancel")]);
+    cancel_button.set_tooltip_text(Some(t("toast.cancel")));
+    cancel_button.update_property(&[gtk4::accessible::Property::Label(t("toast.cancel"))]);
     {
         let control = control.clone();
         cancel_button.connect_clicked(move |_| control.cancel());
