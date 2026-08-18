@@ -250,6 +250,14 @@ const EN: &[(&str, &str)] = &[
     ("menu.open_terminal_as_root", "Open in Terminal as Root"),
     ("menu.copy_path", "Copy Path"),
     ("menu.copy_location", "Copy Location"),
+    // --- Developer Mode submenu (Faz 39, context_menu.rs) ---
+    ("menu.developer", "Developer"),
+    ("menu.copy_absolute_path", "Copy Absolute Path"),
+    ("menu.copy_uri", "Copy URI"),
+    ("menu.copy_relative_path", "Copy Relative Path"),
+    ("menu.open_in_editor", "Open in Editor"),
+    ("menu.calculate_checksums", "Calculate Checksums…"),
+    ("menu.developer_metadata", "Developer Metadata Inspector"),
     ("menu.properties", "Properties"),
     ("menu.new_folder", "New Folder"),
     ("menu.new_document", "New Document"),
@@ -488,6 +496,25 @@ const EN: &[(&str, &str)] = &[
         "Every Preferences page reverts to its default value. This cannot be undone.",
     ),
     ("prefs.advanced.reset_all.cancel", "Cancel"),
+    ("prefs.advanced.group.developer", "Developer"),
+    ("prefs.advanced.developer_mode.title", "Developer Mode"),
+    (
+        "prefs.advanced.developer_mode.subtitle",
+        "Adds path/URI copying, checksums, editor launch, and a Git status badge",
+    ),
+    // --- Developer Mode dialogs (Faz 39) ---
+    ("dev.checksum.title", "Checksums"),
+    ("dev.checksum.close", "Close"),
+    ("dev.checksum.computing", "Computing…"),
+    ("dev.checksum.copy", "Copy"),
+    ("dev.metadata.title", "Developer Metadata"),
+    ("dev.metadata.close", "Close"),
+    ("dev.metadata.inode", "Inode"),
+    ("dev.metadata.device_id", "Device ID"),
+    ("dev.metadata.permissions", "Permissions"),
+    ("dev.metadata.mime_type", "MIME Type"),
+    ("dev.metadata.hard_links", "Hard Links"),
+    ("dev.metadata.unknown", "Unknown"),
 ];
 
 const TR: &[(&str, &str)] = &[
@@ -550,6 +577,14 @@ const TR: &[(&str, &str)] = &[
     ("menu.open_terminal_as_root", "Yönetici Olarak Terminalde Aç"),
     ("menu.copy_path", "Yolu Kopyala"),
     ("menu.copy_location", "Konumu Kopyala"),
+    // --- Geliştirici Modu alt menüsü (Faz 39, context_menu.rs) ---
+    ("menu.developer", "Geliştirici"),
+    ("menu.copy_absolute_path", "Tam Yolu Kopyala"),
+    ("menu.copy_uri", "URI Kopyala"),
+    ("menu.copy_relative_path", "Göreceli Yolu Kopyala"),
+    ("menu.open_in_editor", "Düzenleyicide Aç"),
+    ("menu.calculate_checksums", "Sağlama Toplamlarını Hesapla…"),
+    ("menu.developer_metadata", "Geliştirici Meta Verisi İnceleyici"),
     ("menu.properties", "Özellikler"),
     ("menu.new_folder", "Yeni Klasör"),
     ("menu.new_document", "Yeni Belge"),
@@ -716,6 +751,25 @@ const TR: &[(&str, &str)] = &[
         "Her Ayarlar sayfası varsayılan değerine döner. Bu işlem geri alınamaz.",
     ),
     ("prefs.advanced.reset_all.cancel", "İptal"),
+    ("prefs.advanced.group.developer", "Geliştirici"),
+    ("prefs.advanced.developer_mode.title", "Geliştirici Modu"),
+    (
+        "prefs.advanced.developer_mode.subtitle",
+        "Yol/URI kopyalama, sağlama toplamları, düzenleyici başlatma ve Git durum rozeti ekler",
+    ),
+    // --- Geliştirici Modu diyalogları (Faz 39) ---
+    ("dev.checksum.title", "Sağlama Toplamları"),
+    ("dev.checksum.close", "Kapat"),
+    ("dev.checksum.computing", "Hesaplanıyor…"),
+    ("dev.checksum.copy", "Kopyala"),
+    ("dev.metadata.title", "Geliştirici Meta Verisi"),
+    ("dev.metadata.close", "Kapat"),
+    ("dev.metadata.inode", "Inode"),
+    ("dev.metadata.device_id", "Aygıt Kimliği"),
+    ("dev.metadata.permissions", "İzinler"),
+    ("dev.metadata.mime_type", "MIME Türü"),
+    ("dev.metadata.hard_links", "Sabit Bağlantılar"),
+    ("dev.metadata.unknown", "Bilinmiyor"),
 ];
 
 #[cfg(test)]

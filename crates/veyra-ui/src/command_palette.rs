@@ -264,6 +264,47 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
             action_name: "win.reset-shortcuts",
             action_target: None,
         },
+        // --- Tools: Developer Mode (Faz 39) ---
+        CommandItem {
+            id: "toggle-developer-mode",
+            title: "Toggle Developer Mode",
+            category: "Tools",
+            icon_name: "applications-engineering-symbolic",
+            action_name: "win.toggle-developer-mode",
+            action_target: None,
+        },
+        CommandItem {
+            id: "copy-absolute-path",
+            title: "Copy Absolute Path",
+            category: "Tools",
+            icon_name: "edit-copy-symbolic",
+            action_name: "win.copy-absolute-path-selected",
+            action_target: None,
+        },
+        CommandItem {
+            id: "copy-file-uri",
+            title: "Copy File URI",
+            category: "Tools",
+            icon_name: "edit-copy-symbolic",
+            action_name: "win.copy-uri-selected",
+            action_target: None,
+        },
+        CommandItem {
+            id: "calculate-checksums",
+            title: "Calculate Checksums (SHA-256 / MD5)",
+            category: "Tools",
+            icon_name: "document-properties-symbolic",
+            action_name: "win.calculate-checksums-selected",
+            action_target: None,
+        },
+        CommandItem {
+            id: "open-in-editor",
+            title: "Open in Default Code Editor",
+            category: "Tools",
+            icon_name: "text-editor-symbolic",
+            action_name: "win.open-in-editor-selected",
+            action_target: None,
+        },
         // --- Sort & Filter ---
         CommandItem {
             id: "sort-name",

@@ -736,6 +736,23 @@ fn advanced_page(
         .icon_name("applications-engineering-symbolic")
         .name("advanced")
         .build();
+
+    let developer_group = group(t("prefs.advanced.group.developer"));
+    let developer_mode_row = switch_row(
+        t("prefs.advanced.developer_mode.title"),
+        t("prefs.advanced.developer_mode.subtitle"),
+        settings.borrow().developer_mode,
+    );
+    {
+        let settings = settings.clone();
+        developer_mode_row.connect_active_notify(move |row| {
+            settings.borrow_mut().developer_mode = row.is_active();
+            persist(&settings);
+        });
+    }
+    developer_group.add(&developer_mode_row);
+    page.add(&developer_group);
+
     let g = group(t("prefs.advanced.group.reset"));
 
     let (reset_row, reset_button) = action_row_button(

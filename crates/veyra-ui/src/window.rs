@@ -342,6 +342,7 @@ pub(crate) fn build_window(
         rebuild_search_index,
         settings.clone(),
     );
+    setup_developer_mode_actions(app, &window, settings.clone());
 
     // Faz 34: "Restore Previous Tabs on Startup" is only useful if a session
     // actually gets written somewhere — save on every close regardless of
@@ -437,6 +438,32 @@ fn setup_preferences_actions(
     }
     window.add_action(&action);
     app.set_accels_for_action("win.show-preferences", &["<Primary>comma"]);
+}
+
+/// Registers the Faz 39 `win.toggle-developer-mode` action (`Ctrl+Shift+D`).
+/// Persists immediately, same "no separate Apply step" contract as every
+/// other Preferences toggle — the Developer submenu and Advanced page's
+/// switch both read `settings.developer_mode` live, so this takes effect on
+/// the very next right-click with no tab reload needed.
+fn setup_developer_mode_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    settings: crate::config::SharedSettings,
+) {
+    let action = gio::SimpleAction::new("toggle-developer-mode", None);
+    action.connect_activate(move |_, _| {
+        let enabled = {
+            let mut settings_mut = settings.borrow_mut();
+            settings_mut.developer_mode = !settings_mut.developer_mode;
+            settings_mut.developer_mode
+        };
+        if let Err(err) = settings.borrow().save() {
+            tracing::warn!(error = %err, "failed to save settings.json");
+        }
+        tracing::info!(enabled, "developer mode toggled");
+    });
+    window.add_action(&action);
+    app.set_accels_for_action("win.toggle-developer-mode", &["<Primary><Shift>d"]);
 }
 
 /// Registers the Faz 27 `win.manage-file-associations` action, which opens
@@ -1732,6 +1759,128 @@ fn setup_context_menu_actions(
     window.add_action(&action_create_folder);
     app.set_accels_for_action("win.create-folder", &["<Primary><Shift>n"]);
 
+    let action_copy_absolute_path = gio::SimpleAction::new("copy-absolute-path-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_copy_absolute_path.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
+                window.clipboard().set_text(&item.path.to_string());
+            }
+        });
+    }
+    window.add_action(&action_copy_absolute_path);
+    app.set_accels_for_action("win.copy-absolute-path-selected", &["<Primary><Alt>c"]);
+
+    let action_copy_uri = gio::SimpleAction::new("copy-uri-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_copy_uri.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
+                window
+                    .clipboard()
+                    .set_text(&crate::dev_tools::copy_uri(&item.path));
+            }
+        });
+    }
+    window.add_action(&action_copy_uri);
+
+    let action_copy_relative_path = gio::SimpleAction::new("copy-relative-path-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_copy_relative_path.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            let Some(local) = item.path.as_local_path() else {
+                return;
+            };
+            let current_dir = tab.state.borrow().current_dir.clone();
+            let base = current_dir
+                .as_local_path()
+                .and_then(veyra_filesystem::find_git_root)
+                .or_else(|| current_dir.as_local_path().map(Path::to_path_buf));
+            let Some(base) = base else {
+                return;
+            };
+            window
+                .clipboard()
+                .set_text(&crate::dev_tools::relative_path(local, &base));
+        });
+    }
+    window.add_action(&action_copy_relative_path);
+
+    let action_open_in_editor = gio::SimpleAction::new("open-in-editor-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_open_in_editor.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let Some(item) = tab.selections.selected(&tab.view_stack) else {
+                return;
+            };
+            if let Err(err) = crate::dev_tools::open_in_editor(&item.path) {
+                show_error_dialog(&window, "Unable to Open in Editor", &err.to_string());
+            }
+        });
+    }
+    window.add_action(&action_open_in_editor);
+
+    let action_calculate_checksums = gio::SimpleAction::new("calculate-checksums-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_calculate_checksums.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
+                dialogs::checksum_dialog::show(&window, &item.path);
+            }
+        });
+    }
+    window.add_action(&action_calculate_checksums);
+
+    let action_developer_metadata = gio::SimpleAction::new("developer-metadata-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_developer_metadata.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            if let Some(item) = tab.selections.selected(&tab.view_stack) {
+                dialogs::dev_metadata_dialog::show(&window, &item);
+            }
+        });
+    }
+    window.add_action(&action_developer_metadata);
+
     let action_create_document = gio::SimpleAction::new("create-document", None);
     {
         let panels = panels.clone();
@@ -2496,6 +2645,14 @@ fn open_tab(
         Rc::new(move || trash::is_trash_location(&state.borrow().current_dir))
     };
 
+    // Faz 39: read live rather than captured once, so toggling Developer
+    // Mode in Preferences shows/hides the context menu's Developer submenu
+    // on the very next right-click, no tab reload required.
+    let developer_mode: Rc<dyn Fn() -> bool> = {
+        let settings = chrome.settings.clone();
+        Rc::new(move || settings.borrow().developer_mode)
+    };
+
     let selections;
     let details_column_view_slot;
     let details_sort_columns_slot;
@@ -2515,6 +2672,7 @@ fn open_tab(
             has_clipboard.clone(),
             split_active.clone(),
             is_trash.clone(),
+            developer_mode.clone(),
             thumbnails.clone(),
             dnd_wiring.clone(),
             chrome.settings.clone(),
@@ -2532,6 +2690,7 @@ fn open_tab(
             has_clipboard.clone(),
             split_active.clone(),
             is_trash.clone(),
+            developer_mode.clone(),
             thumbnails.clone(),
             dnd_wiring.clone(),
             chrome.settings.clone(),
@@ -2550,6 +2709,7 @@ fn open_tab(
             has_clipboard,
             split_active,
             is_trash,
+            developer_mode,
             thumbnails,
             dnd_wiring,
             chrome.settings.clone(),
@@ -3277,6 +3437,42 @@ fn update_chrome(tab: &TabPage, chrome: &Chrome) {
 
     chrome.status_left.set_label(&count_label(item_count));
     update_free_space(&tab.state, chrome);
+    update_git_badge(&tab.state, chrome, &current_dir);
+}
+
+/// Faz 39: recomputes and shows/hides `chrome`'s Git status badge for
+/// `path`. Runs `find_git_root`/`git_status` off the GTK main thread (Rule
+/// #11/#14, `git status` shells out to a subprocess). Discards the result
+/// if `tab` has since navigated elsewhere by the time it lands (Rule #17 —
+/// a fast back-to-back navigation must never paint a stale repo's badge
+/// over the newly opened directory).
+fn update_git_badge(state: &SharedState, chrome: &Chrome, path: &VeyraPath) {
+    let Some(local) = path.as_local_path().map(Path::to_path_buf) else {
+        chrome.git_badge.set_visible(false);
+        return;
+    };
+
+    let state_for_done = state.clone();
+    let chrome_for_done = chrome.clone();
+    let path_for_done = path.clone();
+    fs_async::run_blocking(
+        move || {
+            let root = veyra_filesystem::find_git_root(&local)?;
+            veyra_filesystem::git_status(&root).ok()
+        },
+        move |status: Option<veyra_filesystem::GitRepoStatus>| {
+            if state_for_done.borrow().current_dir != path_for_done {
+                return;
+            }
+            match status {
+                Some(status) => {
+                    chrome_for_done.git_badge.set_label(&status.badge_label());
+                    chrome_for_done.git_badge.set_visible(true);
+                }
+                None => chrome_for_done.git_badge.set_visible(false),
+            }
+        },
+    );
 }
 
 /// The `AdwTabPage` title for `path`: `Home` for the user's home directory,

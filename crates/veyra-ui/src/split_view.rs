@@ -54,6 +54,9 @@ pub(crate) struct Chrome {
     pub address_entry: gtk4::Entry,
     pub status_left: gtk4::Label,
     pub status_right: gtk4::Label,
+    /// Faz 39: the Git status badge (`main ↑2 ↓1 *`), hidden whenever the
+    /// current directory isn't inside a Git repository.
+    pub git_badge: gtk4::Label,
     /// Faz 15: the `recent:///`-only info row (Clear History / Privacy
     /// Mode), revealed by `window::update_chrome` whenever this panel's
     /// active tab is showing Recent Files.
@@ -211,9 +214,21 @@ pub(crate) fn build_panel(
     }
     address_entry.add_controller(address_focus);
 
+    // Faz 39: Git status badge — hidden by default, revealed by
+    // `window::update_git_badge` whenever the panel's active tab is
+    // currently showing a location inside a Git repository.
+    let git_badge = gtk4::Label::new(None);
+    git_badge.add_css_class("dim-label");
+    git_badge.add_css_class("caption");
+    git_badge.set_margin_start(4);
+    git_badge.set_margin_end(8);
+    git_badge.set_visible(false);
+    git_badge.set_selectable(true);
+
     let toolbar_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     toolbar_row.append(&nav_box);
     toolbar_row.append(&title_stack);
+    toolbar_row.append(&git_badge);
 
     let recent_banner = recent::build_banner(privacy_mode.clone());
     let trash_banner = trash::build_banner();
@@ -245,6 +260,7 @@ pub(crate) fn build_panel(
         address_entry,
         status_left: status.left_label,
         status_right: status.right_label,
+        git_badge,
         recent_banner,
         privacy_mode,
         trash_banner,

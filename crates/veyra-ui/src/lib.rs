@@ -14,6 +14,7 @@ mod breadcrumbs;
 mod command_palette;
 mod config;
 mod context_menu;
+mod dev_tools;
 mod devices;
 mod dialogs;
 mod dnd;

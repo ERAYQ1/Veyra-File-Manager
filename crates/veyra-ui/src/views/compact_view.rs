@@ -25,6 +25,7 @@ pub(crate) fn build_compact_view(
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
     is_trash: Rc<dyn Fn() -> bool>,
+    developer_mode: Rc<dyn Fn() -> bool>,
     thumbnails: Rc<ThumbnailService>,
     dnd_wiring: DndWiring,
     settings: SharedSettings,
@@ -56,6 +57,7 @@ pub(crate) fn build_compact_view(
         has_clipboard,
         split_active,
         is_trash,
+        developer_mode,
     );
 
     let scrolled = gtk4::ScrolledWindow::builder()

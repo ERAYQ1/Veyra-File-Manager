@@ -22,6 +22,9 @@ pub struct AdvancedInfo {
     /// The mounted filesystem type (e.g. `ext4`, `btrfs`, `tmpfs`, `vfat`),
     /// when the backend reports one.
     pub filesystem_type: Option<String>,
+    /// Faz 39: the entry's hardlink count (`st_nlink`), for the Developer
+    /// Metadata Inspector.
+    pub hard_link_count: Option<u64>,
 }
 
 /// Queries `path`'s device id, allocated disk usage, and containing
@@ -32,7 +35,7 @@ pub fn stat_advanced(path: &VeyraPath) -> Result<AdvancedInfo, FsError> {
 
     let info = file
         .query_info(
-            "unix::device,unix::blocks",
+            "unix::device,unix::blocks,unix::nlink",
             gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
             gio::Cancellable::NONE,
         )
@@ -44,6 +47,9 @@ pub fn stat_advanced(path: &VeyraPath) -> Result<AdvancedInfo, FsError> {
     let disk_usage_bytes = info
         .has_attribute("unix::blocks")
         .then(|| info.attribute_uint64("unix::blocks") * 512);
+    let hard_link_count = info
+        .has_attribute("unix::nlink")
+        .then(|| info.attribute_uint32("unix::nlink") as u64);
 
     // Best-effort: some backends (or a filesystem query racing a mount
     // change) can fail here without that being a reason to fail the whole
@@ -58,5 +64,6 @@ pub fn stat_advanced(path: &VeyraPath) -> Result<AdvancedInfo, FsError> {
         device_id,
         disk_usage_bytes,
         filesystem_type,
+        hard_link_count,
     })
 }

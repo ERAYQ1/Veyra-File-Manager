@@ -1,5 +1,37 @@
 # Changelog
 
+## Faz 39 — Developer Mode & Git Integration (`veyra-filesystem` / `veyra-ui`)
+
+Git deposu algılama/durum motoru ve sağ-tık "Developer" alt menüsü (yol/URI kopyalama, harici düzenleyici, MD5/SHA-256 sağlama toplamları, meta veri inceleyici) — `Ctrl+Shift+D` ile açılıp kapanan, Ayarlar → Advanced'ta kalıcı bir anahtar.
+
+### Eklenenler
+- **`crates/veyra-filesystem/src/git.rs` (yeni modül):** `find_git_root` — saf Rust, `.git` bulana kadar üst dizinlere yürür, hiçbir alt süreç başlatmaz. `git_status` — `git status --porcelain=2 --branch`'i sabit, kabuksuz bir argv (`Command::new("git").arg("-C")...`) ile bir kez çalıştırır (Kural #19); paket dosyası/delta çözme gibi `.git` iç formatını elle yeniden uygulamak yerine kullanıcının zaten güvendiği `git` ikili dosyasına devrediyor — hem daha güvenli hem çok daha doğru. `GitRepoStatus` (`branch`, `ahead`, `behind`, `staged`, `modified`, `untracked`, `is_dirty()`, `badge_label()` → `"main ↑2 ↓1 *"`). `git` bulunamazsa veya komut başarısız olursa rozet sessizce gizlenir (Kural #15/#18).
+- **`crates/veyra-filesystem/src/advanced.rs`:** `AdvancedInfo`'ya `hard_link_count` (`unix::nlink`) eklendi — Geliştirici Meta Verisi İnceleyici'nin sabit bağlantı satırını besliyor; eklemeli alan, mevcut çağıran (`properties_dialog.rs`) etkilenmedi.
+- **`crates/veyra-ui/src/dev_tools.rs` (yeni modül):** `relative_path` (Git köküne veya açık dizine göre, gerektiğinde `../` ile yukarı-aşağı yürüyen saf fonksiyon), `copy_uri` (GIO `file://` URI'si), `compute_checksums` (MD5+SHA-256'yı tek akan okuma geçişinde hesaplar, `OperationControl` ile iptal edilebilir), `open_in_editor` (`$VISUAL` → `$EDITOR` → `code`/`zed`/`subl`/`nvim`/`gedit`, `terminal.rs`'in `find_in_path`'ini paylaşarak — hiçbiri kabuk dizesi değil, her aday disk üzerinde var olduğu doğrulanmış bir ikili).
+- **`crates/veyra-ui/src/dialogs/checksum_dialog.rs` (yeni modül):** MD5/SHA-256'yı arka planda hesaplayıp tek tıkla kopyalama sunan `AdwDialog`; diyalog kapatılırsa hesaplama `OperationControl.cancel()` ile durur.
+- **`crates/veyra-ui/src/dialogs/dev_metadata_dialog.rs` (yeni modül):** inode, izinler (sekizli), MIME türü (zaten yüklü `FileItem`'dan, ekstra `stat` yok) + aygıt kimliği/sabit bağlantı sayısı (arka planda `stat_advanced`).
+- **`config.rs`:** `VeyraSettings.developer_mode: bool` (`#[serde(default)]`, eski `settings.json` ile uyumlu).
+- **`context_menu.rs`:** Tek ögelik seçim menüsüne, yalnızca Developer Mode açıkken görünen "Developer" alt menüsü (Copy Absolute Path, Copy URI, Copy Relative Path, Open in Editor, Calculate Checksums…, Developer Metadata Inspector).
+- **`window.rs`:** `win.toggle-developer-mode` (`Ctrl+Shift+D`, ayarı değiştirip anında kaydeder), `win.copy-absolute-path-selected` (`Ctrl+Alt+C`), `win.copy-uri-selected`, `win.copy-relative-path-selected`, `win.open-in-editor-selected`, `win.calculate-checksums-selected`, `win.developer-metadata-selected`. `update_chrome` artık her gezinmede `update_git_badge`'i tetikliyor — arka planda `find_git_root`/`git_status`, tab o sırada başka bir yere gitmişse sonucu atıyor (Kural #17).
+- **`split_view.rs`:** Panel araç çubuğuna, depo dışındayken gizli duran Git durum rozeti (`Chrome.git_badge`) eklendi.
+- **`shortcuts.rs` / `command_palette.rs`:** Kısayol kataloğuna "Toggle Developer Mode" ve "Copy Absolute Path"; Komut Paletine beş yeni Tools girdisi (Toggle Developer Mode, Copy Absolute Path, Copy File URI, Calculate Checksums, Open in Default Code Editor).
+- **`preferences_dialog.rs`:** Advanced sayfasına "Developer" grubu ve "Developer Mode" `SwitchRow`'u eklendi.
+- **`i18n.rs`:** `menu.developer*`, `dev.checksum.*`, `dev.metadata.*`, `prefs.advanced.developer_mode.*`/`group.developer` — hem `EN` hem `TR` katalogları.
+
+### Kapsam kararları
+- Git durumu tek bir rozette gösteriliyor (headerbar/breadcrumbs satırı), ayrı bir durum çubuğu kopyası eklenmedi — spesifikasyonun "Headerbar / Breadcrumbs & Status Bar" ifadesi aynı bilginin nerede sunulacağına dair iki alternatif olarak okundu, ikisini de aynı anda tutmak gereksiz tekrar olurdu.
+- `git_status` `.git` iç formatını (paket dosyaları, delta çözme, ref çözümleme) elle yeniden uygulamak yerine yerel `git` ikilisini sabit argv ile çağırıyor — Kural #19 (kabuk dizesi yok) ve Kural #48 (doğrulanmadan "tamam" dememe) ile çelişmiyor: tek çağrı, hiçbir kullanıcı girdisi komuta karışmıyor, `git` yoksa/başarısız olursa rozet sessizce gizleniyor.
+- Developer Mode context-menu girdileri yalnızca tekil seçimde görünüyor (spesifikasyonun her eylemi "seçili dosya" tekil bağlamında tanımlaması ve mevcut `build_item_menu`'nün zaten `count == 1` desenini izlemesiyle tutarlı).
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 402 → 418 (yeni: `veyra-filesystem::git` 10 test — kök bulma, temiz/kirli durum, staged/modified/untracked sayımı, detached HEAD, gerçek bir uzak depoya karşı ahead/behind, rozet biçimlendirme; `veyra-ui::dev_tools` 7 test — göreceli yol hesaplama, bilinen içerik için MD5/SHA-256, iptal, uzak konum reddi, düzenleyici listesinde tekrar yok), tamamı geçti.
+- `cargo build --workspace`: temiz, 0 warning.
+
+### Sıradaki Faz
+Faz 40 — onay bekleniyor.
+
 ## Faz 37 — Internationalization & Localization (`veyra-ui`)
 
 Yeni `i18n.rs`: bağımlılıksız (ne `gettext` ne `fluent`) bir çeviri motoru — `en` (varsayılan/fallback) ve `tr` katalogları, `System`/`En`/`Tr` kalıcı tercih, sistem dili algılama ve çoğul desteğiyle. `config.rs`, `preferences_dialog.rs`, `headerbar.rs`, `split_view.rs`, `context_menu.rs`, `widgets/progress_toast.rs` ve `window.rs`'in temsilci bir kesiti bu motora bağlandı.

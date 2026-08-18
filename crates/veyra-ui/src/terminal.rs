@@ -193,7 +193,7 @@ fn resolve_known_terminals() -> Vec<Candidate> {
 /// separator it's checked as-is, otherwise every `$PATH` entry is searched
 /// in order. Returns `None` rather than a guessed/unvalidated path so no
 /// caller ever hands `Command::new` something that doesn't exist.
-fn find_in_path(bin: &str) -> Option<PathBuf> {
+pub(crate) fn find_in_path(bin: &str) -> Option<PathBuf> {
     let dirs = std::env::var_os("PATH").map(|var| std::env::split_paths(&var).collect::<Vec<_>>());
     find_in_dirs(bin, dirs.unwrap_or_default())
 }

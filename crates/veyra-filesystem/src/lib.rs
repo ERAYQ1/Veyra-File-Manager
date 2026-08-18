@@ -11,6 +11,7 @@ mod archive;
 mod conflict;
 mod dircount;
 mod error;
+mod git;
 mod kind;
 mod metadata;
 mod ops;
@@ -25,6 +26,7 @@ pub use archive::{create_archive, extract_archive, ArchiveFormat, ArchiveOutcome
 pub use conflict::{suggest_name, Conflict, ConflictDecision};
 pub use dircount::{count_dir_recursive, DirCount};
 pub use error::FsError;
+pub use git::{find_git_root, git_status, GitRepoStatus, GitStatusError};
 pub use kind::FileKind;
 pub use metadata::{format_size, FileItem, FileMetadata};
 pub use ops::{

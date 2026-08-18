@@ -225,6 +225,16 @@ pub(crate) fn catalog() -> Vec<ShortcutEntry> {
             label: "Reset Shortcuts to Default",
             category: CATEGORY_TOOLS,
         },
+        ShortcutEntry {
+            action: "win.toggle-developer-mode",
+            label: "Toggle Developer Mode",
+            category: CATEGORY_TOOLS,
+        },
+        ShortcutEntry {
+            action: "win.copy-absolute-path-selected",
+            label: "Copy Absolute Path",
+            category: CATEGORY_FILE_OPERATIONS,
+        },
     ]
 }
 
@@ -284,6 +294,8 @@ pub(crate) fn default_shortcuts() -> ShortcutMap {
     // Command Palette, so it doesn't need one (and shouldn't risk firing
     // by accident, echoing Kural #38/#39's spirit for destructive actions).
     set("win.reset-shortcuts", &[]);
+    set("win.toggle-developer-mode", &["<Primary><Shift>d"]);
+    set("win.copy-absolute-path-selected", &["<Primary><Alt>c"]);
     ShortcutMap(map)
 }
 

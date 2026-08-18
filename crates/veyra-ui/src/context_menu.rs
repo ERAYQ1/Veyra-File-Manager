@@ -52,6 +52,7 @@ pub(crate) fn attach<V: IsA<gtk4::Widget> + Clone>(
     has_clipboard: Rc<dyn Fn() -> bool>,
     split_active: Rc<dyn Fn() -> bool>,
     is_trash: Rc<dyn Fn() -> bool>,
+    developer_mode: Rc<dyn Fn() -> bool>,
 ) {
     let popover = gtk4::PopoverMenu::from_model(None::<&gio::MenuModel>);
     popover.set_parent(view);
@@ -90,7 +91,7 @@ pub(crate) fn attach<V: IsA<gtk4::Widget> + Clone>(
         } else if items.is_empty() {
             build_background_menu(has_clipboard())
         } else {
-            build_item_menu(&items, split_active())
+            build_item_menu(&items, split_active(), developer_mode())
         };
 
         popover.set_menu_model(Some(&menu));
@@ -168,7 +169,7 @@ fn build_trash_background_menu() -> gio::Menu {
 /// dropped rather than shown misleadingly next to a 3-item selection; the
 /// bulk-capable actions (Copy/Cut/Move-to-Trash/Delete/Compress/panel
 /// transfer) stay, with their label reflecting the selection count.
-fn build_item_menu(items: &[FileItem], is_split_active: bool) -> gio::Menu {
+fn build_item_menu(items: &[FileItem], is_split_active: bool, developer_mode: bool) -> gio::Menu {
     let count = items.len();
     let item = &items[0];
     let is_dir = item.kind().is_directory();
@@ -278,6 +279,12 @@ fn build_item_menu(items: &[FileItem], is_split_active: bool) -> gio::Menu {
         );
         menu.append_section(None, &path_section);
 
+        if developer_mode {
+            let developer_section = gio::Menu::new();
+            developer_section.append_submenu(Some(t("menu.developer")), &build_developer_submenu());
+            menu.append_section(None, &developer_section);
+        }
+
         let properties_section = gio::Menu::new();
         properties_section.append(Some(t("menu.properties")), Some("win.properties-selected"));
         menu.append_section(None, &properties_section);
@@ -326,6 +333,43 @@ fn build_background_menu(has_clipboard: bool) -> gio::Menu {
     menu.append_section(None, &properties_section);
 
     menu
+}
+
+/// Builds the Faz 39 Developer Mode submenu: path/URI/relative-path
+/// copying, launching an external editor, checksums, and the metadata
+/// inspector — only ever appended to the single-item menu when Developer
+/// Mode is on (`context_menu::attach`'s `developer_mode` closure).
+fn build_developer_submenu() -> gio::Menu {
+    let submenu = gio::Menu::new();
+
+    let copy_section = gio::Menu::new();
+    copy_section.append(
+        Some(t("menu.copy_absolute_path")),
+        Some("win.copy-absolute-path-selected"),
+    );
+    copy_section.append(Some(t("menu.copy_uri")), Some("win.copy-uri-selected"));
+    copy_section.append(
+        Some(t("menu.copy_relative_path")),
+        Some("win.copy-relative-path-selected"),
+    );
+    submenu.append_section(None, &copy_section);
+
+    let tools_section = gio::Menu::new();
+    tools_section.append(
+        Some(t("menu.open_in_editor")),
+        Some("win.open-in-editor-selected"),
+    );
+    tools_section.append(
+        Some(t("menu.calculate_checksums")),
+        Some("win.calculate-checksums-selected"),
+    );
+    tools_section.append(
+        Some(t("menu.developer_metadata")),
+        Some("win.developer-metadata-selected"),
+    );
+    submenu.append_section(None, &tools_section);
+
+    submenu
 }
 
 /// Builds the "Open With" submenu for `item`: up to

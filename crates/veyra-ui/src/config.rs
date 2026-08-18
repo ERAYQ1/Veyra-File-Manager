@@ -354,6 +354,13 @@ pub(crate) struct VeyraSettings {
     pub sanitize_log_paths: bool,
     #[serde(default = "default_true")]
     pub store_recent_files: bool,
+
+    // --- Advanced ---
+    /// Faz 39: reveals the right-click "Developer" submenu (path/URI
+    /// copying, checksums, editor launch, metadata inspector) and the Git
+    /// status headerbar badge.
+    #[serde(default)]
+    pub developer_mode: bool,
 }
 
 fn default_true() -> bool {
@@ -400,6 +407,7 @@ impl Default for VeyraSettings {
             thumbnail_cache_capacity: default_thumbnail_cache_capacity(),
             sanitize_log_paths: false,
             store_recent_files: true,
+            developer_mode: false,
         }
     }
 }
