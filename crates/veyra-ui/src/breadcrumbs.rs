@@ -92,6 +92,9 @@ fn append_segment(
         .css_classes(["flat"])
         .build();
     button.set_tooltip_text(Some(&target.to_string()));
+    button.update_property(&[gtk4::accessible::Property::Label(&format!(
+        "Navigate to {label}"
+    ))]);
     let navigate = navigate.clone();
     {
         let target = target.clone();

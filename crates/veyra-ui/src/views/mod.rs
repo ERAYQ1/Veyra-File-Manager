@@ -191,6 +191,9 @@ pub(crate) fn build_grid_view(
                 label.set_text(file_item.name());
                 label.set_tooltip_text(Some(file_item.name()));
             }
+            item_box.update_property(&[gtk4::accessible::Property::Label(
+                &accessible_description_for(&file_item),
+            )]);
         });
     }
 
@@ -344,6 +347,41 @@ pub(crate) fn attach_background_drop(view: &impl IsA<gtk4::Widget>, dnd_wiring: 
     );
 }
 
+/// The human-readable kind word an accessible description reports for
+/// `item` — a screen reader reads this alongside the name/size, so it needs
+/// to be a real word ("Folder"/"File"/"Broken Link"), not an icon name.
+fn kind_word(item: &FileItem) -> &'static str {
+    match item.kind() {
+        FileKind::Directory => "Folder",
+        FileKind::Symlink {
+            is_broken: true, ..
+        } => "Broken Link",
+        FileKind::Symlink { .. } => "Link",
+        FileKind::Socket => "Socket",
+        FileKind::Fifo => "Named Pipe",
+        FileKind::BlockDevice => "Block Device",
+        FileKind::CharDevice => "Character Device",
+        FileKind::Unknown => "Unknown",
+        FileKind::Regular => "File",
+    }
+}
+
+/// The full accessible description AT-SPI/Orca announces for a file row or
+/// grid cell: name, kind, and (for regular files) size — the same
+/// information a sighted user reads off the icon + label + size column,
+/// collapsed into one sentence for screen-reader users (Kural #28).
+pub(crate) fn accessible_description_for(item: &FileItem) -> String {
+    match item.kind() {
+        FileKind::Directory => format!("{}, Folder", item.name()),
+        _ => format!(
+            "{}, {}, {}",
+            item.name(),
+            kind_word(item),
+            item.metadata.size_human()
+        ),
+    }
+}
+
 /// Standard Adwaita/GNOME symbolic icon name for `item`.
 pub(crate) fn icon_name_for(item: &FileItem) -> &'static str {
     match item.kind() {
@@ -357,5 +395,115 @@ pub(crate) fn icon_name_for(item: &FileItem) -> &'static str {
         FileKind::Unknown => "text-x-generic-symbolic",
         FileKind::Regular if item.metadata.is_executable() => "system-run-symbolic",
         FileKind::Regular => "text-x-generic-symbolic",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use veyra_filesystem::{FileMetadata, VeyraPath};
+
+    fn item(name: &str, kind: FileKind, size_bytes: u64) -> FileItem {
+        let path = VeyraPath::Local(PathBuf::from(format!("/tmp/{name}")));
+        FileItem {
+            path: path.clone(),
+            metadata: FileMetadata {
+                name: name.to_string(),
+                path,
+                kind,
+                size_bytes,
+                modified: None,
+                created: None,
+                accessed: None,
+                permissions: None,
+                owner: None,
+                group: None,
+                mime_type: "application/octet-stream".to_string(),
+                inode: None,
+                is_hidden: false,
+            },
+            target_symlink: None,
+        }
+    }
+
+    #[test]
+    fn accessible_description_is_never_empty() {
+        for kind in [
+            FileKind::Directory,
+            FileKind::Regular,
+            FileKind::Symlink {
+                target: None,
+                is_broken: false,
+            },
+            FileKind::Symlink {
+                target: None,
+                is_broken: true,
+            },
+            FileKind::Socket,
+            FileKind::Fifo,
+            FileKind::BlockDevice,
+            FileKind::CharDevice,
+            FileKind::Unknown,
+        ] {
+            let description = accessible_description_for(&item("thing", kind, 0));
+            assert!(!description.is_empty());
+        }
+    }
+
+    #[test]
+    fn accessible_description_includes_the_file_name() {
+        let description = accessible_description_for(&item("report.pdf", FileKind::Regular, 2048));
+        assert!(description.contains("report.pdf"));
+    }
+
+    #[test]
+    fn accessible_description_reports_folder_kind_without_a_size() {
+        let description = accessible_description_for(&item("Projects", FileKind::Directory, 0));
+        assert_eq!(description, "Projects, Folder");
+    }
+
+    #[test]
+    fn accessible_description_reports_regular_file_kind_and_size() {
+        let description = accessible_description_for(&item("notes.txt", FileKind::Regular, 1024));
+        assert_eq!(description, "notes.txt, File, 1.0 KB");
+    }
+
+    #[test]
+    fn accessible_description_reports_broken_link_distinctly_from_link() {
+        let broken = accessible_description_for(&item(
+            "dead",
+            FileKind::Symlink {
+                target: None,
+                is_broken: true,
+            },
+            0,
+        ));
+        let healthy = accessible_description_for(&item(
+            "alive",
+            FileKind::Symlink {
+                target: None,
+                is_broken: false,
+            },
+            0,
+        ));
+        assert!(broken.contains("Broken Link"));
+        assert!(healthy.contains(", Link,"));
+        assert_ne!(broken.replace("dead", ""), healthy.replace("alive", ""));
+    }
+
+    #[test]
+    fn kind_word_is_never_empty_for_any_kind() {
+        for kind in [
+            FileKind::Directory,
+            FileKind::Regular,
+            FileKind::Socket,
+            FileKind::Fifo,
+            FileKind::BlockDevice,
+            FileKind::CharDevice,
+            FileKind::Unknown,
+        ] {
+            assert!(!kind_word(&item("x", kind, 0)).is_empty());
+        }
     }
 }

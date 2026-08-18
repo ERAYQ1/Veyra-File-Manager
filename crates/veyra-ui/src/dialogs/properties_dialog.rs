@@ -261,6 +261,7 @@ fn build_general_page(
     copy_path_button.set_valign(gtk4::Align::Center);
     copy_path_button.add_css_class("flat");
     copy_path_button.set_tooltip_text(Some("Copy Path"));
+    copy_path_button.update_property(&[gtk4::accessible::Property::Label("Copy Path")]);
     {
         let path = item.path.clone();
         copy_path_button.connect_clicked(move |button| {
@@ -477,6 +478,9 @@ fn build_permissions_page(
     mode_entry.set_halign(gtk4::Align::End);
     mode_entry.set_valign(gtk4::Align::Center);
     mode_entry.add_css_class("monospace");
+    mode_entry.update_property(&[gtk4::accessible::Property::Label(
+        "Permissions Mode (Octal)",
+    )]);
     let mode_error_label = gtk4::Label::new(Some(""));
     mode_error_label.add_css_class("dim-label");
     mode_error_label.add_css_class("caption");

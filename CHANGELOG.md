@@ -1,5 +1,31 @@
 # Changelog
 
+## Faz 36 — Accessibility & Inclusive Design (`veyra-ui`)
+
+Ekran okuyucular (Orca/AT-SPI), yalnızca klavye kullanan kullanıcılar ve yüksek kontrast/büyük metin ölçeklendirmesi için tüm arayüz katmanları gözden geçirildi (Kural #28/#29).
+
+### Eklenenler
+- **`views/mod.rs`:** Yeni `accessible_description_for(&FileItem)` — dosya adı, tür (`Folder`/`File`/`Link`/`Broken Link`/…) ve (klasörler hariç) boyutu tek bir cümlede birleştiren AT-SPI açıklaması. Icon/Compact görünümü paylaştığı `build_grid_view`'un `connect_bind`'ine ve Details görünümünün Name sütununa bağlandı — her satır/hücre artık Orca'ya "notes.txt, File, 1.0 KB" gibi zengin bir açıklama okutuyor.
+- **`breadcrumbs.rs`:** Her yol segmenti butonuna `accessible::Property::Label("Navigate to {segment}")` eklendi (spesifikasyondaki tam formatla).
+- **`sidebar.rs`:** Places/Bookmarks/Devices/Network satırlarının erişilebilir etiketleri artık yalnızca ad değil, konum türünü de taşıyor — `"Documents, Folder"`, `"Projects, Bookmark"`, `"My USB Drive, mounted"`, `"Network, Network Location"` gibi. `places_entries()` her girdiye bir `kind` alanı ekleyecek şekilde genişletildi.
+- **`split_view.rs`:** `install_panel_css` artık `*:focus-visible { outline: 2px solid @accent_color; outline-offset: 2px; }` kuralını da yüklüyor — Tab/ok tuşlarıyla gezinirken her buton/satır/giriş net bir odak halkasına sahip (fare tıklaması `:focus-visible`'ı tetiklemediğinden tıklanan bir ögede halka belirmiyor). Yeni `watch_high_contrast`: `AdwStyleManager::is-high-contrast` açıkken panel kenarlıklarını ve odak halkasını kalınlaştıran, gizli-dosya soluklaştırmasını azaltan ek bir CSS sağlayıcısını canlı olarak takıp söküyor (`notify::high-contrast`'a bağlı, `config::apply_accent_color`'ın kur/kaldır deseniyle aynı).
+- **İpucu (tooltip) taraması:** Metinsiz simge butonlarından ipucu eksik olanlar tamamlandı — `file_associations_dialog.rs`'in Kapat butonu; `disk_analyzer_dialog.rs`, `properties_dialog.rs` ve `connect_server_dialog.rs`'in daha önce yalnızca tooltip taşıyıp erişilebilir etiketi eksik olan butonlarına da `accessible::Property::Label` eklendi. `split_view.rs`'in Geri/İleri/Yukarı ipuçları artık klavye kısayolını da gösteriyor (`"Go Back (Alt+Left)"` vb.).
+- **Etiketsiz giriş kutuları:** `rename_dialog.rs`, `compress_dialog.rs` (ad girişi + format seçici), `conflict_dialog.rs` ve `properties_dialog.rs`'in oktal izin girişi — hiçbiri görünür bir `AdwActionRow`/`ComboRow` başlığından etiketini miras almıyordu; hepsine açık `accessible::Property::Label` eklendi.
+
+### Kapsam kararları
+- Headerbar (arama/bölünmüş görünüm/önizleme/görünüm modu/sırala-süz), panel navigasyon butonları (geri/ileri/yukarı/ana/yenile) ve Devices/Network satırları Faz 8-34 sırasında zaten `tooltip_text` + `accessible::Property::Label` taşıyordu — bu fazda yalnızca eksik kalan yerler tamamlandı, mevcut kapsam yeniden yazılmadı.
+- Metin ölçeklendirmesi: kod tabanında hiçbir sabit piksel `font-size` veya Pango boyutu bulunmadığı (`grep`'le doğrulandı), tüm etiketlerin `EllipsizeMode`/tooltip ile taştığında zarifçe kısaldığı görüldüğünden bu alanda ek bir değişikliğe gerek kalmadı — mevcut mimari zaten sistem yazı tipi ölçeklendirmesiyle esnek.
+- Yüksek kontrast: GTK'nin kendi sistem yüksek-kontrast temasının (tüm palet) üzerine yalnızca Veyra'nın kendi çizdiği iki şeyi (panel kenarlığı, gizli-dosya soluklaştırması, odak halkası kalınlığı) güçlendiren minimal bir ek katman kondu; paleti kendi CSS'imizde yeniden tanımlamak sistem temasıyla çakışacağından kapsam dışı bırakıldı.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 383 → 389 (yeni: `views` 6 test — erişilebilir açıklamanın boş olmadığı, dosya adını içerdiği, klasör/dosya/kırık-bağlantı türlerini doğru ayırt ettiği), tamamı geçti.
+- `cargo build --workspace`: temiz. Gerçek bir Orca/AT-SPI oturumuyla uçtan uca doğrulama bu ortamda yapılamadı (headless ajan, ekran okuyucu/görüntü aracı yok) — yalnızca derleme, birim testi ve kod taraması (tüm `tooltip_text`/`accessible::Property::Label`/`Entry::new` çağrı noktalarının elle denetimi) seviyesinde doğrulandı.
+
+### Sıradaki Faz
+Faz 37 — onay bekleniyor.
+
 ## Faz 35 — Themes & Custom Veyra Accent Colors (`veyra-ui`)
 
 Sistem temasını (ve Libadwaita'nın kendi widget metriklerini) bozmadan, yalnızca Veyra arayüzüne özel bir vurgu rengi seçilebiliyor: `accent_color`/`accent_bg_color`/`accent_fg_color` isimli Libadwaita renklerini dinamik bir `GtkCssProvider` ile geçersiz kılan bir `AccentColorPref` eklendi.

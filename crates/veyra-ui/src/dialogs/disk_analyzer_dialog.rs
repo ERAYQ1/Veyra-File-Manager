@@ -563,6 +563,7 @@ fn open_in_folder_button(
     button.add_css_class("flat");
     button.set_valign(gtk4::Align::Center);
     button.set_tooltip_text(Some("Open in Folder"));
+    button.update_property(&[gtk4::accessible::Property::Label("Open in Folder")]);
     button.connect_clicked(move |_| {
         navigate(parent_path(&path));
         dialog.close();

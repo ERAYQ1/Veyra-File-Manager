@@ -40,6 +40,7 @@ pub(crate) fn show(
     let rename_entry = gtk4::Entry::new();
     rename_entry.set_text(&suggested_name);
     rename_entry.set_tooltip_text(Some("New name to save as instead"));
+    rename_entry.update_property(&[gtk4::accessible::Property::Label("New Name")]);
 
     let apply_to_all =
         gtk4::CheckButton::with_label("Apply this choice to all remaining conflicts");

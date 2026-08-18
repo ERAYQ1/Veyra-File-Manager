@@ -31,6 +31,8 @@ pub(crate) fn show(window: &adw::ApplicationWindow) {
     header.set_title_widget(Some(&gtk4::Label::new(Some("File Associations"))));
 
     let close_button = gtk4::Button::from_icon_name("window-close-symbolic");
+    close_button.set_tooltip_text(Some("Close"));
+    close_button.update_property(&[gtk4::accessible::Property::Label("Close")]);
     header.pack_end(&close_button);
     {
         let dialog = dialog.clone();

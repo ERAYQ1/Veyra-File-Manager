@@ -37,8 +37,8 @@ pub(crate) fn build(
     root.set_margin_end(6);
 
     root.append(&section_heading("Places"));
-    for (label, icon, path) in places_entries() {
-        root.append(&row(label, icon, path, &navigate));
+    for (label, icon, path, kind) in places_entries() {
+        root.append(&row(label, icon, path, kind, &navigate));
     }
 
     let bookmarks_section = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
@@ -164,6 +164,7 @@ pub(crate) fn build(
         "Network",
         "network-workgroup-symbolic",
         VeyraPath::from_uri("network:///"),
+        "Network Location",
         &navigate,
     ));
     let network_box = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
@@ -245,11 +246,12 @@ pub(crate) fn build(
     scrolled.upcast()
 }
 
-fn places_entries() -> Vec<(&'static str, &'static str, VeyraPath)> {
+fn places_entries() -> Vec<(&'static str, &'static str, VeyraPath, &'static str)> {
     let mut entries = vec![(
         "Home",
         "user-home-symbolic",
         VeyraPath::from_local(glib::home_dir()),
+        "Home Folder",
     )];
 
     let user_dirs: [(&str, &str, UserDirectory); 5] = [
@@ -273,7 +275,7 @@ fn places_entries() -> Vec<(&'static str, &'static str, VeyraPath)> {
     ];
     for (label, icon, dir) in user_dirs {
         if let Some(path) = glib::user_special_dir(dir) {
-            entries.push((label, icon, VeyraPath::from_local(path)));
+            entries.push((label, icon, VeyraPath::from_local(path), "Folder"));
         }
     }
     if let Some(path) = glib::user_special_dir(UserDirectory::Videos) {
@@ -281,6 +283,7 @@ fn places_entries() -> Vec<(&'static str, &'static str, VeyraPath)> {
             "Videos",
             "folder-videos-symbolic",
             VeyraPath::from_local(path),
+            "Folder",
         ));
     }
 
@@ -288,11 +291,13 @@ fn places_entries() -> Vec<(&'static str, &'static str, VeyraPath)> {
         "Recent",
         "document-open-recent-symbolic",
         VeyraPath::from_uri("recent:///"),
+        "Recent Files",
     ));
     entries.push((
         "Trash",
         "user-trash-symbolic",
         VeyraPath::from_uri("trash:///"),
+        "Trash",
     ));
 
     entries
@@ -410,7 +415,15 @@ fn device_row(
 
     let button = gtk4::Button::builder().css_classes(["flat"]).build();
     button.set_accessible_role(gtk4::AccessibleRole::Button);
-    button.update_property(&[gtk4::accessible::Property::Label(entry.label.as_str())]);
+    let device_state = if entry.path.is_some() {
+        "mounted"
+    } else {
+        "not mounted"
+    };
+    button.update_property(&[gtk4::accessible::Property::Label(&format!(
+        "{}, {device_state}",
+        entry.label
+    ))]);
 
     let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     let icon = gtk4::Image::from_icon_name(entry.icon_name);
@@ -739,11 +752,14 @@ fn row(
     label: &str,
     icon_name: &str,
     target: VeyraPath,
+    kind: &str,
     navigate: &Rc<dyn Fn(VeyraPath)>,
 ) -> gtk4::Widget {
     let button = gtk4::Button::builder().css_classes(["flat"]).build();
     button.set_accessible_role(gtk4::AccessibleRole::Button);
-    button.update_property(&[gtk4::accessible::Property::Label(label)]);
+    button.update_property(&[gtk4::accessible::Property::Label(&format!(
+        "{label}, {kind}"
+    ))]);
 
     let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     let icon = gtk4::Image::from_icon_name(icon_name);
@@ -823,7 +839,9 @@ fn bookmark_row(
     let label = bookmark.display_label();
     let button = gtk4::Button::builder().css_classes(["flat"]).build();
     button.set_accessible_role(gtk4::AccessibleRole::Button);
-    button.update_property(&[gtk4::accessible::Property::Label(label.as_str())]);
+    button.update_property(&[gtk4::accessible::Property::Label(&format!(
+        "{label}, Bookmark"
+    ))]);
 
     let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     let icon = gtk4::Image::from_icon_name("starred-symbolic");

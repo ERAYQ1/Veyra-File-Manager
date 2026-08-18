@@ -26,6 +26,7 @@ pub(crate) fn show(
 
     let name_entry = gtk4::Entry::new();
     name_entry.set_activates_default(true);
+    name_entry.update_property(&[gtk4::accessible::Property::Label("Archive Name")]);
     content.append(&name_entry);
 
     let labels: Vec<&str> = ArchiveFormat::ALL.iter().map(|f| f.label()).collect();
@@ -35,6 +36,7 @@ pub(crate) fn show(
         .position(|f| *f == default_format)
         .unwrap_or(0) as u32;
     format_dropdown.set_selected(default_index);
+    format_dropdown.update_property(&[gtk4::accessible::Property::Label("Archive Format")]);
     content.append(&format_dropdown);
 
     dialog.set_extra_child(Some(&content));

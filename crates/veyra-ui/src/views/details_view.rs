@@ -242,6 +242,9 @@ fn name_column(
         if let Some(label) = child.and_then(|w| w.downcast::<gtk4::Label>().ok()) {
             label.set_text(file_item.name());
         }
+        row.update_property(&[gtk4::accessible::Property::Label(
+            &crate::views::accessible_description_for(&file_item),
+        )]);
     });
 
     factory.connect_unbind(move |_, list_item| {

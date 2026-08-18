@@ -20,6 +20,7 @@ pub(crate) fn show(
     let entry = gtk4::Entry::new();
     entry.set_text(current_name);
     entry.set_activates_default(true);
+    entry.update_property(&[gtk4::accessible::Property::Label("New Name")]);
     // `select_region` takes character offsets, not byte offsets, so the
     // split found via a byte-index `rfind` must be re-measured in `chars()`
     // to land correctly on multi-byte (e.g. Unicode) names.

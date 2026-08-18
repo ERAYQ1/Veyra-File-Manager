@@ -262,6 +262,9 @@ fn recent_row(
     let remove_button = gtk4::Button::from_icon_name("edit-delete-symbolic");
     remove_button.add_css_class("flat");
     remove_button.set_tooltip_text(Some("Remove from history"));
+    remove_button.update_property(&[gtk4::accessible::Property::Label(&format!(
+        "Remove {uri} from history"
+    ))]);
     {
         let uri = uri.to_string();
         let row = row.clone();

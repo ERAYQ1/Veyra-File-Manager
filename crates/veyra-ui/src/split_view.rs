@@ -127,9 +127,9 @@ pub(crate) fn build_panel(
     privacy_mode: Rc<RefCell<bool>>,
     settings: SharedSettings,
 ) -> Panel {
-    let back_button = nav_button("go-previous-symbolic", "Go Back");
-    let forward_button = nav_button("go-next-symbolic", "Go Forward");
-    let up_button = nav_button("go-up-symbolic", "Go Up");
+    let back_button = nav_button("go-previous-symbolic", "Go Back (Alt+Left)");
+    let forward_button = nav_button("go-next-symbolic", "Go Forward (Alt+Right)");
+    let up_button = nav_button("go-up-symbolic", "Go Up (Alt+Up)");
     let home_button = nav_button("go-home-symbolic", "Go Home");
     let refresh_button = nav_button("view-refresh-symbolic", "Refresh (F5)");
 
@@ -264,18 +264,72 @@ fn nav_button(icon_name: &str, tooltip: &str) -> gtk4::Button {
 /// Also installs `.veyra-hidden-item` (Faz 14): dims and italicizes hidden
 /// files/directories in every view when the tab's Ctrl+H toggle is showing
 /// them, so they read as visually distinct from regular entries.
+///
+/// Faz 36 (Kural #29 — keyboard-first): a `*:focus-visible` rule gives every
+/// keyboard-focused control (button, row, grid cell, entry) a solid 2px
+/// `@accent_color` outline with a 2px offset so it never gets lost inside a
+/// widget's own border/selection styling — mouse clicks don't trigger
+/// `:focus-visible`, so this never adds a ring around a merely-clicked
+/// control, only a `Tab`/arrow-key-focused one.
 pub(crate) fn install_panel_css(display: &gtk4::gdk::Display) {
     let provider = gtk4::CssProvider::new();
     provider.load_from_data(
         ".veyra-panel { border: 2px solid transparent; }\n\
          .veyra-panel.veyra-active-panel { border: 2px solid @accent_color; border-radius: 6px; }\n\
-         .veyra-hidden-item { opacity: 0.55; font-style: italic; }",
+         .veyra-hidden-item { opacity: 0.55; font-style: italic; }\n\
+         *:focus-visible { outline: 2px solid @accent_color; outline-offset: 2px; }",
     );
     gtk4::style_context_add_provider_for_display(
         display,
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+    watch_high_contrast(display);
+}
+
+/// Faz 36: installs (and keeps live-synced with) extra CSS that widens
+/// borders and darkens dim/secondary text whenever Libadwaita's system
+/// high-contrast mode (`AdwStyleManager::is-high-contrast`) is on — on top
+/// of, not instead of, GTK's own high-contrast theme, since that already
+/// swaps the whole color palette; this only reinforces the two things a
+/// file manager draws itself: panel borders and dimmed hidden-file text.
+/// Re-evaluated on every `notify::high-contrast` so toggling the system
+/// setting takes effect immediately, matching `apply_accent_color`'s
+/// install/remove-on-reapply pattern in `config.rs`.
+fn watch_high_contrast(display: &gtk4::gdk::Display) {
+    thread_local! {
+        static HIGH_CONTRAST_PROVIDER: RefCell<Option<gtk4::CssProvider>> = const { RefCell::new(None) };
+    }
+
+    fn sync(display: &gtk4::gdk::Display, enabled: bool) {
+        HIGH_CONTRAST_PROVIDER.with(|cell| {
+            if let Some(old) = cell.borrow_mut().take() {
+                gtk4::style_context_remove_provider_for_display(display, &old);
+            }
+        });
+        if !enabled {
+            return;
+        }
+        let provider = gtk4::CssProvider::new();
+        provider.load_from_data(
+            ".veyra-panel.veyra-active-panel { border-width: 3px; }\n\
+             .veyra-hidden-item { opacity: 0.75; }\n\
+             *:focus-visible { outline-width: 3px; }",
+        );
+        gtk4::style_context_add_provider_for_display(
+            display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        HIGH_CONTRAST_PROVIDER.with(|cell| *cell.borrow_mut() = Some(provider));
+    }
+
+    let style_manager = adw::StyleManager::default();
+    sync(display, style_manager.is_high_contrast());
+    let display = display.clone();
+    style_manager.connect_high_contrast_notify(move |manager| {
+        sync(&display, manager.is_high_contrast());
+    });
 }
 
 #[cfg(test)]
