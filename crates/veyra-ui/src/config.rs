@@ -34,6 +34,149 @@ impl ColorSchemePref {
     }
 }
 
+/// Faz 35: a Veyra-specific accent color override for Libadwaita's
+/// `accent_color`/`accent_bg_color`/`accent_fg_color` named colors.
+/// `System` leaves whatever the desktop's own Libadwaita accent is
+/// untouched — every other variant installs a small CSS provider
+/// redefining just those three variables, so widget metrics, spacing and
+/// every other themed value stay exactly what the system theme says
+/// (spec requirement: "sistem temasını ve widget metriklerini bozmadan").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub(crate) enum AccentColorPref {
+    #[default]
+    System,
+    Blue,
+    Teal,
+    Green,
+    Yellow,
+    Orange,
+    Red,
+    Purple,
+    Pink,
+    Slate,
+}
+
+impl AccentColorPref {
+    pub(crate) const ALL: [AccentColorPref; 9] = [
+        AccentColorPref::Blue,
+        AccentColorPref::Teal,
+        AccentColorPref::Green,
+        AccentColorPref::Yellow,
+        AccentColorPref::Orange,
+        AccentColorPref::Red,
+        AccentColorPref::Purple,
+        AccentColorPref::Pink,
+        AccentColorPref::Slate,
+    ];
+
+    /// `None` for `System` (no override CSS to install), the spec-mandated
+    /// hex string otherwise.
+    pub(crate) fn hex(self) -> Option<&'static str> {
+        match self {
+            AccentColorPref::System => None,
+            AccentColorPref::Blue => Some("#3584e4"),
+            AccentColorPref::Teal => Some("#2190a4"),
+            AccentColorPref::Green => Some("#3a944c"),
+            AccentColorPref::Yellow => Some("#cd9309"),
+            AccentColorPref::Orange => Some("#e66100"),
+            AccentColorPref::Red => Some("#c01c28"),
+            AccentColorPref::Purple => Some("#9141ac"),
+            AccentColorPref::Pink => Some("#d56199"),
+            AccentColorPref::Slate => Some("#5e5c64"),
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            AccentColorPref::System => "System Default",
+            AccentColorPref::Blue => "Blue",
+            AccentColorPref::Teal => "Teal",
+            AccentColorPref::Green => "Green",
+            AccentColorPref::Yellow => "Yellow",
+            AccentColorPref::Orange => "Orange",
+            AccentColorPref::Red => "Red",
+            AccentColorPref::Purple => "Purple",
+            AccentColorPref::Pink => "Pink",
+            AccentColorPref::Slate => "Slate",
+        }
+    }
+
+    /// The `@define-color` block installed for this accent, or `None` for
+    /// `System` (nothing to install — any existing override is removed
+    /// instead, see `apply_accent_color`). `accent_bg_color` mirrors
+    /// `accent_color` (Libadwaita's own convention for solid accent
+    /// surfaces), and `accent_fg_color` is whichever of black/white gives
+    /// the better contrast against it.
+    fn css(self) -> Option<String> {
+        let hex = self.hex()?;
+        let fg = contrasting_fg(hex);
+        Some(format!(
+            "@define-color accent_color {hex};\n\
+             @define-color accent_bg_color {hex};\n\
+             @define-color accent_fg_color {fg};\n"
+        ))
+    }
+}
+
+/// Parses a `#rrggbb` hex string into `(r, g, b)` bytes. Panics on
+/// malformed input — every caller passes one of the hardcoded, unit-tested
+/// literals from `AccentColorPref::hex`, never user input.
+fn parse_hex_rgb(hex: &str) -> (u8, u8, u8) {
+    let hex = hex.trim_start_matches('#');
+    let r = u8::from_str_radix(&hex[0..2], 16).expect("valid hex accent color");
+    let g = u8::from_str_radix(&hex[2..4], 16).expect("valid hex accent color");
+    let b = u8::from_str_radix(&hex[4..6], 16).expect("valid hex accent color");
+    (r, g, b)
+}
+
+/// Picks black or white text, whichever contrasts better against `hex`,
+/// using the standard WCAG relative-luminance perceptual weighting.
+fn contrasting_fg(hex: &str) -> &'static str {
+    let (r, g, b) = parse_hex_rgb(hex);
+    let luminance = 0.299 * f64::from(r) + 0.587 * f64::from(g) + 0.114 * f64::from(b);
+    if luminance > 140.0 {
+        "#000000"
+    } else {
+        "#ffffff"
+    }
+}
+
+thread_local! {
+    /// The currently-installed accent CSS provider, so a later call can
+    /// remove it before installing a new one (or before returning to
+    /// `System`) instead of stacking providers on the display forever.
+    static ACCENT_PROVIDER: RefCell<Option<gtk4::CssProvider>> = const { RefCell::new(None) };
+}
+
+/// Installs (or, for `System`, removes) the Veyra accent-color CSS
+/// override on the default display. Safe to call repeatedly — each call
+/// first tears down whatever provider a previous call installed.
+///
+/// No-op if there is no default display (e.g. headless test/CI
+/// environment), matching the rest of Veyra's "never panic on environment
+/// oddities" posture (Kural #15).
+pub(crate) fn apply_accent_color(pref: AccentColorPref) {
+    let Some(display) = gtk4::gdk::Display::default() else {
+        return;
+    };
+    ACCENT_PROVIDER.with(|cell| {
+        if let Some(old) = cell.borrow_mut().take() {
+            gtk4::style_context_remove_provider_for_display(&display, &old);
+        }
+    });
+    let Some(css) = pref.css() else {
+        return;
+    };
+    let provider = gtk4::CssProvider::new();
+    provider.load_from_data(&css);
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+    ACCENT_PROVIDER.with(|cell| *cell.borrow_mut() = Some(provider));
+}
+
 /// Grid/Compact view icon pixel size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) enum IconSizePref {
@@ -109,6 +252,8 @@ pub(crate) struct VeyraSettings {
     #[serde(default)]
     pub color_scheme: ColorSchemePref,
     #[serde(default)]
+    pub accent_color: AccentColorPref,
+    #[serde(default)]
     pub icon_size: IconSizePref,
 
     // --- Navigation ---
@@ -182,6 +327,7 @@ impl Default for VeyraSettings {
     fn default() -> Self {
         VeyraSettings {
             color_scheme: ColorSchemePref::default(),
+            accent_color: AccentColorPref::default(),
             icon_size: IconSizePref::default(),
             click_policy: ClickPolicy::default(),
             open_folders_in_new_tab: false,
@@ -322,6 +468,89 @@ mod tests {
         assert!(!path.with_extension("json.tmp").exists());
         let loaded = load_from(&path);
         assert_eq!(loaded, settings);
+    }
+
+    #[test]
+    fn accent_color_hex_values_match_spec() {
+        assert_eq!(AccentColorPref::System.hex(), None);
+        assert_eq!(AccentColorPref::Blue.hex(), Some("#3584e4"));
+        assert_eq!(AccentColorPref::Teal.hex(), Some("#2190a4"));
+        assert_eq!(AccentColorPref::Green.hex(), Some("#3a944c"));
+        assert_eq!(AccentColorPref::Yellow.hex(), Some("#cd9309"));
+        assert_eq!(AccentColorPref::Orange.hex(), Some("#e66100"));
+        assert_eq!(AccentColorPref::Red.hex(), Some("#c01c28"));
+        assert_eq!(AccentColorPref::Purple.hex(), Some("#9141ac"));
+        assert_eq!(AccentColorPref::Pink.hex(), Some("#d56199"));
+        assert_eq!(AccentColorPref::Slate.hex(), Some("#5e5c64"));
+    }
+
+    #[test]
+    fn accent_color_all_excludes_system_and_matches_hex_count() {
+        assert_eq!(AccentColorPref::ALL.len(), 9);
+        assert!(!AccentColorPref::ALL.contains(&AccentColorPref::System));
+        for pref in AccentColorPref::ALL {
+            assert!(pref.hex().is_some());
+        }
+    }
+
+    #[test]
+    fn accent_color_default_is_system() {
+        assert_eq!(AccentColorPref::default(), AccentColorPref::System);
+    }
+
+    #[test]
+    fn accent_color_system_has_no_css() {
+        assert_eq!(AccentColorPref::System.css(), None);
+    }
+
+    #[test]
+    fn accent_color_css_defines_all_three_variables() {
+        let css = AccentColorPref::Blue.css().unwrap();
+        assert!(css.contains("@define-color accent_color #3584e4;"));
+        assert!(css.contains("@define-color accent_bg_color #3584e4;"));
+        assert!(css.contains("@define-color accent_fg_color #ffffff;"));
+    }
+
+    #[test]
+    fn contrasting_fg_picks_black_on_bright_yellow() {
+        assert_eq!(contrasting_fg("#cd9309"), "#000000");
+    }
+
+    #[test]
+    fn contrasting_fg_picks_white_on_dark_slate() {
+        assert_eq!(contrasting_fg("#5e5c64"), "#ffffff");
+    }
+
+    #[test]
+    fn accent_color_round_trips_through_json() {
+        for pref in [AccentColorPref::System]
+            .into_iter()
+            .chain(AccentColorPref::ALL)
+        {
+            let json = serde_json::to_string(&pref).unwrap();
+            let restored: AccentColorPref = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored, pref);
+        }
+    }
+
+    #[test]
+    fn settings_with_accent_color_round_trip_through_json() {
+        let settings = VeyraSettings {
+            accent_color: AccentColorPref::Purple,
+            ..VeyraSettings::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let restored: VeyraSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, settings);
+    }
+
+    #[test]
+    fn load_from_missing_accent_color_field_defaults_to_system() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, br#"{"show_hidden": true}"#).unwrap();
+        let loaded = load_from(&path);
+        assert_eq!(loaded.accent_color, AccentColorPref::System);
     }
 
     #[test]

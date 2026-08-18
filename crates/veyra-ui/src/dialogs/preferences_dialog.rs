@@ -13,7 +13,7 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use crate::config::{
-    ClickPolicy, ColorSchemePref, DefaultViewMode, IconSizePref, SharedSettings,
+    AccentColorPref, ClickPolicy, ColorSchemePref, DefaultViewMode, IconSizePref, SharedSettings,
     MAX_PREVIEW_SIZE_CHOICES_KB, STREAM_CHUNK_SIZE_CHOICES, THUMBNAIL_CACHE_CAPACITY_CHOICES,
 };
 use crate::network;
@@ -143,6 +143,34 @@ fn appearance_page(
         });
     }
     g.add(&theme_row);
+
+    let accent_choices: Vec<AccentColorPref> = std::iter::once(AccentColorPref::System)
+        .chain(AccentColorPref::ALL)
+        .collect();
+    let accent_labels: Vec<&str> = accent_choices.iter().map(|c| c.label()).collect();
+    let current = settings.borrow().accent_color;
+    let accent_row = combo_row(
+        "Accent Color",
+        &accent_labels,
+        accent_choices
+            .iter()
+            .position(|c| *c == current)
+            .unwrap_or(0),
+    );
+    {
+        let settings = settings.clone();
+        let accent_choices = accent_choices.clone();
+        accent_row.connect_selected_notify(move |row| {
+            let accent = accent_choices
+                .get(row.selected() as usize)
+                .copied()
+                .unwrap_or_default();
+            settings.borrow_mut().accent_color = accent;
+            persist(&settings);
+            crate::config::apply_accent_color(accent);
+        });
+    }
+    g.add(&accent_row);
 
     let current = settings.borrow().icon_size;
     let icon_size_labels: Vec<&str> = IconSizePref::ALL.iter().map(|s| s.label()).collect();
@@ -696,6 +724,7 @@ fn advanced_page(
                 *settings.borrow_mut() = defaults.clone();
                 persist(&settings);
                 adw::StyleManager::default().set_color_scheme(defaults.color_scheme.to_adw());
+                crate::config::apply_accent_color(defaults.accent_color);
                 thumbnails.resize_l1(defaults.thumbnail_cache_capacity);
                 preview_widget.set_visible(defaults.enable_preview_panel);
                 veyra_core::security::set_sanitize_log_paths(defaults.sanitize_log_paths);

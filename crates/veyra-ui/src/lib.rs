@@ -79,6 +79,7 @@ pub fn run(app_id: &str, start_dir: Option<VeyraPath>, cache_dir: &Path) -> glib
         let settings = config::VeyraSettings::load();
         veyra_core::security::set_sanitize_log_paths(settings.sanitize_log_paths);
         libadwaita::StyleManager::default().set_color_scheme(settings.color_scheme.to_adw());
+        config::apply_accent_color(settings.accent_color);
         let settings: config::SharedSettings = Rc::new(RefCell::new(settings));
 
         if let Some(display) = gtk4::gdk::Display::default() {

@@ -1,5 +1,23 @@
 # Changelog
 
+## Faz 35 — Themes & Custom Veyra Accent Colors (`veyra-ui`)
+
+Sistem temasını (ve Libadwaita'nın kendi widget metriklerini) bozmadan, yalnızca Veyra arayüzüne özel bir vurgu rengi seçilebiliyor: `accent_color`/`accent_bg_color`/`accent_fg_color` isimli Libadwaita renklerini dinamik bir `GtkCssProvider` ile geçersiz kılan bir `AccentColorPref` eklendi.
+
+### Eklenenler
+- **`crates/veyra-ui/src/config.rs`:** `AccentColorPref` (`System` + 9 sabit vurgu — Blue/Teal/Green/Yellow/Orange/Red/Purple/Pink/Slate, spesifikasyondaki hex değerleriyle), `VeyraSettings::accent_color` alanı (`#[serde(default)]`, eski `settings.json` dosyalarıyla geriye dönük uyumlu). `apply_accent_color(pref)` — `System` için önceki override provider'ını kaldırıyor, diğer her renk için `@define-color accent_color/accent_bg_color/accent_fg_color` bloğunu `STYLE_PROVIDER_PRIORITY_APPLICATION` önceliğiyle varsayılan display'e yüklüyor (`split_view::install_panel_css`'in zaten kullandığı desenle aynı). `accent_fg_color`, her rengin WCAG ağırlıklı parlaklığına göre siyah/beyaz arasından otomatik seçiliyor (ör. parlak Yellow → siyah metin, koyu Slate → beyaz metin) — kontrast için elle kodlanmış bir liste yerine tek bir hesaplama.
+- **`crates/veyra-ui/src/dialogs/preferences_dialog.rs`:** Appearance sayfasına Theme satırının hemen altına "Accent Color" `ComboRow`'u eklendi; seçim her satırda olduğu gibi anında `settings.json`'a yazılıyor ve `apply_accent_color` ile canlı uygulanıyor. "Reset All Settings to Default" artık vurgu rengini de `AccentColorPref::default()` (`System`)'a döndürüyor.
+- **`crates/veyra-ui/src/lib.rs`:** Uygulama açılışında, tema (`StyleManager::set_color_scheme`) uygulandığı yerin hemen ardından kayıtlı vurgu rengi de pencere kurulmadan önce uygulanıyor.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 371 → 383 (yeni: `config` 12 test — hex değerleri, CSS çıktısı, kontrast hesaplama, JSON round-trip, eksik alanla eski `settings.json` uyumluluğu), tamamı geçti.
+- `cargo build --workspace`: temiz. Gerçek bir GTK/Wayland oturumunda tıklama-akışı bu ortamda otomatik doğrulanamadı (headless ajan) — derleme/birim testi seviyesinde doğrulandı.
+
+### Sıradaki Faz
+Faz 36 — onay bekleniyor.
+
 ## Faz 34 — Comprehensive Settings / Preferences (`veyra-core`, `veyra-search`, `veyra-ui`)
 
 Tema, görünüm, gizlilik ve performans ayarları artık dağınık/sabit kodlanmış değil: uygulamanın tüm yönlerini `~/.config/veyra/settings.json` üzerinden yöneten ve çalışma zamanında canlı uygulayan bir Ayarlar Penceresi (`Ctrl+,`, `win.show-preferences`) eklendi.
