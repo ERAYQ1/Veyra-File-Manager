@@ -1,5 +1,30 @@
 # Changelog
 
+## Faz 46 — Native Packaging (Arch, Fedora, openSUSE, Debian & Standart Kurulum)
+
+Veyra'nın Flatpak dışında ana Linux dağıtımlarında da yerel (native) paketlenebilmesi için `DESTDIR`/`PREFIX` destekli bir kök `Makefile` ve dört dağıtım ailesine (Arch, Fedora/RHEL, openSUSE, Debian/Ubuntu) özel paketleme metadata'sı eklendi; tüm paket dosyalarındaki sürüm numaralarının `Cargo.toml` ile eşleştiğini doğrulayan birim testleri yazıldı.
+
+### Eklenenler
+- **`Makefile` (yeni):** `PREFIX ?= /usr`, `DESTDIR` destekli. `build`: `cargo build --release --locked --workspace`. `install`: binary'yi `bin/veyra` (755), `.desktop`'ı `share/applications/` (644), metainfo'yu `share/metainfo/` (644) ve `data/icons/hicolor/` altındaki tüm simgeleri karşılık gelen `share/icons/hicolor/` yoluna (644) kopyalar. `uninstall`: kurulan tüm dosyaları temizler.
+- **`packaging/arch/PKGBUILD` (yeni):** `pkgname=veyra`, `pkgver=0.1.0`, `depends=(gtk4 libadwaita glib2)`, `makedepends=(cargo rust)`, `optdepends=(polkit gvfs xdg-terminal-exec)`. `build()` `cargo build --frozen --release --workspace`, `package()` `make DESTDIR="$pkgdir" PREFIX=/usr install`.
+- **`packaging/fedora/veyra.spec` ve `packaging/opensuse/veyra.spec` (yeni):** `BuildRequires: cargo, rust, gtk4-devel/pkgconfig(gtk4), libadwaita-devel/pkgconfig(libadwaita-1)`, `Requires: gtk4, libadwaita, glib2`. `%install` `%make_install`; `%check` içinde `desktop-file-validate` + `appstream-util validate-relax` çağrıları. openSUSE sürümü `pkgconfig()` tarzı bağımlılıklar ve `Group:` etiketiyle openSUSE paketleme kurallarına uyarlandı.
+- **`packaging/debian/` (yeni: `control`, `rules`, `changelog`, `copyright`, `source/format`):** `control`'da `Depends: ${shlibs:Depends}, ${misc:Depends}, libgtk-4-1, libadwaita-1-0`; `rules` `dh $@` + `override_dh_auto_build/_install/_test` ile aynı kök `Makefile`'a devrediyor; `copyright` GPL-3.0-or-later, `source/format` `3.0 (quilt)`.
+- **`docs/packaging.md` (yeni):** Arch (`makepkg -si`), Fedora/openSUSE (`rpmbuild -ba`), Debian (`debuild -b -uc -us`) ve kaynaktan derleme (`make && sudo make install`) adımları; sürüm senkronizasyonu kuralı.
+- **`crates/veyra-app/tests/packaging_metadata.rs` (yeni, 7 test):** `PKGBUILD`/Fedora/openSUSE `Version` alanlarının ve Debian `changelog` üst-akış sürümünün kök `Cargo.toml`'daki `[workspace.package].version` ile eşleştiğini doğrular; Debian `control` paragraf yapısını, `Makefile`'daki standart hedefleri (`all/build/install/uninstall/clean`) ve tüm paketleme dosyalarının referans verdiği `data/` yollarının (desktop, metainfo, simge) gerçekten var olduğunu doğrular.
+
+### Kapsam kararları
+- Paketleme dosyaları kaynak tarball indirip derleyecek şekilde yazıldı (`source=("$pkgname-$pkgver.tar.gz::...")`); bu ortamda gerçek bir `makepkg`/`rpmbuild`/`debuild` çalıştırması yapılmadı çünkü bunlar ağ erişimi (tarball indirme) ve dağıtıma özgü build container'ları gerektiriyor — bunun yerine sözdizimi, alan adları ve sürüm eşleşmesi Rust testleriyle doğrulandı; bu sınırlama açıkça belirtiliyor.
+- Debian paketleme dosyaları `packaging/debian/` altında tutuldu (kaynak ağacın kökünde bir `debian/` dizini zorlamak yerine) — kurulum `docs/packaging.md`'de `ln -s packaging/debian debian` ile açıklanıyor; bu, Flatpak manifestinin de `build-aux/flatpak/` altında izole tutulduğu mevcut düzenle tutarlı.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 459 → 466, tamamı geçti (yeni: `veyra-app::packaging_metadata` +7 test).
+- `makepkg`/`rpmbuild`/`debuild` bu ortamda çalıştırılmadı (yukarıdaki Kapsam kararları'na bakın) — sözdizimi ve sürüm eşleşmesi test edildi, gerçek paket üretimi doğrulanmadı.
+
+### Sıradaki Faz
+- Faz 47 onay bekliyor.
+
 ## Faz 45 — Flatpak Packaging & Sandbox Security (Flatpak & XDG Portal Entegrasyonu)
 
 Veyra için GNOME standartlarına uyumlu bir Flatpak manifesti ve gerçek (üretilmiş, placeholder olmayan) `cargo-sources.json` bağımlılık listesi eklendi; sandbox izinleri sekiz gerekçelendirilmiş `finish-args` girdisiyle katı biçimde minimum tutuldu; dosya açma/bildirim/varsayılan-uygulama işlemlerinin GIO üzerinden zaten XDG Portalları'na şeffaf biçimde yönlendiğini doğrulayan sandbox tespiti ve dokümantasyon eklendi.

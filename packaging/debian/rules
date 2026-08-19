@@ -1,0 +1,16 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export CARGO_HOME = $(CURDIR)/debian/cargo_home
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release --locked --workspace
+
+override_dh_auto_install:
+	$(MAKE) DESTDIR=$(CURDIR)/debian/veyra PREFIX=/usr install
+
+override_dh_auto_test:
+	cargo test --release --locked --workspace

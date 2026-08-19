@@ -1,0 +1,24 @@
+Source: veyra
+Section: utils
+Priority: optional
+Maintainer: Veyra Contributors <okuslug33@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               cargo,
+               rustc (>= 1.85),
+               libgtk-4-dev,
+               libadwaita-1-dev,
+               pkg-config
+Standards-Version: 4.6.2
+Homepage: https://github.com/ERAYQ1/Veyra-File-Manager
+Rules-Requires-Root: no
+
+Package: veyra
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libgtk-4-1, libadwaita-1-0
+Recommends: policykit-1, gvfs, xdg-terminal-exec
+Description: Modern, high-performance Linux file manager
+ Veyra is a modern, fast and secure file manager for the Linux desktop,
+ built in Rust with GTK4 and Libadwaita. It targets Dolphin-level
+ functionality with a keyboard-first, accessible and responsive
+ interface, without compromising on memory safety or performance under
+ very large directories.
