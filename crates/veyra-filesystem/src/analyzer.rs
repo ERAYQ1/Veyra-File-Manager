@@ -58,9 +58,10 @@ pub struct UsageEntry {
 
 /// A group of files under the scanned root that share the same byte size —
 /// a cheap, hash-free heuristic for "possibly duplicated", surfaced as
-/// candidates for the user (or a future content-hash pass) to confirm.
+/// candidates for `duplicates::find_duplicates` (Faz 42) to confirm with a
+/// real content hash.
 #[derive(Debug, Clone, PartialEq)]
-pub struct DuplicateGroup {
+pub struct SameSizeCandidateGroup {
     pub size_bytes: u64,
     pub paths: Vec<VeyraPath>,
 }
@@ -72,7 +73,7 @@ pub struct AnalysisResult {
     pub tree: UsageNode,
     pub largest_files: Vec<UsageEntry>,
     pub largest_dirs: Vec<UsageEntry>,
-    pub duplicate_candidates: Vec<DuplicateGroup>,
+    pub duplicate_candidates: Vec<SameSizeCandidateGroup>,
 }
 
 /// Recursively scans `dir`, building its `UsageNode` tree and the derived
@@ -115,10 +116,10 @@ pub fn analyze_directory(
     largest_dirs.sort_by_key(|e| std::cmp::Reverse(e.size_bytes));
     largest_dirs.truncate(TOP_N);
 
-    let mut duplicate_candidates: Vec<DuplicateGroup> = duplicate_index
+    let mut duplicate_candidates: Vec<SameSizeCandidateGroup> = duplicate_index
         .into_iter()
         .filter(|(_, paths)| paths.len() >= 2)
-        .map(|(size_bytes, paths)| DuplicateGroup { size_bytes, paths })
+        .map(|(size_bytes, paths)| SameSizeCandidateGroup { size_bytes, paths })
         .collect();
     duplicate_candidates.sort_by_key(|g| std::cmp::Reverse(g.size_bytes));
 

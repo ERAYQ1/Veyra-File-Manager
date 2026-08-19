@@ -1600,6 +1600,7 @@ dependencies = [
  "glib",
  "mime_guess",
  "sevenz-rust",
+ "sha2",
  "tar",
  "tempfile",
  "thiserror",

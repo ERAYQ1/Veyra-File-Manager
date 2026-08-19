@@ -15,6 +15,7 @@ use crate::dnd::{self, DropExecutor};
 use crate::fs_async;
 use crate::network;
 use crate::thumbnails::ThumbnailService;
+use crate::undo::SharedUndoStack;
 
 /// Builds the Places + Bookmarks + Devices sidebar. Places are the standard
 /// XDG user directories (resolved via GLib so localized folder names are
@@ -29,6 +30,8 @@ pub(crate) fn build(
     open_in_new_tab: Rc<dyn Fn(VeyraPath)>,
     thumbnails: Rc<ThumbnailService>,
     dnd_execute: DropExecutor,
+    refresh_all: Rc<dyn Fn()>,
+    undo_stack: SharedUndoStack,
 ) -> gtk4::Widget {
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
     root.set_margin_top(12);
@@ -143,6 +146,8 @@ pub(crate) fn build(
         let open_in_new_tab = open_in_new_tab.clone();
         let thumbnails = thumbnails.clone();
         let monitor = monitor.clone();
+        let refresh_all = refresh_all.clone();
+        let undo_stack = undo_stack.clone();
         Rc::new(move || {
             refresh_devices_box(
                 &devices_box,
@@ -151,6 +156,8 @@ pub(crate) fn build(
                 &navigate,
                 &open_in_new_tab,
                 &thumbnails,
+                &refresh_all,
+                &undo_stack,
             )
         })
     };
@@ -177,6 +184,8 @@ pub(crate) fn build(
         let open_in_new_tab = open_in_new_tab.clone();
         let thumbnails = thumbnails.clone();
         let monitor = monitor.clone();
+        let refresh_all = refresh_all.clone();
+        let undo_stack = undo_stack.clone();
         Rc::new(move || {
             refresh_network_box(
                 &network_box,
@@ -185,6 +194,8 @@ pub(crate) fn build(
                 &navigate,
                 &open_in_new_tab,
                 &thumbnails,
+                &refresh_all,
+                &undo_stack,
             )
         })
     };
@@ -307,6 +318,7 @@ fn places_entries() -> Vec<(&'static str, &'static str, VeyraPath, &'static str)
 /// every active mount, and every not-yet-mounted volume (USB stick plugged
 /// in but unopened, optical disc not yet accessed). Called once at sidebar
 /// build time and again on every `GVolumeMonitor` hotplug signal.
+#[allow(clippy::too_many_arguments)]
 fn refresh_devices_box(
     container: &gtk4::Box,
     monitor: &gio::VolumeMonitor,
@@ -314,6 +326,8 @@ fn refresh_devices_box(
     navigate: &Rc<dyn Fn(VeyraPath)>,
     open_in_new_tab: &Rc<dyn Fn(VeyraPath)>,
     thumbnails: &Rc<ThumbnailService>,
+    refresh_all: &Rc<dyn Fn()>,
+    undo_stack: &SharedUndoStack,
 ) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
@@ -326,6 +340,8 @@ fn refresh_devices_box(
         let navigate = navigate.clone();
         let open_in_new_tab = open_in_new_tab.clone();
         let thumbnails = thumbnails.clone();
+        let refresh_all = refresh_all.clone();
+        let undo_stack = undo_stack.clone();
         Rc::new(move || {
             refresh_devices_box(
                 &container,
@@ -334,6 +350,8 @@ fn refresh_devices_box(
                 &navigate,
                 &open_in_new_tab,
                 &thumbnails,
+                &refresh_all,
+                &undo_stack,
             )
         })
     };
@@ -346,6 +364,8 @@ fn refresh_devices_box(
             open_in_new_tab,
             thumbnails,
             &refresh_self,
+            refresh_all,
+            undo_stack,
         ));
     }
 }
@@ -355,6 +375,7 @@ fn refresh_devices_box(
 /// network row needs the exact same click-to-navigate, right-click
 /// Unmount/Open in New Tab/Properties menu, and inline eject affordances a
 /// Devices row already has.
+#[allow(clippy::too_many_arguments)]
 fn refresh_network_box(
     container: &gtk4::Box,
     monitor: &gio::VolumeMonitor,
@@ -362,6 +383,8 @@ fn refresh_network_box(
     navigate: &Rc<dyn Fn(VeyraPath)>,
     open_in_new_tab: &Rc<dyn Fn(VeyraPath)>,
     thumbnails: &Rc<ThumbnailService>,
+    refresh_all: &Rc<dyn Fn()>,
+    undo_stack: &SharedUndoStack,
 ) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
@@ -374,6 +397,8 @@ fn refresh_network_box(
         let navigate = navigate.clone();
         let open_in_new_tab = open_in_new_tab.clone();
         let thumbnails = thumbnails.clone();
+        let refresh_all = refresh_all.clone();
+        let undo_stack = undo_stack.clone();
         Rc::new(move || {
             refresh_network_box(
                 &container,
@@ -382,6 +407,8 @@ fn refresh_network_box(
                 &navigate,
                 &open_in_new_tab,
                 &thumbnails,
+                &refresh_all,
+                &undo_stack,
             )
         })
     };
@@ -394,6 +421,8 @@ fn refresh_network_box(
             open_in_new_tab,
             thumbnails,
             &refresh_self,
+            refresh_all,
+            undo_stack,
         ));
     }
 }
@@ -403,6 +432,7 @@ fn refresh_network_box(
 /// Unmount/Eject button when applicable, and a right-click context menu
 /// (Open in New Tab / Mount / Unmount / Safe Removal / Properties, each
 /// enabled only when the underlying `gio` object supports it).
+#[allow(clippy::too_many_arguments)]
 fn device_row(
     entry: DeviceEntry,
     window: &adw::ApplicationWindow,
@@ -410,6 +440,8 @@ fn device_row(
     open_in_new_tab: &Rc<dyn Fn(VeyraPath)>,
     thumbnails: &Rc<ThumbnailService>,
     on_changed: &Rc<dyn Fn()>,
+    refresh_all: &Rc<dyn Fn()>,
+    undo_stack: &SharedUndoStack,
 ) -> gtk4::Widget {
     let entry = Rc::new(entry);
 
@@ -546,9 +578,17 @@ fn device_row(
         let window = window.clone();
         let navigate = navigate.clone();
         let entry = entry.clone();
+        let refresh_all = refresh_all.clone();
+        let undo_stack = undo_stack.clone();
         action_analyze.connect_activate(move |_, _| {
             if let Some(path) = entry.path.clone() {
-                dialogs::disk_analyzer_dialog::show(&window, path, navigate.clone());
+                dialogs::disk_analyzer_dialog::show(
+                    &window,
+                    path,
+                    navigate.clone(),
+                    refresh_all.clone(),
+                    undo_stack.clone(),
+                );
             }
         });
     }

@@ -237,12 +237,18 @@ pub(crate) fn build_window(
     };
 
     let content_page = adw::NavigationPage::new(&content_paned, t("panel.files_page_title"));
+    let sidebar_refresh_all: Rc<dyn Fn()> = {
+        let panels = panels.clone();
+        Rc::new(move || refresh_all_tabs(&panels))
+    };
     let sidebar_widget = sidebar::build(
         &window,
         navigate.clone(),
         open_in_new_tab,
         thumbnails.clone(),
         dnd_execute.clone(),
+        sidebar_refresh_all,
+        undo_stack.clone(),
     );
     let sidebar_page = adw::NavigationPage::new(&sidebar_widget, t("panel.sidebar_page_title"));
 
@@ -317,7 +323,14 @@ pub(crate) fn build_window(
     setup_recent_actions(&window, &panels, privacy_mode);
     setup_trash_actions(app, &window, &panels, &focused, &undo_stack);
     setup_undo_actions(app, &window, &panels, &undo_stack);
-    setup_disk_analyzer_actions(app, &window, &panels, &focused, navigate.clone());
+    setup_disk_analyzer_actions(
+        app,
+        &window,
+        &panels,
+        &focused,
+        navigate.clone(),
+        &undo_stack,
+    );
     setup_terminal_actions(app, &window, &panels, &focused);
     setup_terminal_as_root_actions(app, &window, &panels, &focused);
     setup_network_actions(&window, navigate);
@@ -2021,13 +2034,21 @@ fn setup_disk_analyzer_actions(
     panels: &Panels,
     focused: &Rc<RefCell<PanelId>>,
     navigate: Rc<dyn Fn(VeyraPath)>,
+    undo_stack: &SharedUndoStack,
 ) {
+    let refresh_all: Rc<dyn Fn()> = {
+        let panels = panels.clone();
+        Rc::new(move || refresh_all_tabs(&panels))
+    };
+
     let action_analyze_selected = gio::SimpleAction::new("analyze-disk-selected", None);
     {
         let window = window.clone();
         let panels = panels.clone();
         let focused = focused.clone();
         let navigate = navigate.clone();
+        let refresh_all = refresh_all.clone();
+        let undo_stack = undo_stack.clone();
         action_analyze_selected.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
@@ -2039,7 +2060,13 @@ fn setup_disk_analyzer_actions(
             if !item.kind().is_directory() {
                 return;
             }
-            dialogs::disk_analyzer_dialog::show(&window, item.path, navigate.clone());
+            dialogs::disk_analyzer_dialog::show(
+                &window,
+                item.path,
+                navigate.clone(),
+                refresh_all.clone(),
+                undo_stack.clone(),
+            );
         });
     }
     window.add_action(&action_analyze_selected);
@@ -2049,13 +2076,20 @@ fn setup_disk_analyzer_actions(
         let window = window.clone();
         let panels = panels.clone();
         let focused = focused.clone();
+        let undo_stack = undo_stack.clone();
         action_analyze_current.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
                 return;
             };
             let path = tab.state.borrow().current_dir.clone();
-            dialogs::disk_analyzer_dialog::show(&window, path, navigate.clone());
+            dialogs::disk_analyzer_dialog::show(
+                &window,
+                path,
+                navigate.clone(),
+                refresh_all.clone(),
+                undo_stack.clone(),
+            );
         });
     }
     window.add_action(&action_analyze_current);

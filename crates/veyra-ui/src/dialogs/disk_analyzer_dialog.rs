@@ -10,17 +10,22 @@
 //! root) driving both the current view and "go back up" navigation.
 
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use chrono::{DateTime, Local, Utc};
 use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use veyra_filesystem::{
-    format_size, AnalysisResult, DuplicateGroup, OperationControl, UsageEntry, UsageNode, VeyraPath,
+    find_duplicates, format_size, AnalysisResult, DuplicateGroup, OperationControl,
+    SameSizeCandidateGroup, UsageEntry, UsageNode, VeyraPath,
 };
 
 use crate::fs_async;
+use crate::i18n::{t, t_fmt, t_plural};
+use crate::undo::{SharedUndoStack, UndoableAction};
 
 /// Categorical palette for the breakdown bar/list, cycled in order; the
 /// eighth (last) is reserved for the aggregated "Other" segment.
@@ -37,11 +42,16 @@ const PALETTE: [(f64, f64, f64); 8] = [
 
 /// Shows the Disk Analyzer for `root`, parented to `parent`. `navigate` jumps
 /// the caller's file browser to a path (used by "Open in Folder" entries in
-/// the Largest Files/Duplicates tabs).
+/// the Largest Files/Duplicate Files tabs). `refresh_all` re-reads every
+/// open tab in both panels after a Duplicate Files cleanup actually moves
+/// something to Trash; `undo_stack` records that cleanup so `Ctrl+Z` can
+/// bring the trashed copies back (Rule #38/#39).
 pub(crate) fn show(
     parent: &impl IsA<gtk4::Widget>,
     root: VeyraPath,
     navigate: Rc<dyn Fn(VeyraPath)>,
+    refresh_all: Rc<dyn Fn()>,
+    undo_stack: SharedUndoStack,
 ) {
     let dialog = adw::Dialog::builder()
         .title("Disk Usage")
@@ -91,6 +101,8 @@ pub(crate) fn show(
                     &header_for_result,
                     analysis,
                     navigate,
+                    refresh_all,
+                    undo_stack,
                 );
             }
             Err(err) => {
@@ -128,7 +140,7 @@ type RenderSlot = Rc<RefCell<Option<RenderFn>>>;
 struct LoadedState {
     tree: UsageNode,
     largest_files: Vec<UsageEntry>,
-    duplicate_candidates: Vec<DuplicateGroup>,
+    same_size_candidates: Vec<SameSizeCandidateGroup>,
 }
 
 /// Replaces the loading spinner with the real tabbed view once the scan
@@ -139,11 +151,13 @@ fn build_loaded_view(
     header: &adw::HeaderBar,
     analysis: AnalysisResult,
     navigate: Rc<dyn Fn(VeyraPath)>,
+    refresh_all: Rc<dyn Fn()>,
+    undo_stack: SharedUndoStack,
 ) {
     let state = Rc::new(LoadedState {
         tree: analysis.tree,
         largest_files: analysis.largest_files,
-        duplicate_candidates: analysis.duplicate_candidates,
+        same_size_candidates: analysis.duplicate_candidates,
     });
     let path_indices: Rc<RefCell<Vec<usize>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -169,14 +183,16 @@ fn build_loaded_view(
     );
 
     let duplicates_page = build_duplicates_page(
-        &state.duplicate_candidates,
+        state.same_size_candidates.clone(),
         navigate.clone(),
         dialog.clone(),
+        refresh_all,
+        undo_stack,
     );
     view_stack.add_titled_with_icon(
         &duplicates_page,
         Some("duplicates"),
-        "Duplicates",
+        t("dup.tab.title"),
         "edit-copy-symbolic",
     );
 
@@ -493,63 +509,577 @@ fn build_largest_files_page(
     scroller.upcast()
 }
 
-/// Builds the Duplicates tab: one expander row per same-size group, each
-/// listing its member paths with their own "Open in Folder" action.
+/// One confirmed duplicate file, paired with its modified time (fetched
+/// alongside the content hash, off the GTK thread) so the tab can render
+/// it and the "Keep Newest"/"Keep Oldest" helpers can compare it without
+/// any further I/O.
+#[derive(Clone)]
+struct DupFileEntry {
+    path: VeyraPath,
+    modified: Option<DateTime<Utc>>,
+}
+
+/// A content-hash-confirmed duplicate group, augmented with per-file
+/// modified times — the UI-side counterpart to
+/// `veyra_filesystem::DuplicateGroup`.
+#[derive(Clone)]
+struct DuplicateGroupView {
+    size_per_file: u64,
+    wasted_size: u64,
+    files: Vec<DupFileEntry>,
+}
+
+/// Builds the Duplicate Files tab: starts the (potentially slow) content
+/// hash pass in the background immediately (Rule #11/#12), showing a
+/// spinner until it lands, then an interactive view — checkbox per file,
+/// "Select All Copies (Keep Newest/Oldest)" helpers, and a "Move Selected
+/// to Trash" action gated behind the all-copies-protection rule and an
+/// explicit confirmation (Rule #38/#39).
 fn build_duplicates_page(
-    groups: &[DuplicateGroup],
+    candidates: Vec<SameSizeCandidateGroup>,
     navigate: Rc<dyn Fn(VeyraPath)>,
     dialog: adw::Dialog,
+    refresh_all: Rc<dyn Fn()>,
+    undo_stack: SharedUndoStack,
 ) -> gtk4::Widget {
-    if groups.is_empty() {
-        return empty_state("No duplicate-size candidates found.");
+    let container = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    container.set_vexpand(true);
+
+    let spinner = gtk4::Spinner::new();
+    spinner.set_spinning(true);
+    spinner.set_size_request(32, 32);
+    spinner.set_halign(gtk4::Align::Center);
+    spinner.set_valign(gtk4::Align::Center);
+    spinner.set_vexpand(true);
+    let status_label = gtk4::Label::new(Some(t("dup.loading")));
+    status_label.add_css_class("dim-label");
+    let loading_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    loading_box.append(&spinner);
+    loading_box.append(&status_label);
+    container.append(&loading_box);
+
+    let control = OperationControl::new();
+    {
+        let control = control.clone();
+        dialog.connect_closed(move |_| control.cancel());
     }
+
+    let container_for_result = container.clone();
+    fs_async::run_blocking(
+        move || compute_duplicate_groups(&candidates, &control),
+        move |groups| {
+            container_for_result.remove(&loading_box);
+            if groups.is_empty() {
+                container_for_result.append(&empty_state(t("dup.empty")));
+                return;
+            }
+            let interactive = build_duplicates_interactive_view(
+                groups,
+                navigate,
+                dialog,
+                refresh_all,
+                undo_stack,
+            );
+            container_for_result.append(&interactive);
+        },
+    );
+
+    container.upcast()
+}
+
+/// Runs the Faz 42 content-hash engine over `candidates`, then fetches each
+/// confirmed duplicate's modified time in the same background pass (a
+/// `stat` call is itself blocking I/O, so it must never run on the GTK
+/// thread — Rule #14). A file whose `stat` fails (removed mid-scan) keeps
+/// its entry with `modified: None` rather than being dropped, since it's
+/// still a legitimate, selectable duplicate (Rule #16).
+fn compute_duplicate_groups(
+    candidates: &[SameSizeCandidateGroup],
+    control: &OperationControl,
+) -> Vec<DuplicateGroupView> {
+    find_duplicates(candidates, control)
+        .into_iter()
+        .map(|group: DuplicateGroup| DuplicateGroupView {
+            size_per_file: group.size_per_file,
+            wasted_size: group.wasted_size,
+            files: group
+                .files
+                .into_iter()
+                .map(|path| {
+                    let modified = veyra_filesystem::stat(&path)
+                        .ok()
+                        .and_then(|item| item.metadata.modified);
+                    DupFileEntry { path, modified }
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// Shared, mutable widgets/state the Duplicate Files tab's helper buttons
+/// (quick-select, clear, trash) all act on.
+struct DuplicatesUi {
+    groups: RefCell<Vec<DuplicateGroupView>>,
+    selected: RefCell<HashSet<VeyraPath>>,
+    checkboxes: RefCell<HashMap<VeyraPath, gtk4::CheckButton>>,
+    list: gtk4::ListBox,
+    summary_label: gtk4::Label,
+    status_label: gtk4::Label,
+    trash_button: gtk4::Button,
+    dialog: adw::Dialog,
+    navigate: Rc<dyn Fn(VeyraPath)>,
+    refresh_all: Rc<dyn Fn()>,
+    undo_stack: SharedUndoStack,
+}
+
+/// Builds the fully interactive Duplicate Files view once the background
+/// hash pass has produced at least one confirmed group.
+fn build_duplicates_interactive_view(
+    groups: Vec<DuplicateGroupView>,
+    navigate: Rc<dyn Fn(VeyraPath)>,
+    dialog: adw::Dialog,
+    refresh_all: Rc<dyn Fn()>,
+    undo_stack: SharedUndoStack,
+) -> gtk4::Widget {
+    let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+    let summary_label = gtk4::Label::new(None);
+    summary_label.add_css_class("dim-label");
+    summary_label.set_xalign(0.0);
+    summary_label.set_margin_start(16);
+    summary_label.set_margin_end(16);
+    summary_label.set_margin_top(12);
+    root.append(&summary_label);
+
+    let helpers = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    helpers.set_margin_start(16);
+    helpers.set_margin_end(16);
+    helpers.set_margin_top(8);
+    let keep_newest_button = gtk4::Button::with_label(t("dup.select_keep_newest"));
+    let keep_oldest_button = gtk4::Button::with_label(t("dup.select_keep_oldest"));
+    let clear_button = gtk4::Button::with_label(t("dup.clear_selection"));
+    helpers.append(&keep_newest_button);
+    helpers.append(&keep_oldest_button);
+    helpers.append(&clear_button);
+    root.append(&helpers);
 
     let list = gtk4::ListBox::new();
     list.add_css_class("boxed-list");
     list.set_selection_mode(gtk4::SelectionMode::None);
-    list.set_margin_top(12);
+    list.set_margin_top(8);
     list.set_margin_bottom(12);
     list.set_margin_start(16);
     list.set_margin_end(16);
 
-    for group in groups {
+    let scroller = gtk4::ScrolledWindow::new();
+    scroller.set_vexpand(true);
+    scroller.set_child(Some(&list));
+    root.append(&scroller);
+
+    let bottom_bar = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    bottom_bar.set_margin_start(16);
+    bottom_bar.set_margin_end(16);
+    bottom_bar.set_margin_top(8);
+    bottom_bar.set_margin_bottom(12);
+    let status_label = gtk4::Label::new(Some(t("dup.selection_status.empty")));
+    status_label.set_hexpand(true);
+    status_label.set_xalign(0.0);
+    let trash_button = gtk4::Button::with_label(t("dup.move_to_trash"));
+    trash_button.add_css_class("destructive-action");
+    trash_button.set_sensitive(false);
+    bottom_bar.append(&status_label);
+    bottom_bar.append(&trash_button);
+    root.append(&bottom_bar);
+
+    update_summary_label(&summary_label, &groups);
+
+    let ui = Rc::new(DuplicatesUi {
+        groups: RefCell::new(groups),
+        selected: RefCell::new(HashSet::new()),
+        checkboxes: RefCell::new(HashMap::new()),
+        list,
+        summary_label,
+        status_label,
+        trash_button: trash_button.clone(),
+        dialog,
+        navigate,
+        refresh_all,
+        undo_stack,
+    });
+
+    render_duplicate_groups(&ui);
+
+    {
+        let ui = ui.clone();
+        keep_newest_button.connect_clicked(move |_| select_all_copies(&ui, true));
+    }
+    {
+        let ui = ui.clone();
+        keep_oldest_button.connect_clicked(move |_| select_all_copies(&ui, false));
+    }
+    {
+        let ui = ui.clone();
+        clear_button.connect_clicked(move |_| clear_selection(&ui));
+    }
+    {
+        let ui = ui.clone();
+        trash_button.connect_clicked(move |_| on_trash_selected_clicked(&ui));
+    }
+
+    root.upcast()
+}
+
+/// Rebuilds `ui.list`'s rows from `ui.groups`'s current contents — called
+/// once up front and again after a successful cleanup, since trashed files
+/// (and any group they collapse below 2 members) must disappear from the
+/// view without a full tab reload.
+fn render_duplicate_groups(ui: &Rc<DuplicatesUi>) {
+    while let Some(child) = ui.list.first_child() {
+        ui.list.remove(&child);
+    }
+    ui.checkboxes.borrow_mut().clear();
+
+    for group in ui.groups.borrow().iter() {
         let expander = adw::ExpanderRow::builder()
-            .title(format!(
-                "{} files, {} each",
-                group.paths.len(),
-                format_size(group.size_bytes)
+            .title(t_plural(
+                "dup.group.copies",
+                group.files.len() as i64,
+                &[
+                    ("count", group.files.len().to_string().as_str()),
+                    ("size", format_size(group.size_per_file).as_str()),
+                ],
             ))
-            .subtitle(format!(
-                "{} total",
-                format_size(group.size_bytes * group.paths.len() as u64)
+            .subtitle(t_fmt(
+                "dup.group.total",
+                &[(
+                    "size",
+                    &format_size(group.size_per_file * group.files.len() as u64),
+                )],
             ))
             .build();
         expander.set_title_lines(1);
         expander.set_subtitle_lines(2);
         expander.add_prefix(&gtk4::Image::from_icon_name("edit-copy-symbolic"));
 
-        for path in &group.paths {
+        for entry in &group.files {
             let member_row = adw::ActionRow::builder()
-                .title(path.file_name().unwrap_or_else(|| path.to_string()))
-                .subtitle(path.to_string())
+                .title(
+                    entry
+                        .path
+                        .file_name()
+                        .unwrap_or_else(|| entry.path.to_string()),
+                )
+                .subtitle(format!(
+                    "{}  ·  {}",
+                    entry.path,
+                    entry
+                        .modified
+                        .map(|dt| dt
+                            .with_timezone(&Local)
+                            .format("%Y-%m-%d %H:%M:%S")
+                            .to_string())
+                        .unwrap_or_else(|| t("dev.metadata.unknown").to_string())
+                ))
                 .build();
             member_row.set_title_lines(1);
             member_row.set_subtitle_lines(2);
-            member_row.add_suffix(&open_in_folder_button(
-                path.clone(),
-                navigate.clone(),
-                dialog.clone(),
+
+            let checkbox = gtk4::CheckButton::new();
+            checkbox.set_valign(gtk4::Align::Center);
+            checkbox.set_active(ui.selected.borrow().contains(&entry.path));
+            {
+                let ui = ui.clone();
+                let path = entry.path.clone();
+                checkbox.connect_toggled(move |checkbox| {
+                    if checkbox.is_active() {
+                        ui.selected.borrow_mut().insert(path.clone());
+                    } else {
+                        ui.selected.borrow_mut().remove(&path);
+                    }
+                    update_selection_status(&ui);
+                });
+            }
+            member_row.add_prefix(&checkbox);
+            member_row.add_suffix(&reveal_in_folder_button(
+                entry.path.clone(),
+                ui.navigate.clone(),
+                ui.dialog.clone(),
             ));
+
+            ui.checkboxes
+                .borrow_mut()
+                .insert(entry.path.clone(), checkbox);
             expander.add_row(&member_row);
         }
 
-        list.append(&expander);
+        ui.list.append(&expander);
     }
 
-    let scroller = gtk4::ScrolledWindow::new();
-    scroller.set_vexpand(true);
-    scroller.set_child(Some(&list));
-    scroller.upcast()
+    update_selection_status(ui);
+}
+
+fn update_summary_label(label: &gtk4::Label, groups: &[DuplicateGroupView]) {
+    let group_count = groups.len();
+    let file_count: usize = groups.iter().map(|g| g.files.len()).sum();
+    let wasted: u64 = groups.iter().map(|g| g.wasted_size).sum();
+    let text = format!(
+        "{} • {} • {}",
+        t_plural(
+            "dup.summary.groups",
+            group_count as i64,
+            &[("count", group_count.to_string().as_str())]
+        ),
+        t_plural(
+            "dup.summary.files",
+            file_count as i64,
+            &[("count", file_count.to_string().as_str())]
+        ),
+        t_fmt("dup.summary.wasted", &[("size", &format_size(wasted))]),
+    );
+    label.set_text(&text);
+}
+
+/// Updates the bottom status label and "Move Selected to Trash" button
+/// sensitivity to match `ui.selected`'s current size — called after every
+/// checkbox toggle and after any programmatic selection change.
+fn update_selection_status(ui: &Rc<DuplicatesUi>) {
+    let selected = ui.selected.borrow();
+    let count = selected.len();
+    if count == 0 {
+        ui.status_label.set_text(t("dup.selection_status.empty"));
+        ui.trash_button.set_sensitive(false);
+        return;
+    }
+
+    let size_by_path: HashMap<VeyraPath, u64> = ui
+        .groups
+        .borrow()
+        .iter()
+        .flat_map(|g| {
+            g.files
+                .iter()
+                .map(move |f| (f.path.clone(), g.size_per_file))
+        })
+        .collect();
+    let total: u64 = selected
+        .iter()
+        .map(|p| size_by_path.get(p).copied().unwrap_or(0))
+        .sum();
+
+    ui.status_label.set_text(&t_plural(
+        "dup.selection_status",
+        count as i64,
+        &[
+            ("count", count.to_string().as_str()),
+            ("size", format_size(total).as_str()),
+        ],
+    ));
+    ui.trash_button.set_sensitive(true);
+}
+
+/// "Select All Copies (Keep Newest/Oldest)": per group, picks the file to
+/// *keep* (the newest, or oldest, by `modified`; a file with unknown
+/// `modified` never wins that comparison, and the first file is kept if
+/// every member's `modified` is unknown) and checks every other member.
+/// Never touches the kept file's own checkbox, so a group is never fully
+/// selected by this helper alone.
+fn select_all_copies(ui: &Rc<DuplicatesUi>, keep_newest: bool) {
+    let checkboxes = ui.checkboxes.borrow();
+    for group in ui.groups.borrow().iter() {
+        if group.files.is_empty() {
+            continue;
+        }
+        let known = group
+            .files
+            .iter()
+            .enumerate()
+            .filter_map(|(index, f)| f.modified.map(|dt| (index, dt)));
+        let keep_index = if keep_newest {
+            known.max_by_key(|(_, dt)| *dt)
+        } else {
+            known.min_by_key(|(_, dt)| *dt)
+        }
+        .map(|(index, _)| index)
+        .unwrap_or(0);
+
+        for (index, entry) in group.files.iter().enumerate() {
+            if index == keep_index {
+                continue;
+            }
+            if let Some(checkbox) = checkboxes.get(&entry.path) {
+                checkbox.set_active(true);
+            }
+        }
+    }
+}
+
+fn clear_selection(ui: &Rc<DuplicatesUi>) {
+    for checkbox in ui.checkboxes.borrow().values() {
+        if checkbox.is_active() {
+            checkbox.set_active(false);
+        }
+    }
+}
+
+/// "Move Selected to Trash": enforces the all-copies-delete-prevention rule
+/// (Rule #38 — at least one file per duplicate group must survive), then
+/// shows the confirmation dialog, then actually trashes on confirmation.
+fn on_trash_selected_clicked(ui: &Rc<DuplicatesUi>) {
+    let selected = ui.selected.borrow().clone();
+    if selected.is_empty() {
+        return;
+    }
+
+    let fully_selected_groups: Vec<String> = ui
+        .groups
+        .borrow()
+        .iter()
+        .filter(|g| g.files.iter().all(|f| selected.contains(&f.path)))
+        .map(|g| {
+            g.files[0]
+                .path
+                .file_name()
+                .unwrap_or_else(|| g.files[0].path.to_string())
+        })
+        .collect();
+
+    if !fully_selected_groups.is_empty() {
+        let dialog = adw::AlertDialog::builder()
+            .heading(t("dup.block_all_copies.title"))
+            .body(t_fmt(
+                "dup.block_all_copies.body",
+                &[("names", &fully_selected_groups.join(", "))],
+            ))
+            .build();
+        dialog.add_responses(&[("ok", t("dup.block_all_copies.close"))]);
+        dialog.set_default_response(Some("ok"));
+        dialog.set_close_response("ok");
+        dialog.present(Some(&ui.dialog));
+        return;
+    }
+
+    let size_by_path: HashMap<VeyraPath, u64> = ui
+        .groups
+        .borrow()
+        .iter()
+        .flat_map(|g| {
+            g.files
+                .iter()
+                .map(move |f| (f.path.clone(), g.size_per_file))
+        })
+        .collect();
+    let total_size: u64 = selected
+        .iter()
+        .map(|p| size_by_path.get(p).copied().unwrap_or(0))
+        .sum();
+    let count = selected.len();
+
+    let confirm = adw::AlertDialog::builder()
+        .heading(t_plural(
+            "dup.confirm.title",
+            count as i64,
+            &[("count", count.to_string().as_str())],
+        ))
+        .body(t_fmt(
+            "dup.confirm.body",
+            &[
+                ("count", count.to_string().as_str()),
+                ("size", format_size(total_size).as_str()),
+            ],
+        ))
+        .build();
+    confirm.add_responses(&[
+        ("cancel", t("dup.confirm.cancel")),
+        ("trash", t("dup.confirm.confirm")),
+    ]);
+    confirm.set_response_appearance("trash", adw::ResponseAppearance::Destructive);
+    confirm.set_default_response(Some("cancel"));
+    confirm.set_close_response("cancel");
+
+    confirm.present(Some(&ui.dialog));
+    let ui = ui.clone();
+    confirm.connect_response(None, move |_, response| {
+        if response == "trash" {
+            trash_selected(&ui, selected.clone());
+        }
+    });
+}
+
+/// Actually moves every path in `selected` to Trash (background thread,
+/// Rule #11/#14), records the batch as one undo step, refreshes the
+/// caller's open panels, and re-renders the tab's list with the trashed
+/// files (and any group they collapsed below 2 members) removed. A file
+/// that fails to trash (permission denied, already gone) is skipped rather
+/// than aborting the whole batch (Rule #18).
+/// `(succeeded, failed)` from a batch `trash_tracked` pass: `succeeded` as
+/// `(original, trashed)` pairs (the shape `UndoableAction::Trash` records),
+/// `failed` as `(original, error)`.
+type TrashBatchResult = (
+    Vec<(VeyraPath, VeyraPath)>,
+    Vec<(VeyraPath, veyra_filesystem::FsError)>,
+);
+
+fn trash_selected(ui: &Rc<DuplicatesUi>, selected: HashSet<VeyraPath>) {
+    let paths: Vec<VeyraPath> = selected.into_iter().collect();
+    let ui = ui.clone();
+    fs_async::run_blocking(
+        move || {
+            let mut succeeded = Vec::new();
+            let mut failed = Vec::new();
+            for path in paths {
+                match veyra_filesystem::trash_tracked(&path) {
+                    Ok(trashed) => succeeded.push((path, trashed)),
+                    Err(err) => failed.push((path, err)),
+                }
+            }
+            (succeeded, failed)
+        },
+        move |(succeeded, failed): TrashBatchResult| {
+            if !succeeded.is_empty() {
+                ui.undo_stack
+                    .borrow_mut()
+                    .record(UndoableAction::Trash(succeeded.clone()));
+                let trashed_paths: HashSet<VeyraPath> = succeeded
+                    .iter()
+                    .map(|(original, _)| original.clone())
+                    .collect();
+
+                let mut groups = ui.groups.borrow_mut();
+                for group in groups.iter_mut() {
+                    group.files.retain(|f| !trashed_paths.contains(&f.path));
+                    group.wasted_size = group
+                        .size_per_file
+                        .saturating_mul(group.files.len().saturating_sub(1) as u64);
+                }
+                groups.retain(|g| g.files.len() >= 2);
+                ui.selected
+                    .borrow_mut()
+                    .retain(|p| !trashed_paths.contains(p));
+
+                update_summary_label(&ui.summary_label, &groups);
+                drop(groups);
+                render_duplicate_groups(&ui);
+                (ui.refresh_all)();
+            }
+
+            if !failed.is_empty() {
+                let dialog = adw::AlertDialog::builder()
+                    .heading(t("dup.trash_error.title"))
+                    .body(
+                        failed
+                            .iter()
+                            .map(|(path, err)| format!("{path}: {err}"))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                    .build();
+                dialog.add_responses(&[("ok", t("dup.block_all_copies.close"))]);
+                dialog.set_default_response(Some("ok"));
+                dialog.set_close_response("ok");
+                dialog.present(Some(&ui.dialog));
+            }
+        },
+    );
 }
 
 /// A small "Open in Folder" icon button: navigates the caller's file browser
@@ -564,6 +1094,27 @@ fn open_in_folder_button(
     button.set_valign(gtk4::Align::Center);
     button.set_tooltip_text(Some("Open in Folder"));
     button.update_property(&[gtk4::accessible::Property::Label("Open in Folder")]);
+    button.connect_clicked(move |_| {
+        navigate(parent_path(&path));
+        dialog.close();
+    });
+    button
+}
+
+/// Same as `open_in_folder_button`, but with the Duplicate Files tab's own
+/// "Reveal in Folder" (Faz 42) label rather than "Open in Folder" — the
+/// exact wording differs, the behavior (navigate the caller's browser
+/// there, then close the analyzer) is identical.
+fn reveal_in_folder_button(
+    path: VeyraPath,
+    navigate: Rc<dyn Fn(VeyraPath)>,
+    dialog: adw::Dialog,
+) -> gtk4::Button {
+    let button = gtk4::Button::from_icon_name("folder-open-symbolic");
+    button.add_css_class("flat");
+    button.set_valign(gtk4::Align::Center);
+    button.set_tooltip_text(Some(t("dup.reveal_in_folder")));
+    button.update_property(&[gtk4::accessible::Property::Label(t("dup.reveal_in_folder"))]);
     button.connect_clicked(move |_| {
         navigate(parent_path(&path));
         dialog.close();

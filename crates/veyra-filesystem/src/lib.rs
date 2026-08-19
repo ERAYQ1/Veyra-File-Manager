@@ -10,6 +10,7 @@ mod analyzer;
 mod archive;
 mod conflict;
 mod dircount;
+mod duplicates;
 mod error;
 mod git;
 mod kind;
@@ -21,10 +22,13 @@ mod progress;
 mod queue;
 
 pub use advanced::{stat_advanced, AdvancedInfo};
-pub use analyzer::{analyze_directory, AnalysisResult, DuplicateGroup, UsageEntry, UsageNode};
+pub use analyzer::{
+    analyze_directory, AnalysisResult, SameSizeCandidateGroup, UsageEntry, UsageNode,
+};
 pub use archive::{create_archive, extract_archive, ArchiveFormat, ArchiveOutcome, SkipReason};
 pub use conflict::{suggest_name, Conflict, ConflictDecision};
 pub use dircount::{count_dir_recursive, DirCount};
+pub use duplicates::{find_duplicates, DuplicateGroup};
 pub use error::FsError;
 pub use git::{
     find_git_root, git_status, query_dir_git_statuses, GitFileStatus, GitRepoStatus, GitStatusError,
