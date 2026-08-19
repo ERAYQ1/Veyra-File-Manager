@@ -399,6 +399,59 @@ mod tests {
         assert_eq!(natural_name_cmp("File", "file"), StdOrdering::Equal);
     }
 
+    /// Faz 47: a full `sort_by` pass (not just pairwise `natural_name_cmp`
+    /// calls) over a mixed-magnitude numeric run, confirming the property
+    /// holds transitively across the whole list, not just for adjacent
+    /// pairs.
+    #[test]
+    fn full_list_sort_orders_mixed_numeric_names_numerically() {
+        let config = SortConfig {
+            key: SortKey::Name,
+            order: SortOrder::Ascending,
+            folders_first: false,
+        };
+        let mut items = [
+            file_with("file20", 0, None, "text/plain", false),
+            file_with("file1", 0, None, "text/plain", false),
+            file_with("file10", 0, None, "text/plain", false),
+            file_with("file2", 0, None, "text/plain", false),
+        ];
+        items.sort_by(|a, b| compare_items(a, b, &config));
+        let names: Vec<&str> = items.iter().map(|i| i.name()).collect();
+        assert_eq!(names, ["file1", "file2", "file10", "file20"]);
+    }
+
+    /// Faz 47: folders sort ahead of files even when interleaved with a
+    /// numeric run that would otherwise place a file first.
+    #[test]
+    fn full_list_sort_keeps_folders_ahead_of_a_numeric_file_run() {
+        let config = SortConfig {
+            key: SortKey::Name,
+            order: SortOrder::Ascending,
+            folders_first: true,
+        };
+        let mut items = [
+            file_with("file2", 0, None, "text/plain", false),
+            dir("zzz_folder"),
+            file_with("file1", 0, None, "text/plain", false),
+            dir("aaa_folder"),
+        ];
+        items.sort_by(|a, b| compare_items(a, b, &config));
+        let names: Vec<&str> = items.iter().map(|i| i.name()).collect();
+        assert_eq!(names, ["aaa_folder", "zzz_folder", "file1", "file2"]);
+    }
+
+    /// Faz 47: natural sort must also treat Turkish diacritics
+    /// case-insensitively via `to_lowercase`, not just ASCII letters.
+    /// (Deliberately avoids Turkish dotted/dotless İ/I, whose Unicode
+    /// case-folding isn't locale-aware and doesn't round-trip to plain
+    /// ASCII "i" — a separate, already-known limitation.)
+    #[test]
+    fn natural_sort_is_case_insensitive_for_turkish_diacritics() {
+        assert_eq!(natural_name_cmp("GÜNEŞ", "güneş"), StdOrdering::Equal);
+        assert_eq!(natural_name_cmp("ÇÖZÜM", "çözüm"), StdOrdering::Equal);
+    }
+
     #[test]
     fn name_sort_is_case_insensitive() {
         let config = SortConfig {

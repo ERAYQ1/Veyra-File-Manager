@@ -1,5 +1,25 @@
 # Changelog
 
+## Faz 47 — Comprehensive Testing Suite & Adversarial Filename Property Tests
+
+Emoji, CJK, RTL (Arapça/İbranice), Türkçe özel karakter, boşluk/sekme ve 255 baytlık sınır boyuttaki dosya isimlerini kapsayan bir zorlayıcı-dosya-ismi test paketi; oluşturmadan kalıcı silmeye tam operasyon zinciri entegrasyon testleri; ve doğal sıralama/oturum kalıcılığı/FTS5 arama sözdizimi için ek UI ve arama mantığı testleri eklendi (Rule #34/#35).
+
+### Eklenenler
+- **`crates/veyra-filesystem/tests/unicode_adversarial.rs` (yeni, 11 test):** Emoji, CJK (Çince/Japonca/Korece), RTL (Arapça/İbranice), Türkçe özel karakter, boşluk/sekme/nokta, özel simge ve 255-baytlık sınır isimleriyle oluşturma/yazma/okuma, yeniden adlandırma, kopyalama/taşıma, çöpe atma/geri yükleme, ZIP ve TAR.GZ sıkıştırma/çıkarma ve `stat` doğrulaması. 255-baytlık sınır ismi, freedesktop.org Trash-spec'inin `.trashinfo` eki (10 bayt) ve ustar TAR başlığının 100-baytlık yol alanı gibi gerçek dosya sistemi/format sınırlarına çarptığı yerlerde bilinçli olarak hariç tutulup ayrı bir "temiz hata, panic değil" testiyle doğrulandı (Rule #15).
+- **`crates/veyra-filesystem/tests/operations_lifecycle.rs` (yeni, 3 test):** Oluştur → yaz → SHA-256 checksum → alt dizine taşı → yeniden adlandır → ZIP'e sıkıştır → farklı dizine çıkar → hash doğrula → çöpe at → geri yükle (Undo) → kalıcı sil uçtan uca zinciri; TAR.GZ dizin yapısı round-trip'i; ve ZIP dışındaki tüm desteklenen arşiv formatlarının (TAR, TAR.XZ, TAR.ZST, 7z) checksum doğrulamalı round-trip testi.
+- **`crates/veyra-search/tests/query_syntax_search.rs` (yeni, 13 test):** `name:`/`size:`/`type:`/`modified:` filtrelerinin gerçek bir FTS5 indeksine karşı tek başına ve birlikte kullanımı, boş/sadece-boşluk sorgular, FTS5 özel karakterlerinin (`"`, `*`, `AND`/`OR`/`NEAR`, parantez) hata vermeden işlenmesi, Unicode/Türkçe dosya adlarında arama ve `remove_path` sonrası indeksten düşme.
+- **`crates/veyra-ui/src/sorting.rs` ve `crates/veyra-ui/src/session.rs` (inline `#[cfg(test)]` genişletmeleri, 9 yeni test):** Karışık büyüklükte sayısal isim serilerinin (`file1`/`file2`/`file10`/`file20`) tam liste `sort_by` ile doğal sıralaması, klasörlerin sayısal dosya serisine rağmen her zaman önce gelmesi, Türkçe büyük/küçük harf duyarsızlığı; bozuk/eksik/boş JSON oturum dosyalarının panic yerine boş oturuma düşmesi, çok sekmeli/Unicode yol içeren oturumların bayt-bayt round-trip'i, sağ panel yol ayrıştırmasının sol panelle aynı davranması.
+
+  (`veyra-ui`'nin iç modülleri `pub(crate)` olduğundan, bu testler ayrı bir harici `tests/` dosyası yerine ilgili modüllerin mevcut `#[cfg(test)]` bloklarına eklendi — dış API sınırının dışına çıkmadan aynı kapsamı sağlıyor.)
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 466 → 501, tamamı geçti.
+
+### Sıradaki Faz
+- Faz 48 onay bekliyor.
+
 ## Faz 46 — Native Packaging (Arch, Fedora, openSUSE, Debian & Standart Kurulum)
 
 Veyra'nın Flatpak dışında ana Linux dağıtımlarında da yerel (native) paketlenebilmesi için `DESTDIR`/`PREFIX` destekli bir kök `Makefile` ve dört dağıtım ailesine (Arch, Fedora/RHEL, openSUSE, Debian/Ubuntu) özel paketleme metadata'sı eklendi; tüm paket dosyalarındaki sürüm numaralarının `Cargo.toml` ile eşleştiğini doğrulayan birim testleri yazıldı.
