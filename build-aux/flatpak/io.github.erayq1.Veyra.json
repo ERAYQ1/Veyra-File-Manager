@@ -1,0 +1,54 @@
+{
+    "id": "io.github.erayq1.Veyra",
+    "runtime": "org.gnome.Platform",
+    "runtime-version": "47",
+    "sdk": "org.gnome.Sdk",
+    "sdk-extensions": [
+        "org.freedesktop.Sdk.Extension.rust-stable"
+    ],
+    "command": "veyra",
+    "finish-args": [
+        "--share=ipc",
+        "--socket=fallback-x11",
+        "--socket=wayland",
+        "--filesystem=host",
+        "--talk-name=org.freedesktop.FileManager1",
+        "--talk-name=org.freedesktop.Notifications",
+        "--talk-name=org.gtk.vfs.*",
+        "--system-talk-name=org.freedesktop.UDisks2"
+    ],
+    "build-options": {
+        "append-path": "/usr/lib/sdk/rust-stable/bin",
+        "env": {
+            "CARGO_HOME": "/run/build/veyra/cargo",
+            "RUST_BACKTRACE": "1"
+        }
+    },
+    "cleanup": [
+        "/include",
+        "/lib/pkgconfig",
+        "/share/man",
+        "*.a",
+        "*.la"
+    ],
+    "modules": [
+        {
+            "name": "veyra",
+            "buildsystem": "simple",
+            "build-commands": [
+                "cargo --offline build --release --workspace --locked",
+                "install -Dm755 target/release/veyra /app/bin/veyra",
+                "install -Dm644 data/io.github.erayq1.Veyra.desktop /app/share/applications/io.github.erayq1.Veyra.desktop",
+                "install -Dm644 data/io.github.erayq1.Veyra.metainfo.xml /app/share/metainfo/io.github.erayq1.Veyra.metainfo.xml",
+                "install -Dm644 data/icons/hicolor/scalable/apps/io.github.erayq1.Veyra.svg /app/share/icons/hicolor/scalable/apps/io.github.erayq1.Veyra.svg"
+            ],
+            "sources": [
+                {
+                    "type": "dir",
+                    "path": "../.."
+                },
+                "cargo-sources.json"
+            ]
+        }
+    ]
+}

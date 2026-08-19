@@ -48,6 +48,17 @@ pub(crate) fn matches_query(name: &str, description: &str, query: &str) -> bool 
 /// application starts on (workspace/startup-notification context) — any
 /// realized widget works, since `GtkWidget::display` doesn't require the
 /// widget to be mapped.
+///
+/// Faz 45: no separate Flatpak/portal code path here on purpose. GIO's
+/// `GDesktopAppInfo` backend detects a sandboxed process itself (the same
+/// `/.flatpak-info` check `system_integration::is_flatpak_sandbox` mirrors
+/// for diagnostics) and transparently proxies this exact call through
+/// `xdg-desktop-portal`'s `OpenURI` portal instead of forking the target
+/// application directly — see `docs/flatpak_permissions.md`'s "XDG Portal
+/// Integration" section. Adding a manual portal call here would duplicate
+/// behavior GIO already provides and (per the "avoid new dependencies when
+/// an existing one already covers the need" rule) would need a new D-Bus
+/// portal crate for no behavioral gain.
 pub(crate) fn launch(
     app: &gio::AppInfo,
     file: &gio::File,

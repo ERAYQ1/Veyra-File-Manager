@@ -59,6 +59,39 @@ pub(crate) fn notify_operation_complete(window: &adw::ApplicationWindow, title: 
     app.send_notification(Some("operation-complete"), &notification);
 }
 
+/// True when this process is running inside a Flatpak sandbox. Checks the
+/// same two signals `flatpak-builder`-produced apps and GLib itself agree
+/// on: the `/.flatpak-info` file every Flatpak sandbox bind-mounts in (the
+/// authoritative source — see `flatpak(5)`), falling back to the
+/// `FLATPAK_ID` environment variable Flatpak also sets, in case a future
+/// sandbox variant ever omits the file. Cheap enough (one `Path::exists`,
+/// one env lookup) to call on every launch decision rather than caching.
+///
+/// Faz 45: nothing in `veyra-ui` branches its *behavior* on this today —
+/// `gio::AppInfo::launch` (`open_with.rs`), `gio::Notification`
+/// (`notify_operation_complete` above), and `gio::AppInfo::default_for_type`/
+/// `set_as_default_for_type` (`is_default_file_manager`/
+/// `set_as_default_file_manager` above) already detect the sandbox
+/// themselves at the GLib level and transparently redirect through the
+/// matching XDG portal (`OpenURI`, `Notification`, the default-apps
+/// `mimeapps.list` proxy) instead of touching the host directly — see
+/// `docs/flatpak_permissions.md`. This function exists for diagnostics
+/// (logged once at startup) and for future code that genuinely needs to
+/// know, rather than to gate any of the above.
+pub(crate) fn is_flatpak_sandbox() -> bool {
+    is_sandboxed(
+        std::path::Path::new("/.flatpak-info").exists(),
+        std::env::var_os("FLATPAK_ID").is_some(),
+    )
+}
+
+/// The actual (env-free, filesystem-free) decision `is_flatpak_sandbox`
+/// makes — split out so it's unit testable without mutating real process
+/// state (racy across parallel `cargo test` threads).
+fn is_sandboxed(flatpak_info_exists: bool, flatpak_id_set: bool) -> bool {
+    flatpak_info_exists || flatpak_id_set
+}
+
 /// The result of parsing a `GApplication` `command-line` invocation's
 /// argument vector (argv[0], the program name, already excluded by the
 /// caller). Kept as a separate, GTK-free struct so parsing itself is unit
@@ -155,5 +188,92 @@ mod tests {
     #[test]
     fn desktop_file_opts_into_notifications() {
         assert!(DESKTOP_FILE.contains("X-GNOME-UsesNotifications=true"));
+    }
+
+    #[test]
+    fn sandbox_detected_via_flatpak_info_file_alone() {
+        assert!(is_sandboxed(true, false));
+    }
+
+    #[test]
+    fn sandbox_detected_via_flatpak_id_env_alone() {
+        assert!(is_sandboxed(false, true));
+    }
+
+    #[test]
+    fn not_sandboxed_when_neither_signal_present() {
+        assert!(!is_sandboxed(false, false));
+    }
+
+    /// Faz 45 requirement A: the Flatpak manifest declares exactly the
+    /// minimal permission set `docs/flatpak_permissions.md` justifies — a
+    /// drift here (an added/removed `finish-args` entry with no matching
+    /// doc/manifest update) would silently break the "every permission is
+    /// documented" guarantee that document promises the reader.
+    const MANIFEST: &str = include_str!("../../../build-aux/flatpak/io.github.erayq1.Veyra.json");
+
+    #[test]
+    fn manifest_is_valid_json_with_the_expected_app_id_and_runtime() {
+        let value: serde_json::Value =
+            serde_json::from_str(MANIFEST).expect("manifest must be valid JSON");
+        assert_eq!(value["id"], "io.github.erayq1.Veyra");
+        assert_eq!(value["runtime"], "org.gnome.Platform");
+        assert_eq!(value["sdk"], "org.gnome.Sdk");
+        assert_eq!(value["command"], "veyra");
+    }
+
+    #[test]
+    fn manifest_finish_args_match_the_documented_minimal_set() {
+        let value: serde_json::Value = serde_json::from_str(MANIFEST).unwrap();
+        let finish_args: Vec<&str> = value["finish-args"]
+            .as_array()
+            .expect("finish-args must be an array")
+            .iter()
+            .map(|v| v.as_str().expect("finish-args entries must be strings"))
+            .collect();
+        for expected in [
+            "--share=ipc",
+            "--socket=fallback-x11",
+            "--socket=wayland",
+            "--filesystem=host",
+            "--talk-name=org.freedesktop.FileManager1",
+            "--talk-name=org.freedesktop.Notifications",
+            "--talk-name=org.gtk.vfs.*",
+            "--system-talk-name=org.freedesktop.UDisks2",
+        ] {
+            assert!(
+                finish_args.contains(&expected),
+                "manifest is missing finish-args entry {expected:?}"
+            );
+        }
+        // No permission beyond the documented, justified set (Kural #20's
+        // "keep sandbox permissions minimal" spirit) — every entry present
+        // must be one of the eight `docs/flatpak_permissions.md` covers.
+        assert_eq!(finish_args.len(), 8, "unexpected extra finish-args entry");
+    }
+
+    #[test]
+    fn manifest_references_the_committed_cargo_sources_file() {
+        let value: serde_json::Value = serde_json::from_str(MANIFEST).unwrap();
+        let sources = value["modules"][0]["sources"]
+            .as_array()
+            .expect("module must declare sources");
+        assert!(sources.iter().any(|s| s == "cargo-sources.json"));
+    }
+
+    /// Real cargo-sources.json, generated by `flatpak-cargo-generator.py`
+    /// against `Cargo.lock` (see `build-aux/flatpak/README.md`) — not a
+    /// placeholder, so it's worth checking it's still well-formed and
+    /// non-empty rather than just present.
+    const CARGO_SOURCES: &str = include_str!("../../../build-aux/flatpak/cargo-sources.json");
+
+    #[test]
+    fn cargo_sources_is_valid_json_and_non_empty() {
+        let value: serde_json::Value =
+            serde_json::from_str(CARGO_SOURCES).expect("cargo-sources.json must be valid JSON");
+        let sources = value
+            .as_array()
+            .expect("cargo-sources.json must be an array");
+        assert!(!sources.is_empty());
     }
 }

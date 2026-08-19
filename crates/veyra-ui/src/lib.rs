@@ -79,6 +79,13 @@ pub const APP_ID: &str = "io.github.erayq1.Veyra";
 /// Blocks the calling thread until the GTK main loop exits. Must be called on
 /// the same thread the process started on (GTK main thread requirement).
 pub fn run(app_id: &str, cache_dir: &Path) -> glib::ExitCode {
+    // Faz 45: diagnostic only — see `system_integration::is_flatpak_sandbox`'s
+    // doc comment for why nothing below branches on this.
+    tracing::info!(
+        sandboxed = system_integration::is_flatpak_sandbox(),
+        "sandbox environment detected"
+    );
+
     let app = Application::builder()
         .application_id(app_id)
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)

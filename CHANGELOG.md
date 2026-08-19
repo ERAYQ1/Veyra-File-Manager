@@ -1,5 +1,35 @@
 # Changelog
 
+## Faz 45 — Flatpak Packaging & Sandbox Security (Flatpak & XDG Portal Entegrasyonu)
+
+Veyra için GNOME standartlarına uyumlu bir Flatpak manifesti ve gerçek (üretilmiş, placeholder olmayan) `cargo-sources.json` bağımlılık listesi eklendi; sandbox izinleri sekiz gerekçelendirilmiş `finish-args` girdisiyle katı biçimde minimum tutuldu; dosya açma/bildirim/varsayılan-uygulama işlemlerinin GIO üzerinden zaten XDG Portalları'na şeffaf biçimde yönlendiğini doğrulayan sandbox tespiti ve dokümantasyon eklendi.
+
+### Eklenenler
+- **`build-aux/flatpak/io.github.erayq1.Veyra.json` (yeni manifest):** `runtime: org.gnome.Platform//47`, `sdk: org.gnome.Sdk//47` + `org.freedesktop.Sdk.Extension.rust-stable`, `command: veyra`. `finish-args`: `--share=ipc`, `--socket=fallback-x11`, `--socket=wayland`, `--filesystem=host`, `--talk-name=org.freedesktop.FileManager1`, `--talk-name=org.freedesktop.Notifications`, `--talk-name=org.gtk.vfs.*`, `--system-talk-name=org.freedesktop.UDisks2` — başka hiçbir izin yok. Tek `cargo` modülü: `cargo --offline build --release --workspace --locked` + `.desktop`/`.metainfo.xml`/simgenin `/app/share/` altına `install -Dm`'i.
+- **`build-aux/flatpak/cargo-sources.json` (yeni, üretilmiş):** Resmi `flatpak-cargo-generator.py` betiği gerçek `Cargo.lock`'a karşı çalıştırılarak üretildi — 393 crate girdisi içeren gerçek, doğrulanmış bir dosya; placeholder/boş dosya değil.
+- **`build-aux/flatpak/README.md` (yeni):** `flatpak-builder` ile derleme talimatı ve `cargo-sources.json`'ı `Cargo.lock` değiştiğinde yeniden üretme adımları.
+- **`docs/flatpak_permissions.md` (yeni):** Sekiz `finish-args` girdisinin her biri için gerekçe + "bu iznin vermediği şey" tablosu, ve `open_with.rs`/`gio::Notification`/`is_default_file_manager` gibi GIO API'lerinin sandbox içinde zaten şeffaf biçimde ilgili XDG Portalına (`OpenURI`, `Notification`, `mimeapps.list` proxy) yönlendiğini açıklayan bir "XDG Portal Rolü" bölümü.
+- **`crates/veyra-ui/src/system_integration.rs`:** `is_flatpak_sandbox()` (`/.flatpak-info` + `FLATPAK_ID` env değişkeni tespiti, saf/test edilebilir `is_sandboxed` yardımcı fonksiyonuyla ayrıştırılmış) — `lib.rs::run()` başlangıcında tanılama logu olarak kullanılıyor. 7 yeni birim testi: sandbox tespiti (3), manifest JSON sözdizimi + `app-id`/`runtime`/`command` doğrulaması, manifest `finish-args`'ının bu belgeyle birebir eşleştiğini doğrulayan test (girdi sayısı dahil — fazla/eksik izin sessizce kayamaz), manifest'in `cargo-sources.json`'ı kaynak olarak referans aldığının doğrulanması, `cargo-sources.json`'ın geçerli/boş-olmayan JSON olduğunun doğrulanması.
+- **`crates/veyra-ui/src/open_with.rs`:** `launch()`'a, GIO'nun `GDesktopAppInfo` arka ucunun sandbox'ı kendisi tespit edip bu çağrıyı doğrudan host'ta fork etmek yerine şeffaf biçimde `OpenURI` portalı üzerinden yönlendirdiğini — ve bu yüzden burada elle bir portal çağrısı yazılmadığını — açıklayan dokümantasyon eklendi.
+
+### Kapsam kararları
+- `open_with.rs`/bildirimler/varsayılan-uygulama sorguları için elle bir portal D-Bus çağrısı (örn. yeni bir `ashpd` bağımlılığı) **yazılmadı** — GIO'nun `gio::AppInfo::launch`/`gio::Notification`/`default_for_type`/`set_as_default_for_type` API'leri, GLib seviyesinde sandbox'ı zaten kendileri tespit edip ilgili XDG Portalına yönlendiriyor (bu, Nautilus/Files gibi diğer GNOME uygulamalarının da özel bir portal kodu yazmadan aynı GIO çağrılarını kullanmasının nedeni). Test edilemeyen/doğrulanamayan spekülatif portal kodu yazmak yerine (`AGENTS.md` Kural #48/global kural: "doğrulanmadan done denmez"), mevcut doğru davranış dokümante edildi ve `is_flatpak_sandbox()` yalnızca tanılama/gelecekteki gerçek ihtiyaçlar için eklendi.
+- `--filesystem=host` bilinçli olarak geniş tutuldu (bkz. `docs/flatpak_permissions.md`) — bir dosya yöneticisinin işi tanım gereği kullanıcının seçtiği her yolu (kök, bağlı sürücüler, `/mnt`, `/media`) gezebilmek; `--filesystem=home` gibi daha dar bir izin bu temel işlevi sessizce kırardı. Ayrıcalıklı işlemler yine bu izinden bağımsız olarak ayrı bir Polkit/`pkexec` yardımcısından geçiyor (Kural #20).
+- `flatpak-builder` bu ortamda kurulu olmadığından gerçek bir `flatpak-builder --user --install` derlemesi çalıştırılamadı; bunun yerine manifest JSON sözdizimi (Rust testi + `python3 -m json.tool`), `cargo-sources.json`'ın gerçek üretimi/geçerliliği, ve `appstreamcli validate` ile metainfo doğrulaması yapıldı — bu sınırlama net biçimde belirtiliyor, "derlendi" iddia edilmiyor.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 452 → 459, tamamı geçti (yeni: `veyra-ui::system_integration` +7 test).
+- `cargo build --workspace`: temiz, 0 warning.
+- `desktop-file-validate data/io.github.erayq1.Veyra.desktop`: yalnızca önceden var olan kategori hint'i (Faz 44'ten, kapsam dışı).
+- `appstreamcli validate --pedantic data/io.github.erayq1.Veyra.metainfo.xml`: yalnızca ulaşılamayan-URL uyarıları (yayınlanmamış repo) + pedantik app-id büyük harf notu — hata yok.
+- `python3 -c "import json; json.load(open('build-aux/flatpak/io.github.erayq1.Veyra.json'))"` ve aynısı `cargo-sources.json` için: her ikisi de geçerli JSON.
+- `flatpak-builder` bu ortamda mevcut değil — gerçek bir sandbox derlemesi çalıştırılamadı (yukarıdaki Kapsam kararları'na bakın).
+
+### Sıradaki Faz
+- Faz 46 onay bekliyor.
+
 ## Faz 44 — System Integration (Linux Sistem & Masaüstü Entegrasyonu)
 
 Veyra'yı Linux masaüstünün doğal bir parçası haline getiren sistem entegrasyonu: `.desktop` dosyası zenginleştirildi, varsayılan dosya yöneticisi durumu Ayarlar'dan sorgulanıp ayarlanabiliyor, tekil örnek (`GApplication`) artık gerçek `command-line` işleme ile çalışıyor (CLI çoklu dizin/dosya açma, `--new-window`, `--preferences`), ve uzun süren arka plan işlemleri pencere odakta değilken masaüstü bildirimi gönderiyor.
