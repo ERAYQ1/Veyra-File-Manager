@@ -331,6 +331,7 @@ pub(crate) fn build_window(
         navigate.clone(),
         &undo_stack,
     );
+    setup_storage_dashboard_action(app, &window, &panels, navigate.clone(), &undo_stack);
     setup_terminal_actions(app, &window, &panels, &focused);
     setup_terminal_as_root_actions(app, &window, &panels, &focused);
     setup_network_actions(&window, navigate);
@@ -2094,6 +2095,38 @@ fn setup_disk_analyzer_actions(
     }
     window.add_action(&action_analyze_current);
     app.set_accels_for_action("win.analyze-disk-current", &["<Primary><Shift>u"]);
+}
+
+/// Registers the Faz 43 `win.show-storage-dashboard` action (`Ctrl+Shift+I`),
+/// opening the Smart Storage Dashboard scoped to the user's Home directory.
+fn setup_storage_dashboard_action(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    navigate: Rc<dyn Fn(VeyraPath)>,
+    undo_stack: &SharedUndoStack,
+) {
+    let refresh_all: Rc<dyn Fn()> = {
+        let panels = panels.clone();
+        Rc::new(move || refresh_all_tabs(&panels))
+    };
+
+    let action = gio::SimpleAction::new("show-storage-dashboard", None);
+    {
+        let window = window.clone();
+        let undo_stack = undo_stack.clone();
+        action.connect_activate(move |_, _| {
+            dialogs::storage_dashboard_dialog::show(
+                &window,
+                VeyraPath::from_local(glib::home_dir()),
+                navigate.clone(),
+                refresh_all.clone(),
+                undo_stack.clone(),
+            );
+        });
+    }
+    window.add_action(&action);
+    app.set_accels_for_action("win.show-storage-dashboard", &["<Primary><Shift>i"]);
 }
 
 /// Registers the Faz 23 `win.open-terminal-here-selected` (context menu

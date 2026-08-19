@@ -13,6 +13,7 @@ use crate::devices::{self, DeviceEntry};
 use crate::dialogs;
 use crate::dnd::{self, DropExecutor};
 use crate::fs_async;
+use crate::i18n::t;
 use crate::network;
 use crate::thumbnails::ThumbnailService;
 use crate::undo::SharedUndoStack;
@@ -43,6 +44,7 @@ pub(crate) fn build(
     for (label, icon, path, kind) in places_entries() {
         root.append(&row(label, icon, path, kind, &navigate));
     }
+    root.append(&storage_dashboard_row());
 
     let bookmarks_section = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     bookmarks_section.append(&section_heading("Bookmarks"));
@@ -255,6 +257,30 @@ pub(crate) fn build(
         .child(&root)
         .build();
     scrolled.upcast()
+}
+
+/// The Faz 43 "Storage" row: unlike every other Places entry, it doesn't
+/// navigate — it fires `win.show-storage-dashboard` directly (same pattern
+/// as the Network section's "Connect to Server…" row below), opening the
+/// Smart Storage Dashboard instead.
+fn storage_dashboard_row() -> gtk4::Widget {
+    let button = gtk4::Button::builder().css_classes(["flat"]).build();
+    button.set_action_name(Some("win.show-storage-dashboard"));
+    button.set_accessible_role(gtk4::AccessibleRole::Button);
+    button.update_property(&[gtk4::accessible::Property::Label(t(
+        "storage.sidebar.label",
+    ))]);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    content.append(&gtk4::Image::from_icon_name("drive-harddisk-symbolic"));
+    let text = gtk4::Label::new(Some(t("storage.sidebar.label")));
+    text.set_xalign(0.0);
+    text.set_hexpand(true);
+    text.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    content.append(&text);
+    button.set_child(Some(&content));
+
+    button.upcast()
 }
 
 fn places_entries() -> Vec<(&'static str, &'static str, VeyraPath, &'static str)> {

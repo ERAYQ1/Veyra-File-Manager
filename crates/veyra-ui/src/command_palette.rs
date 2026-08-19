@@ -209,6 +209,14 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
             action_target: None,
         },
         CommandItem {
+            id: "storage-dashboard",
+            title: "Smart Storage Dashboard…",
+            category: "Tools",
+            icon_name: "drive-harddisk-symbolic",
+            action_name: "win.show-storage-dashboard",
+            action_target: None,
+        },
+        CommandItem {
             id: "connect-server",
             title: "Connect to Server…",
             category: "Tools",

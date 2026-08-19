@@ -1,5 +1,30 @@
 # Changelog
 
+## Faz 43 — Smart Storage Dashboard (`veyra-filesystem` entegrasyonu / `veyra-ui`)
+
+Tek bir pencerede kök dosya sisteminin doluluk durumunu, Home dizinindeki en büyük klasörleri, en son kullanılan dosyaları ve mükerrer dosya temizleme fırsatını gösteren **Smart Storage Dashboard** eklendi — kenar çubuğundaki yeni "Storage" satırından, komut paletinden (`Ctrl+K`) veya `Ctrl+Shift+I` kısayolundan açılıyor.
+
+### Eklenenler
+- **`crates/veyra-ui/src/dialogs/storage_dashboard_dialog.rs` (yeni modül):** `show(parent, home, navigate, refresh_all, undo_stack)` — diyalog anında açılıp bir spinner gösteriyor; kök dosya sisteminin kullanım bilgisi (`devices::query_usage`), Home dizininin `veyra_filesystem::analyze_directory` taraması (en büyük klasörler + aynı-boyut mükerrer aday listesi, tek geçişte) ve Recent Files kaydının anlık görüntüsü tek bir arka plan işinde (`fs_async::run_blocking`, Kural #11/#12) toplanıyor. Dört kart: **Storage Gauge** (`GtkProgressBar` + Used/Free/Total özeti, `gauge_percent`/`gauge_summary_label` saf fonksiyonları), **Largest Folders** (ilk 5 klasör + "Analyze…" butonuyla tam Disk Analyzer'ı açma), **Recent Files** (ilk 5 dosya, tıklanınca klasörüne gidip paneli kapatma) ve **Duplicates** (aynı-boyut aday sayısı anında görünür; "Scan Duplicates" butonu tıklanınca `find_duplicates`'i (Faz 42) yeniden dosya sistemini taramadan, zaten elde edilmiş adaylar üzerinde arka planda çalıştırıp doğrulanmış grup sayısı + boşa harcanan alanı gösteriyor; "Open in Disk Analyzer…" her zaman tam interaktif temizleme görünümüne yönlendiriyor). `gauge_percent`, `gauge_summary_label`, `take_top`, `duplicate_summary` saf fonksiyonları için 7 birim testi.
+- **`crates/veyra-ui/src/window.rs`:** `setup_storage_dashboard_action` — `win.show-storage-dashboard` eylemi (`Ctrl+Shift+I`; Faz 20'nin `Ctrl+Shift+U`'su zaten `win.analyze-disk-current`'e ait olduğundan farklı bir kısayol seçildi), Home dizinini `glib::home_dir()` ile çözüp diyaloğu açıyor.
+- **`crates/veyra-ui/src/sidebar.rs`:** Places bölümünün altına, `win.connect-to-server` satırıyla aynı desende (`navigate` yerine doğrudan `set_action_name`) çalışan bir "Storage" satırı eklendi.
+- **`crates/veyra-ui/src/command_palette.rs`:** Tools kategorisine "Smart Storage Dashboard…" komutu eklendi.
+- **`i18n.rs`:** `storage.*` altında ~20 yeni anahtar (diyalog başlığı, kenar çubuğu etiketi, dört kartın başlık/boş-durum/buton metinleri, tekil/çoğul mükerrer özet varyantları) — hem `EN` hem `TR` katalogları.
+
+### Kapsam kararları
+- Doluluk göstergesi Home dizinini değil kök dosya sistemini (`/`) ölçüyor — "Sürücü Doluluk Göstergesi" kavramsal olarak tüm sürücünün doluluğu, tek bir alt dizinin değil; `devices::query_usage`/`usage_fraction`/`format_usage` (Faz 17) doğrudan yeniden kullanıldı, kopya kod yok.
+- Duplicates kartı diyalog açılışında içerik hash'i taramıyor — aynı-boyut aday listesi zaten Largest Folders için yapılan `analyze_directory` geçişinin bir yan ürünü (ücretsiz), ama gerçek `find_duplicates` içerik-hash geçişi büyük ev dizinlerinde saniyeler sürebilir; panelin anında açılması gerektiğinden (Kural #11) bu iş "Scan Duplicates" butonuna kadar erteleniyor.
+- Largest Folders/Duplicates kartlarındaki "Analyze…"/"Open in Disk Analyzer…" butonları yeni bir özet görünüm inşa etmek yerine mevcut Disk Analyzer diyaloğunu (Faz 20/42) olduğu gibi açıyor — Breakdown/Largest Files/Duplicate Files sekmelerinin ayrı bir "mini" kopyasını yazmak kod tekrarı ve bakım yükü olurdu.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 437 → 444, tamamı geçti (yeni: `veyra-ui::dialogs::storage_dashboard_dialog` 7 test).
+- `cargo build --workspace`: temiz, 0 warning.
+
+### Sıradaki Faz
+Faz 44 — onay bekleniyor.
+
 ## Faz 42 — Duplicate Finder: Disk Analyzer İçinde Çift Dosya Bulucu (`veyra-filesystem` / `veyra-ui`)
 
 Faz 20'nin boyut-eşleşmesine dayalı "aday" listesi, gerçek içerik hash'iyle kesinleştiren 3 aşamalı bir motora (`crates/veyra-filesystem/src/duplicates.rs`) bağlandı ve Disk Analyzer'a interaktif bir **Duplicate Files** sekmesi eklendi: her dosyanın yanında seçim kutusu, "Select All Copies (Keep Newest/Oldest)" hızlı seçim yardımcıları ve — her grupta en az bir kopyanın korunmasını zorunlu kılan, asla otomatik silme yapmayan, Çöp Kutusu + `Ctrl+Z` ile geri alınabilir — güvenli bir "Move Selected to Trash" temizleme akışı.

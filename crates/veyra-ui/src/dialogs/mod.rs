@@ -14,3 +14,4 @@ pub(crate) mod preferences_dialog;
 pub(crate) mod properties_dialog;
 pub(crate) mod rename_dialog;
 pub(crate) mod shortcuts_help_dialog;
+pub(crate) mod storage_dashboard_dialog;
