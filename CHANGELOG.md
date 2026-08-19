@@ -1,5 +1,57 @@
 # Changelog
 
+## Faz 49 — Performance Benchmarks & 1M Scaling Suite
+
+100 / 1.000 / 10.000 / 100.000 / 1.000.000 ölçeklerinde dizin tarama verimini, `FAST_ATTRIBUTES` vs `FULL_ATTRIBUTES` tembel metaveri kazanımını, gerçek işlem RSS'i üzerinden sınırlı bellek kullanımını, FTS5 arama gecikmesini, thumbnail L1 önbellek erişim hızını ve kopyalama/taşıma verimini ölçen bir performans kıyaslama paketi eklendi; sonuçlar `docs/benchmarks.md`'de tablolanıp `docs/performance-budget.md`'nin hedef bütçeleriyle karşılaştırıldı.
+
+### Eklenenler
+- **`crates/veyra-filesystem/tests/benchmarks_scaling.rs` (yeni, 9 test):** `read_dir_chunked` verimi 100/1K/10K/100K/1M ölçeğinde (gerçek dosyalarla, 1M dahil — tmpfs üzerinde oluşturma ~2sn + tarama ~6sn, `#[ignore]` gerektirmeyecek kadar hızlı); `read_dir` (`FULL_ATTRIBUTES`) ile `read_dir_chunked` (`FAST_ATTRIBUTES`) arasındaki 10K ölçekli hız karşılaştırması; `/proc/self/status`'tan `VmRSS` okuyarak 100K ögelik taramada gerçek bellek büyümesinin sınırlı kaldığını kanıtlayan test (yeni bağımlılık yok — stdlib ile); 50MB dosya kopyalama/taşıma verim testleri.
+- **`crates/veyra-search/tests/benchmarks_search_latency.rs` (yeni, 1 test):** 10.000 dosya indekslenip dar/geniş/isabetsiz üç sorgu türü için FTS5 arama gecikmesi ölçülüyor.
+- **`crates/veyra-ui/src/thumbnails.rs` (inline `#[cfg(test)]` genişletmesi, 1 yeni test):** L1 LRU önbelleğin 100.000 put/get işlemindeki ortalama erişim süresini ölçen `l1_lru_cache_access_is_fast_at_scale`.
+- **`docs/benchmarks.md` (yeni):** Yukarıdaki tüm ölçümlerin gerçek sayılarla tablolandığı rapor; `docs/performance-budget.md`'nin hedef bütçeleriyle karşılaştırma ve "toplam tarama süresi" ile "ilk batch görünürlük süresi" arasındaki farkın açıklığa kavuşturulması.
+
+### Ölçüm bulguları (öne çıkanlar — tam tablo `docs/benchmarks.md`'de)
+- Dizin tarama verimi 100'den 1M'e kadar ~115K–184K dosya/sn aralığında düz kalıyor — gizli bir O(n²) davranış yok.
+- `FAST_ATTRIBUTES` 10K ölçekte `FULL_ATTRIBUTES`'tan ~2,5× hızlı (52,5ms vs 133ms) — Rule #30'un tembel-metaveri tasarımının gerçek kazancı doğrulandı.
+- 100K ögelik bir taramada ölçülebilir RSS artışı yok (~0kB) — bounded-memory iddiası artık batch-boyutu muhasebesinin ötesinde gerçek bellek ölçümüyle destekleniyor.
+- FTS5 araması dar/isabetsiz sorgularda <300µs; 500 sonuçla dolan geniş bir sorguda 14ms (`RESULT_LIMIT` nedeniyle sıralama maliyeti) — ikisi de kullanıcı için "anlık" hissettiren eşiğin altında.
+- `SearchIndex::index_entry`'nin çağrı-başına-transaction tasarımı 10K dosyayı indekslemeyi ~23sn'ye mal ediyor — arama gecikmesini etkilemiyor (indeksleme arka planda düşük öncelikli thread'de çalışıyor) ama gelecekteki bir indeksleyici-verimliliği fazı için not edildi.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 527 → 538, tamamı geçti (toplam süre ~35sn — 1M ölçekli tarama ve 10K FTS5 indeksleme testleri baskın maliyet).
+
+### Sıradaki Faz
+- Faz 50 onay bekliyor.
+
+## Faz 48 — Security Testing & Adversarial Hardening (Güvenlik & Dayanıklılık Test Paketi)
+
+Kötü niyetli symlink'ler (döngüler, hassas hedefler, chmod kaçışı), kötü niyetli/bozuk arşivler, yetkisizlik/TOCTOU/işlem-sırasında-silinen-dosya senaryoları ve bozuk yapılandırma/veritabanı dosyalarını kapsayan bir güvenlik test paketi eklendi. Test yazımı sırasında `chmod_recursive`'da gerçek bir Kural #22 ihlali bulundu ve düzeltildi.
+
+### Bulunan ve Düzeltilen Güvenlik Açığı
+- **`crates/veyra-filesystem/src/ops.rs` — `chmod_recursive` symlink hedefini değiştiriyordu:** Linux'ta `lchmod` syscall'ı bulunmadığından, bir symlink üzerinde `chmod()` her zaman hedefi takip eder. `chmod_recursive_walk`, dizin içindeki her dosya-olmayan ögeye (symlink dahil) koşulsuz `set_permissions` çağırıyordu — bu, dizin içinde `/etc/shadow` veya başka bir dosyaya işaret eden bir symlink varsa, `chmod_recursive`'ın o hedefin izinlerini sessizce değiştirebileceği anlamına geliyordu (kanıtlandı: kendi kontrolündeki bir "victim" dosyasına işaret eden symlink içeren dizinde `chmod_recursive` çalıştırılınca victim'in izinleri `644` → `700` değişti). **Düzeltme:** `chmod_recursive_walk` artık enumerasyonda `FileType::SymbolicLink` gördüğü her ögeyi (ve `chmod_recursive` girişinde kök ögenin kendisini) tamamen atlıyor — ne chmod'luyor ne de içine giriyor. `crates/veyra-filesystem/tests/security_adversarial.rs`'deki `chmod_recursive_never_modifies_a_symlinks_target_permissions` ve `chmod_recursive_skips_a_symlinked_root_entirely` regresyon testleriyle doğrulandı.
+
+### Eklenenler
+- **`crates/veyra-filesystem/tests/security_adversarial.rs` (yeni, 23 test):**
+  - **Symlink saldırıları:** karşılıklı döngü (`a↔b`) `count_dir_recursive`/`analyze_directory`'de takılmıyor; kendine-işaret eden symlink `read_dir_chunked`'de takılmıyor; bir symlink kendi (küçük) boyutunu/türünü raporluyor, hassas hedefin içeriğini değil; yukarıdaki `chmod_recursive` regresyon testleri.
+  - **Kötü niyetli/bozuk arşivler:** iç içe `../` path traversal ZIP'te hedef dışına çıkamıyor; rastgele baytlarla bozulmuş ve ortadan kesilmiş ZIP/TAR/TAR.GZ başlıkları panic yerine temiz hata veya boş+hatalı `outcome` döndürüyor; arşiv içi symlink girdisi asla diske yazılmıyor.
+  - **Yetkisizlik & TOCTOU:** `chmod 0000` dosya/dizinlerde `stat`/`read_dir`/`copy`/`delete` zarif hata veriyor; çağrıdan hemen önce silinen dosyalarda `stat`/`copy` `FsError::NotFound` döndürüyor (panic yok); `find_duplicates` hashleme öncesi kaybolan bir aday dosyayı atlayıp geçerli çiftleri yine de onaylıyor; `analyze_directory` erişilemeyen bir alt dizini atlayıp taramanın geri kalanını tamamlıyor.
+  - **Bozuk veri & kötü niyetli isimler:** `\u{202E}` bidi override `has_bidi_override` ile tespit ediliyor ve panic'e yol açmıyor; null byte içeren isimler `validate_filename` tarafından reddediliyor.
+- **`crates/veyra-search/tests/security_corrupt_index.rs` (yeni, 3 test):** Rastgele baytlarla bozulmuş, sıfır baytlık ve SQLite başlığı ortadan kesilmiş `search_index.db` dosyalarının `SearchIndex::open` ile panic yerine temiz hata (veya güvenli sıfırdan yeniden oluşturma) döndürdüğünü doğrular.
+
+### Kapsam kararları
+- Gerçek `/etc/shadow` gibi sistem dosyalarına symlink oluşturup okumak hem taşınabilir olmadığından hem de gereksiz risk taşıdığından, "hassas hedef" testleri kendi kontrolündeki bir sahte-hassas dosyaya işaret eden symlink'lerle yürütüldü — asıl doğrulanan şey (bir symlink'in kendi metadata'sını raporlaması, hedefinkini değil) aynı kalıyor.
+- Gerçek eşzamanlı bir yarış durumu (dosya taranırken başka bir thread'in onu silmesi) yerine, "çağrıdan hemen önce silinmiş"/"izinsiz" durumları kullanıldı — aynı hata-yönetimi kod yolunu deterministik biçimde tetikliyor, gerçek bir race koşulundan daha güvenilir ve flaky olmayan bir test.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 501 → 527, tamamı geçti.
+
+### Sıradaki Faz
+- Faz 49 onay bekliyor.
+
 ## Faz 47 — Comprehensive Testing Suite & Adversarial Filename Property Tests
 
 Emoji, CJK, RTL (Arapça/İbranice), Türkçe özel karakter, boşluk/sekme ve 255 baytlık sınır boyuttaki dosya isimlerini kapsayan bir zorlayıcı-dosya-ismi test paketi; oluşturmadan kalıcı silmeye tam operasyon zinciri entegrasyon testleri; ve doğal sıralama/oturum kalıcılığı/FTS5 arama sözdizimi için ek UI ve arama mantığı testleri eklendi (Rule #34/#35).

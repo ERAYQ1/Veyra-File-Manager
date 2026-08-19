@@ -432,6 +432,54 @@ mod tests {
         assert!(cache.get(&PathBuf::from("/b")).is_none());
     }
 
+    /// Faz 49: L1 LRU access-speed benchmark (Rule #31/#33) — the same
+    /// `LruCache<PathBuf, _>` shape `ThumbnailService::l1` uses (proxied
+    /// with a `u32` payload here, as the sibling tests above already do, to
+    /// stay independent of a real `gdk_pixbuf::Pixbuf`/display). Measured
+    /// ~500ns/op in development (dominated by the `PathBuf` allocation each
+    /// put clones, not the O(1) hash-map lookup itself, which is closer to
+    /// 150ns alone); the 5µs bound below leaves a comfortable margin so
+    /// this never flakes under a loaded CI runner while still catching an
+    /// actual regression (e.g. an accidental linear scan replacing the O(1)
+    /// lookup).
+    #[test]
+    fn l1_lru_cache_access_is_fast_at_scale() {
+        const N: usize = 100_000;
+        let mut cache: LruCache<PathBuf, u32> = LruCache::new(NonZeroUsize::new(500).unwrap());
+        let paths: Vec<PathBuf> = (0..N).map(|i| PathBuf::from(format!("/f{i}"))).collect();
+
+        let start = std::time::Instant::now();
+        for (i, path) in paths.iter().enumerate() {
+            cache.put(path.clone(), i as u32);
+        }
+        let put_elapsed = start.elapsed();
+
+        let start = std::time::Instant::now();
+        let mut hits = 0u32;
+        // Only the last 500 puts are still resident (capacity 500); query
+        // across the whole range so most calls are legitimate misses, same
+        // as a real cache under normal churn.
+        for path in &paths {
+            if cache.get(path).is_some() {
+                hits += 1;
+            }
+        }
+        let get_elapsed = start.elapsed();
+
+        println!(
+            "l1_lru_cache_access_is_fast_at_scale: {N} puts in {put_elapsed:?} \
+             ({:.1}ns/op), {N} gets in {get_elapsed:?} ({:.1}ns/op), {hits} hits",
+            put_elapsed.as_nanos() as f64 / N as f64,
+            get_elapsed.as_nanos() as f64 / N as f64
+        );
+        assert_eq!(hits, 500);
+        let per_op_ns = (put_elapsed + get_elapsed).as_nanos() as f64 / (2 * N) as f64;
+        assert!(
+            per_op_ns < 5_000.0,
+            "L1 LRU access averaged {per_op_ns:.1}ns/op, expected well under 5µs"
+        );
+    }
+
     #[test]
     fn md5_uri_hash_is_stable_and_matches_known_vector() {
         let mut hasher = Md5::new();

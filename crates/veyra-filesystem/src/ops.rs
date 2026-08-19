@@ -569,12 +569,18 @@ pub struct ChmodRecursiveOutcome {
 }
 
 /// Faz 28: Recursively changes permissions on `root` and all its descendants.
-/// Symlinked directories are not traversed into — they are chmod'd as entries
-/// but never followed (Rule #22). A subdirectory that fails to enumerate
-/// mid-walk (permission denied, removed concurrently) is skipped rather than
-/// aborting the whole operation (Rule #18). Cooperatively cancellable via
-/// `control` — cancelling mid-walk returns whatever was succeeded so far plus
-/// any errors encountered before cancellation.
+/// Symlinks — the root itself, or any descendant — are never chmod'd and
+/// never traversed into (Rule #22): `set_permissions` has no way to target a
+/// symlink itself rather than what it points at (Linux has no `lchmod`, so
+/// the underlying `chmod()` syscall always follows), so the only safe
+/// behavior is to skip a symlink entirely rather than risk silently
+/// rewriting the permissions of whatever file or directory — possibly
+/// outside `root`'s own tree — it happens to point at. A subdirectory that
+/// fails to enumerate mid-walk (permission denied, removed concurrently) is
+/// skipped rather than aborting the whole operation (Rule #18).
+/// Cooperatively cancellable via `control` — cancelling mid-walk returns
+/// whatever was succeeded so far plus any errors encountered before
+/// cancellation.
 ///
 /// This function is blocking and must only be called from `fs_async::run_blocking`
 /// on a background thread, never on the GTK main thread (Rule #11/#14).
@@ -587,14 +593,26 @@ pub fn chmod_recursive(
         succeeded: 0,
         errors: Vec::new(),
     };
-    chmod_recursive_walk(
-        &root.to_gio_file(),
-        root,
-        permissions,
-        control,
-        &mut outcome,
-    )?;
+    let root_file = root.to_gio_file();
+    if !is_symlink(&root_file) {
+        chmod_recursive_walk(&root_file, root, permissions, control, &mut outcome)?;
+    }
     Ok(outcome)
+}
+
+/// Whether `file` is itself a symlink (queried with `NOFOLLOW_SYMLINKS` so
+/// this reports the link, never what it points at). Errors (e.g. the entry
+/// vanished between being listed and being queried — Rule #17) are treated
+/// as "not a symlink" so the caller falls through to its normal handling
+/// (which will surface the real error, e.g. `NotFound`, itself).
+fn is_symlink(file: &gio::File) -> bool {
+    file.query_info(
+        "standard::type",
+        gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+        gio::Cancellable::NONE,
+    )
+    .map(|info| info.file_type() == FileType::SymbolicLink)
+    .unwrap_or(false)
 }
 
 fn chmod_recursive_walk(
@@ -604,7 +622,8 @@ fn chmod_recursive_walk(
     control: &OperationControl,
     outcome: &mut ChmodRecursiveOutcome,
 ) -> Result<(), FsError> {
-    // chmod root itself first
+    // chmod root itself first (the caller already confirmed it's not a
+    // symlink before ever calling this function).
     match set_permissions(path_for_errors, permissions) {
         Ok(()) => outcome.succeeded += 1,
         Err(err) => outcome.errors.push((path_for_errors.clone(), err)),
@@ -624,9 +643,15 @@ fn chmod_recursive_walk(
         }
         match enumerator.next_file(gio::Cancellable::NONE) {
             Ok(Some(info)) => {
+                let file_type = info.file_type();
+                if file_type == FileType::SymbolicLink {
+                    // Never chmod'd, never traversed — see `chmod_recursive`'s
+                    // doc comment for why.
+                    continue;
+                }
                 let child = enumerator.child(&info);
                 let child_path = VeyraPath::from_gio_file(&child);
-                if info.file_type() == FileType::Directory {
+                if file_type == FileType::Directory {
                     let _ =
                         chmod_recursive_walk(&child, &child_path, permissions, control, outcome);
                 } else {
