@@ -1,5 +1,30 @@
 # Changelog
 
+## Faz 41 — Checksums & Hash Verification (`veyra-ui`)
+
+`dev_tools::compute_checksums`'a üçüncü algoritma olarak SHA-512 eklendi (aynı tek geçişli akışta, ek IO maliyeti yok) ve sonuçlar artık sadece Geliştirici sağ-tık diyaloğunda değil, **Özellikler Penceresi**'nin General sayfasına isteğe bağlı (on-demand) bir "Checksums" grubu olarak da sunuluyor — beklenen bir hash'i yapıştırıp anında yeşil/kırmızı eşleşme rozeti görebileceğiniz bir doğrulama alanıyla birlikte.
+
+### Eklenenler
+- **`crates/veyra-ui/src/dev_tools.rs`:** `ChecksumResult` üçüncü alan olarak `sha512: String` kazandı; `compute_checksums` artık `Md5`/`Sha256`/`Sha512`'yi aynı 256 KB'lık okuma döngüsünde birlikte güncelliyor (Kural #33 — dosya üç kez değil bir kez okunuyor). `ChecksumAlgorithm` (`Md5`/`Sha256`/`Sha512`, `label()` → `"MD5"`/`"SHA-256"`/`"SHA-512"`) ve `matching_algorithm(result, expected)` — yapıştırılan metni (baştaki/sondaki boşluk ve harf büyüklüğü göz ardı edilerek) üç sağlama toplamıyla karşılaştırıp eşleşen algoritmayı döndüren saf fonksiyon; hiçbir şey eşleşmezse veya `expected` boşsa `None`.
+- **`crates/veyra-ui/src/dialogs/checksum_dialog.rs`:** SHA-512 satırı üçüncü `checksum_row` olarak eklendi. `VerifySection`/`build_verify_section()` — "Paste expected checksum to verify…" yer tutuculu bir `GtkEntry` + başlangıçta gizli bir durum etiketinden oluşan, hem bu diyalog hem `properties_dialog` tarafından paylaşılan doğrulama bileşeni. `update_verify_status` her tuş vuruşunda (`connect_changed`) ve arka plan hesaplaması bittiğinde yeniden çalışıp `.success`/`.error` CSS sınıflarıyla yeşil `"✓ Matches SHA-256"` / kırmızı `"✗ Checksum mismatch"` gösteriyor; hash henüz hesaplanmadıysa veya alan boşsa etiket gizli kalıyor. `ChecksumRow`/`checksum_row` artık `pub(crate)` — `properties_dialog` aynı satır/kopyalama widget'ını yeniden kullanıyor, kopya kod yok.
+- **`crates/veyra-ui/src/dialogs/properties_dialog.rs`:** Yalnızca `FileKind::Regular` dosyalar için General sayfasına "Checksums" grubu eklendi — açılışta otomatik hesaplama yapmıyor (büyük dosyalarda CPU/disk tüketmemek için), tek bir "Calculate Checksums" butonuyla başlıyor; tıklanınca buton satırı grup içinden çıkarılıp `checksum_dialog`'un paylaşılan MD5/SHA-256/SHA-512 satırları + doğrulama alanı takılıyor, hesaplama `fs_async::run_blocking` ile arka planda `dev_tools::compute_checksums` çağırıyor ve Properties penceresi hesaplama bitmeden kapatılırsa `OperationControl` ile anında iptal ediliyor (Kural #13) — `build_general_page` artık bu bağlanma için `dialog: &adw::PreferencesDialog`'u da alıyor.
+- **`i18n.rs`:** `dev.checksum.calculate`, `dev.checksum.verify_placeholder`, `dev.checksum.matches` (`{algorithm}` yer tutuculu), `dev.checksum.mismatch` — hem `EN` hem `TR` katalogları.
+
+### Kapsam kararları
+- Checksums grubu yalnızca `FileKind::Regular` için gösteriliyor — bir dizinin "sağlama toplamı" ayrı bir kavram (içerik özeti değil), bir sembolik bağlantının baytları hedef yolu, hedefinin içeriği değil; ikisi de spesifikasyonun "Dosyalar için" ifadesiyle kapsam dışı.
+- Doğrulama tek bir metin kutusu — kullanıcı hangi algoritmayı yapıştırdığını belirtmiyor, `matching_algorithm` üç sağlama toplamına karşı sırayla deniyor ve eşleşeni bulup adını rozette gösteriyor; ayrı MD5/SHA-256/SHA-512 doğrulama kutuları spesifikasyonun tek bir yapıştırma alanı istemesiyle çelişirdi.
+- `checksum_dialog.rs`'in satır/doğrulama bileşenleri `properties_dialog.rs`'e `pub(crate)` olarak açıldı, aynı UI'nin ikinci bir kopyası yazılmadı — iki yüzey de aynı `dev_tools::compute_checksums` motorunu ve aynı görsel dili paylaşıyor.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 426 → 429, tamamı geçti (yeni: `veyra-ui::dev_tools` 3 test — boş dosyanın MD5/SHA-256/SHA-512 standart sabit değerleriyle eşleşmesi, `matching_algorithm`'ın büyük/küçük harf ve boşluk duyarsız her üç algoritmayı bulması, ilgisiz/boş girdide `None` dönmesi; mevcut `checksums_of_known_content_match_expected_digests` testi SHA-512 doğrulamasıyla genişletildi).
+- `cargo build --workspace`: temiz, 0 warning.
+- Uygulama `cargo build -p veyra-app` ile derlenip masaüstü ortamında (`WAYLAND_DISPLAY`/`DISPLAY` mevcut) kısa süre çalıştırıldı — pencere hatasız açıldı, panik/çökme yok; Checksums grubunun/diyaloğunun buton tıklama → hesaplama → doğrulama akışı otomatik bir ekran etkileşim aracı bulunmadığı için elle tıklanarak görsel olarak doğrulanmadı — bu iddia edilmiyor.
+
+### Sıradaki Faz
+Faz 42 — onay bekleniyor.
+
 ## Faz 40 — Git Integration: Dosya Bazlı Durum Rozetleri (`veyra-filesystem` / `veyra-ui`)
 
 Faz 39'un repo seviyesindeki headerbar rozetinin ("main ↑2 ↓1 *") yanına, açık dizindeki her dosyanın kendi Git durumunu gösteren küçük, salt-okunur rozetler eklendi — Icon, Compact ve Details görünümlerinin üçünde de.

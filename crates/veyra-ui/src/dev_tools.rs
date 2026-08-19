@@ -15,7 +15,7 @@ use std::process::Command;
 
 use gio::prelude::FileExt;
 use md5::{Digest, Md5};
-use sha2::Sha256;
+use sha2::{Sha256, Sha512};
 
 use veyra_filesystem::{OperationControl, VeyraPath};
 
@@ -74,12 +74,59 @@ pub(crate) fn relative_path(path: &Path, base: &Path) -> String {
     result.display().to_string()
 }
 
-/// MD5 and SHA-256 hex digests of a file's contents, computed in one
-/// streaming read pass (Rule #33 — no reason to read a large file twice for
-/// two independent hashers).
+/// MD5, SHA-256, and SHA-512 hex digests of a file's contents, computed in
+/// one streaming read pass (Rule #33 — no reason to read a large file three
+/// times for three independent hashers).
 pub(crate) struct ChecksumResult {
     pub md5: String,
     pub sha256: String,
+    pub sha512: String,
+}
+
+/// The algorithm a pasted checksum turned out to match, from
+/// `matching_algorithm` — its `label()` is the exact text every checksum
+/// row's title already renders (`"MD5"`/`"SHA-256"`/`"SHA-512"`), so a
+/// match message can quote it back without a separate name table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChecksumAlgorithm {
+    Md5,
+    Sha256,
+    Sha512,
+}
+
+impl ChecksumAlgorithm {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            ChecksumAlgorithm::Md5 => "MD5",
+            ChecksumAlgorithm::Sha256 => "SHA-256",
+            ChecksumAlgorithm::Sha512 => "SHA-512",
+        }
+    }
+}
+
+/// Compares `expected` (arbitrary pasted user text — leading/trailing
+/// whitespace and letter case both ignored, since that's exactly the kind
+/// of copy-paste noise a checksum pasted from a download page's README or
+/// terminal output carries) against `result`'s three digests, returning
+/// whichever algorithm matched. An empty (after trimming) `expected` never
+/// matches anything — that's "nothing pasted yet", not a mismatch.
+pub(crate) fn matching_algorithm(
+    result: &ChecksumResult,
+    expected: &str,
+) -> Option<ChecksumAlgorithm> {
+    let expected = expected.trim();
+    if expected.is_empty() {
+        return None;
+    }
+    if result.md5.eq_ignore_ascii_case(expected) {
+        Some(ChecksumAlgorithm::Md5)
+    } else if result.sha256.eq_ignore_ascii_case(expected) {
+        Some(ChecksumAlgorithm::Sha256)
+    } else if result.sha512.eq_ignore_ascii_case(expected) {
+        Some(ChecksumAlgorithm::Sha512)
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -90,9 +137,10 @@ pub(crate) enum ChecksumError {
     Io(#[from] io::Error),
 }
 
-/// Streams `path` through MD5 and SHA-256 simultaneously, checking `control`
-/// between chunks so a dialog closed mid-hash of a huge file stops promptly
-/// instead of running to completion in the background (Rule #13).
+/// Streams `path` through MD5, SHA-256, and SHA-512 simultaneously,
+/// checking `control` between chunks so a dialog closed mid-hash of a huge
+/// file stops promptly instead of running to completion in the background
+/// (Rule #13).
 pub(crate) fn compute_checksums(
     path: &Path,
     control: &OperationControl,
@@ -100,6 +148,7 @@ pub(crate) fn compute_checksums(
     let mut file = std::fs::File::open(path)?;
     let mut md5 = Md5::new();
     let mut sha256 = Sha256::new();
+    let mut sha512 = Sha512::new();
     let mut buf = vec![0u8; CHECKSUM_CHUNK_SIZE];
 
     loop {
@@ -112,11 +161,13 @@ pub(crate) fn compute_checksums(
         }
         md5.update(&buf[..read]);
         sha256.update(&buf[..read]);
+        sha512.update(&buf[..read]);
     }
 
     Ok(ChecksumResult {
         md5: hex_lower(&md5.finalize()),
         sha256: hex_lower(&sha256.finalize()),
+        sha512: hex_lower(&sha512.finalize()),
     })
 }
 
@@ -227,6 +278,69 @@ mod tests {
             result.sha256,
             "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
         );
+        assert_eq!(
+            result.sha512,
+            "309ecc489c12d6eb4cc40f50c902f2b4d0ed77ee511a7c7a9bcd3ca86d4cd86f989dd35bc5ff499670da34255b45b0cfd830e81f605dcf7dc5542e93ae9cd76f"
+        );
+    }
+
+    #[test]
+    fn checksums_of_an_empty_file_match_the_well_known_empty_digests() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("empty.txt");
+        std::fs::write(&file, b"").unwrap();
+
+        let control = OperationControl::new();
+        let result = compute_checksums(&file, &control).unwrap();
+
+        assert_eq!(result.md5, "d41d8cd98f00b204e9800998ecf8427e");
+        assert_eq!(
+            result.sha256,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            result.sha512,
+            "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"
+        );
+    }
+
+    #[test]
+    fn matching_algorithm_finds_each_algorithm_case_and_whitespace_insensitively() {
+        let result = ChecksumResult {
+            md5: "5eb63bbbe01eeed093cb22bb8f5acdc3".to_string(),
+            sha256: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+                .to_string(),
+            sha512: "309ecc489c12d6eb4cc40f50c902f2b4d0ed77ee511a7c7a9bcd3ca86d4cd86f989dd35bc5ff499670da34255b45b0cfd830e81f605dcf7dc5542e93ae9cd76f".to_string(),
+        };
+
+        assert_eq!(
+            matching_algorithm(&result, "  5EB63BBBE01EEED093CB22BB8F5ACDC3  "),
+            Some(ChecksumAlgorithm::Md5)
+        );
+        assert_eq!(
+            matching_algorithm(
+                &result,
+                "B94D27B9934D3E08A52E52D7DA7DABFAC484EFE37A5380EE9088F7ACE2EFCDE9"
+            ),
+            Some(ChecksumAlgorithm::Sha256)
+        );
+        assert_eq!(
+            matching_algorithm(&result, &result.sha512),
+            Some(ChecksumAlgorithm::Sha512)
+        );
+    }
+
+    #[test]
+    fn matching_algorithm_returns_none_for_an_unrelated_or_empty_string() {
+        let result = ChecksumResult {
+            md5: "5eb63bbbe01eeed093cb22bb8f5acdc3".to_string(),
+            sha256: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9".to_string(),
+            sha512: "x".repeat(128),
+        };
+
+        assert_eq!(matching_algorithm(&result, "not a checksum"), None);
+        assert_eq!(matching_algorithm(&result, ""), None);
+        assert_eq!(matching_algorithm(&result, "   "), None);
     }
 
     #[test]

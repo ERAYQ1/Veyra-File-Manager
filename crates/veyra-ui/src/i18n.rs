@@ -507,6 +507,14 @@ const EN: &[(&str, &str)] = &[
     ("dev.checksum.close", "Close"),
     ("dev.checksum.computing", "Computing…"),
     ("dev.checksum.copy", "Copy"),
+    // --- Checksums & Verification (Faz 41) ---
+    ("dev.checksum.calculate", "Calculate Checksums"),
+    (
+        "dev.checksum.verify_placeholder",
+        "Paste expected checksum to verify…",
+    ),
+    ("dev.checksum.matches", "✓ Matches {algorithm}"),
+    ("dev.checksum.mismatch", "✗ Checksum mismatch"),
     ("dev.metadata.title", "Developer Metadata"),
     ("dev.metadata.close", "Close"),
     ("dev.metadata.inode", "Inode"),
@@ -762,6 +770,14 @@ const TR: &[(&str, &str)] = &[
     ("dev.checksum.close", "Kapat"),
     ("dev.checksum.computing", "Hesaplanıyor…"),
     ("dev.checksum.copy", "Kopyala"),
+    // --- Sağlama Toplamları & Doğrulama (Faz 41) ---
+    ("dev.checksum.calculate", "Sağlama Toplamlarını Hesapla"),
+    (
+        "dev.checksum.verify_placeholder",
+        "Doğrulamak için beklenen sağlama toplamını yapıştırın…",
+    ),
+    ("dev.checksum.matches", "✓ {algorithm} İle Eşleşiyor"),
+    ("dev.checksum.mismatch", "✗ Sağlama toplamı uyuşmuyor"),
     ("dev.metadata.title", "Geliştirici Meta Verisi"),
     ("dev.metadata.close", "Kapat"),
     ("dev.metadata.inode", "Inode"),

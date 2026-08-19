@@ -34,8 +34,11 @@ use libadwaita::prelude::*;
 
 use veyra_filesystem::{FileItem, FileKind, FilePermissions, OperationControl, VeyraPath};
 
+use crate::dev_tools::{self, ChecksumResult};
+use crate::dialogs::checksum_dialog;
 use crate::dialogs::file_associations_dialog;
 use crate::fs_async;
+use crate::i18n::t;
 use crate::open_with;
 use crate::privileged;
 use crate::thumbnails::ThumbnailService;
@@ -73,7 +76,7 @@ fn show_dialog(
         .content_height(560)
         .build();
 
-    let general = build_general_page(&item, &thumbnails, parent);
+    let general = build_general_page(&item, &thumbnails, parent, &dialog);
     dialog.add(&general.page);
 
     if item.metadata.permissions.is_some() {
@@ -164,6 +167,7 @@ fn build_general_page(
     item: &FileItem,
     thumbnails: &Rc<ThumbnailService>,
     parent: &impl IsA<gtk4::Widget>,
+    dialog: &adw::PreferencesDialog,
 ) -> GeneralPageHandles {
     let page = adw::PreferencesPage::builder()
         .title("General")
@@ -316,11 +320,109 @@ fn build_general_page(
     time_group.add(&timestamp_row("Accessed", item.metadata.accessed));
     page.add(&time_group);
 
+    // Faz 41: checksums are opt-in (a "Calculate Checksums" button, not an
+    // automatic hash on open) so a multi-gigabyte file's Properties window
+    // doesn't burn CPU/disk the moment it's opened — only regular files
+    // have hashable content of their own (a directory's "checksum" would
+    // mean something else entirely, and a symlink's bytes are its target
+    // path, not its target's content).
+    if matches!(item.kind(), FileKind::Regular) {
+        page.add(&build_checksums_group(dialog, item.path.clone()));
+    }
+
     GeneralPageHandles {
         page,
         disk_usage_row,
         contains,
     }
+}
+
+/// Builds the Properties window's "Checksums" group: starts as a single
+/// "Calculate Checksums" button row; clicking it swaps in the same
+/// MD5/SHA-256/SHA-512 rows and paste-to-verify field `checksum_dialog`
+/// uses, computed via one background streaming pass
+/// (`dev_tools::compute_checksums`), cancelled if the Properties window
+/// closes before it finishes (Rule #13).
+fn build_checksums_group(
+    dialog: &adw::PreferencesDialog,
+    path: VeyraPath,
+) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder()
+        .title(t("dev.checksum.title"))
+        .build();
+
+    let button_row = adw::ActionRow::new();
+    let calculate_button = gtk4::Button::with_label(t("dev.checksum.calculate"));
+    calculate_button.set_valign(gtk4::Align::Center);
+    calculate_button.add_css_class("flat");
+    button_row.add_suffix(&calculate_button);
+    button_row.set_activatable_widget(Some(&calculate_button));
+    group.add(&button_row);
+
+    let dialog = dialog.clone();
+    let group_for_click = group.clone();
+    calculate_button.connect_clicked(move |button| {
+        button.set_sensitive(false);
+        group_for_click.remove(&button_row);
+
+        let md5_row = checksum_dialog::checksum_row("MD5");
+        let sha256_row = checksum_dialog::checksum_row("SHA-256");
+        let sha512_row = checksum_dialog::checksum_row("SHA-512");
+        group_for_click.add(&md5_row.row);
+        group_for_click.add(&sha256_row.row);
+        group_for_click.add(&sha512_row.row);
+
+        let verify = checksum_dialog::build_verify_section();
+        group_for_click.add(&verify.widget);
+
+        let control = OperationControl::new();
+        {
+            let control = control.clone();
+            dialog.connect_closed(move |_| control.cancel());
+        }
+
+        let computed: Rc<RefCell<Option<ChecksumResult>>> = Rc::new(RefCell::new(None));
+        {
+            let computed = computed.clone();
+            let status_label = verify.status_label.clone();
+            verify.entry.connect_changed(move |entry| {
+                checksum_dialog::update_verify_status(&computed, entry, &status_label)
+            });
+        }
+
+        let path = path.clone();
+        fs_async::run_blocking(
+            move || {
+                path.as_local_path()
+                    .map(|local| dev_tools::compute_checksums(local, &control))
+            },
+            move |result| match result {
+                Some(Ok(checksums)) => {
+                    md5_row.finish(&checksums.md5);
+                    sha256_row.finish(&checksums.sha256);
+                    sha512_row.finish(&checksums.sha512);
+                    *computed.borrow_mut() = Some(checksums);
+                    checksum_dialog::update_verify_status(
+                        &computed,
+                        &verify.entry,
+                        &verify.status_label,
+                    );
+                }
+                Some(Err(err)) => {
+                    md5_row.fail(&err.to_string());
+                    sha256_row.fail(&err.to_string());
+                    sha512_row.fail(&err.to_string());
+                }
+                None => {
+                    md5_row.fail("Unavailable");
+                    sha256_row.fail("Unavailable");
+                    sha512_row.fail("Unavailable");
+                }
+            },
+        );
+    });
+
+    group
 }
 
 struct AdvancedPageHandles {
