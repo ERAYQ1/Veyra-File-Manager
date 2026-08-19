@@ -10,6 +10,7 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
+use crate::i18n::t;
 use crate::shortcuts;
 
 /// Shows the Keyboard Shortcuts help window over `window`.
@@ -17,7 +18,7 @@ pub(crate) fn show(window: &adw::ApplicationWindow) {
     let app = window.application();
 
     let dialog = adw::Dialog::builder()
-        .title("Keyboard Shortcuts")
+        .title(t("shortcuts_help.title"))
         .content_width(480)
         .content_height(560)
         .build();

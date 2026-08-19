@@ -40,14 +40,14 @@ pub(crate) fn build(
     root.set_margin_start(6);
     root.set_margin_end(6);
 
-    root.append(&section_heading("Places"));
+    root.append(&section_heading(t("sidebar.places")));
     for (label, icon, path, kind) in places_entries() {
         root.append(&row(label, icon, path, kind, &navigate));
     }
     root.append(&storage_dashboard_row());
 
     let bookmarks_section = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
-    bookmarks_section.append(&section_heading("Bookmarks"));
+    bookmarks_section.append(&section_heading(t("sidebar.bookmarks")));
     let bookmarks_box = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     bookmarks_section.append(&bookmarks_box);
     root.append(&bookmarks_section);
@@ -136,7 +136,7 @@ pub(crate) fn build(
     }
     bookmarks_section.add_controller(drop_target);
 
-    root.append(&section_heading("Devices"));
+    root.append(&section_heading(t("sidebar.devices")));
     let devices_box = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     root.append(&devices_box);
 
@@ -168,12 +168,12 @@ pub(crate) fn build(
     // Faz 21: Network section — the "Network" (`network:///` local-network
     // browse) root always shown, live-refreshed active SFTP/SMB/FTP/WebDAV
     // mounts below it, and a "+ Connect to Server…" action at the bottom.
-    root.append(&section_heading("Network"));
+    root.append(&section_heading(t("sidebar.network")));
     root.append(&row(
-        "Network",
+        t("sidebar.network"),
         "network-workgroup-symbolic",
         VeyraPath::from_uri("network:///"),
-        "Network Location",
+        t("sidebar.network_location"),
         &navigate,
     ));
     let network_box = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
@@ -205,10 +205,12 @@ pub(crate) fn build(
 
     let connect_button = gtk4::Button::builder().css_classes(["flat"]).build();
     connect_button.set_action_name(Some("win.connect-to-server"));
-    connect_button.update_property(&[gtk4::accessible::Property::Label("Connect to Server")]);
+    connect_button.update_property(&[gtk4::accessible::Property::Label(t(
+        "sidebar.connect_to_server",
+    ))]);
     let connect_content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     connect_content.append(&gtk4::Image::from_icon_name("list-add-symbolic"));
-    let connect_label = gtk4::Label::new(Some("Connect to Server…"));
+    let connect_label = gtk4::Label::new(Some(t("sidebar.connect_to_server_ellipsis")));
     connect_label.set_xalign(0.0);
     connect_content.append(&connect_label);
     connect_button.set_child(Some(&connect_content));
@@ -285,56 +287,69 @@ fn storage_dashboard_row() -> gtk4::Widget {
 
 fn places_entries() -> Vec<(&'static str, &'static str, VeyraPath, &'static str)> {
     let mut entries = vec![(
-        "Home",
+        t("sidebar.home"),
         "user-home-symbolic",
         VeyraPath::from_local(glib::home_dir()),
-        "Home Folder",
+        t("sidebar.home_folder"),
     )];
 
     let user_dirs: [(&str, &str, UserDirectory); 5] = [
-        ("Desktop", "user-desktop-symbolic", UserDirectory::Desktop),
         (
-            "Documents",
+            t("sidebar.desktop"),
+            "user-desktop-symbolic",
+            UserDirectory::Desktop,
+        ),
+        (
+            t("sidebar.documents"),
             "folder-documents-symbolic",
             UserDirectory::Documents,
         ),
         (
-            "Downloads",
+            t("sidebar.downloads"),
             "folder-download-symbolic",
             UserDirectory::Downloads,
         ),
-        ("Music", "folder-music-symbolic", UserDirectory::Music),
         (
-            "Pictures",
+            t("sidebar.music"),
+            "folder-music-symbolic",
+            UserDirectory::Music,
+        ),
+        (
+            t("sidebar.pictures"),
             "folder-pictures-symbolic",
             UserDirectory::Pictures,
         ),
     ];
     for (label, icon, dir) in user_dirs {
         if let Some(path) = glib::user_special_dir(dir) {
-            entries.push((label, icon, VeyraPath::from_local(path), "Folder"));
+            entries.push((
+                label,
+                icon,
+                VeyraPath::from_local(path),
+                t("sidebar.folder"),
+            ));
         }
     }
     if let Some(path) = glib::user_special_dir(UserDirectory::Videos) {
         entries.push((
-            "Videos",
+            t("sidebar.videos"),
             "folder-videos-symbolic",
             VeyraPath::from_local(path),
-            "Folder",
+            t("sidebar.folder"),
         ));
     }
 
     entries.push((
-        "Recent",
+        t("sidebar.recent"),
         "document-open-recent-symbolic",
         VeyraPath::from_uri("recent:///"),
-        "Recent Files",
+        t("sidebar.recent_files"),
     ));
     entries.push((
-        "Trash",
+        t("sidebar.trash"),
         "user-trash-symbolic",
         VeyraPath::from_uri("trash:///"),
-        "Trash",
+        t("sidebar.trash"),
     ));
 
     entries
@@ -516,7 +531,7 @@ fn device_row(
         let eject_button = gtk4::Button::from_icon_name("media-eject-symbolic");
         eject_button.add_css_class("flat");
         eject_button.set_valign(gtk4::Align::Center);
-        eject_button.set_tooltip_text(Some("Unmount / Eject"));
+        eject_button.set_tooltip_text(Some(t("sidebar.unmount_eject")));
         {
             let window = window.clone();
             let entry = entry.clone();

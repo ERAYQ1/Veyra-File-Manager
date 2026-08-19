@@ -24,6 +24,7 @@ use libadwaita::prelude::*;
 
 use veyra_filesystem::VeyraPath;
 
+use crate::i18n::{t, t_fmt};
 use crate::open_with;
 
 /// Shows the Open With dialog for `path`, whose content type is
@@ -42,16 +43,16 @@ pub(crate) fn show(
     let default_id = default_app.as_ref().and_then(gio::AppInfo::id);
 
     let dialog = adw::Dialog::builder()
-        .title("Open With")
+        .title(t("open_with.title"))
         .content_width(440)
         .content_height(560)
         .build();
 
     let header = adw::HeaderBar::new();
     header.set_show_end_title_buttons(false);
-    header.set_title_widget(Some(&gtk4::Label::new(Some("Open With"))));
+    header.set_title_widget(Some(&gtk4::Label::new(Some(t("open_with.title")))));
 
-    let cancel_button = gtk4::Button::with_label("Cancel");
+    let cancel_button = gtk4::Button::with_label(t("open_with.cancel"));
     header.pack_start(&cancel_button);
     {
         let dialog = dialog.clone();
@@ -60,7 +61,7 @@ pub(crate) fn show(
         });
     }
 
-    let open_button = gtk4::Button::with_label("Open");
+    let open_button = gtk4::Button::with_label(t("open_with.open"));
     open_button.add_css_class("suggested-action");
     open_button.set_sensitive(false);
     header.pack_end(&open_button);
@@ -73,10 +74,10 @@ pub(crate) fn show(
     content.set_margin_end(16);
 
     let search_entry = gtk4::SearchEntry::new();
-    search_entry.set_placeholder_text(Some("Search Applications…"));
+    search_entry.set_placeholder_text(Some(t("open_with.search_placeholder")));
     content.append(&search_entry);
 
-    let recommended_label = gtk4::Label::new(Some("Recommended Applications"));
+    let recommended_label = gtk4::Label::new(Some(t("open_with.recommended")));
     recommended_label.set_xalign(0.0);
     recommended_label.add_css_class("heading");
     content.append(&recommended_label);
@@ -87,7 +88,7 @@ pub(crate) fn show(
     recommended_list.add_css_class("boxed-list");
     content.append(&recommended_list);
 
-    let all_label = gtk4::Label::new(Some("All Applications"));
+    let all_label = gtk4::Label::new(Some(t("open_with.all_applications")));
     all_label.set_xalign(0.0);
     all_label.add_css_class("heading");
     all_label.add_css_class("dim-label");
@@ -105,8 +106,9 @@ pub(crate) fn show(
         .build();
     content.append(&all_scroller);
 
-    let default_checkbox = gtk4::CheckButton::with_label(&format!(
-        "Always use this application for {content_type} files"
+    let default_checkbox = gtk4::CheckButton::with_label(&t_fmt(
+        "open_with.always_use_for_type",
+        &[("content_type", &content_type)],
     ));
     content.append(&default_checkbox);
 
@@ -135,7 +137,7 @@ pub(crate) fn show(
                 }
             }
             if let Err(err) = open_with::launch(&app, &file, &window) {
-                on_error("Unable to Open File", &err.to_string());
+                on_error(t("open_with.error.unable_to_open"), &err.to_string());
             }
             dialog.close();
         })
@@ -313,7 +315,7 @@ fn build_app_row(app: &gio::AppInfo, is_default: bool) -> adw::ActionRow {
     row.add_prefix(&icon);
 
     if is_default {
-        let badge = gtk4::Label::new(Some("Default"));
+        let badge = gtk4::Label::new(Some(t("open_with.default_badge")));
         badge.add_css_class("dim-label");
         badge.add_css_class("caption");
         row.add_suffix(&badge);

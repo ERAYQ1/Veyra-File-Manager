@@ -54,7 +54,7 @@ pub(crate) fn show(
     undo_stack: SharedUndoStack,
 ) {
     let dialog = adw::Dialog::builder()
-        .title("Disk Usage")
+        .title(t("disk_analyzer.title"))
         .content_width(760)
         .content_height(640)
         .build();
@@ -66,7 +66,10 @@ pub(crate) fn show(
     spinner.set_valign(gtk4::Align::Center);
     spinner.set_vexpand(true);
 
-    let status_label = gtk4::Label::new(Some(&format!("Scanning {root}…")));
+    let status_label = gtk4::Label::new(Some(&t_fmt(
+        "disk_analyzer.scanning",
+        &[("root", &root.to_string())],
+    )));
     status_label.add_css_class("dim-label");
 
     let loading_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -75,7 +78,7 @@ pub(crate) fn show(
 
     let toolbar_view = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&gtk4::Label::new(Some("Disk Usage"))));
+    header.set_title_widget(Some(&gtk4::Label::new(Some(t("disk_analyzer.title")))));
     toolbar_view.add_top_bar(&header);
     toolbar_view.set_content(Some(&loading_box));
     dialog.set_child(Some(&toolbar_view));
@@ -106,13 +109,17 @@ pub(crate) fn show(
                 );
             }
             Err(err) => {
-                header_for_result.set_title_widget(Some(&gtk4::Label::new(Some("Disk Usage"))));
+                header_for_result
+                    .set_title_widget(Some(&gtk4::Label::new(Some(t("disk_analyzer.title")))));
                 let error_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
                 error_box.set_valign(gtk4::Align::Center);
                 error_box.set_vexpand(true);
                 let icon = gtk4::Image::from_icon_name("dialog-error-symbolic");
                 icon.set_pixel_size(48);
-                let label = gtk4::Label::new(Some(&format!("Couldn't scan this folder: {err}")));
+                let label = gtk4::Label::new(Some(&t_fmt(
+                    "disk_analyzer.scan_error",
+                    &[("error", &err.to_string())],
+                )));
                 label.set_wrap(true);
                 error_box.append(&icon);
                 error_box.append(&label);
@@ -319,7 +326,7 @@ fn render_breakdown(
     container.append(&summary);
 
     if node.children.is_empty() {
-        let empty = gtk4::Label::new(Some("This folder is empty."));
+        let empty = gtk4::Label::new(Some(t("empty.folder.title")));
         empty.add_css_class("dim-label");
         empty.set_margin_top(24);
         empty.set_valign(gtk4::Align::Start);
@@ -459,7 +466,7 @@ fn breakdown_segments(node: &UsageNode) -> Vec<(String, u64)> {
     let shown: u64 = segments.iter().map(|(_, s)| s).sum();
     let other = node.size_bytes.saturating_sub(shown);
     if other > 0 {
-        segments.push(("Other".to_string(), other));
+        segments.push((t("storage.other_segment").to_string(), other));
     }
     segments
 }
@@ -472,7 +479,7 @@ fn build_largest_files_page(
     dialog: adw::Dialog,
 ) -> gtk4::Widget {
     if entries.is_empty() {
-        return empty_state("No files found.");
+        return empty_state(t("storage.no_files_found"));
     }
 
     let list = gtk4::ListBox::new();
@@ -1092,7 +1099,7 @@ fn open_in_folder_button(
     let button = gtk4::Button::from_icon_name("folder-open-symbolic");
     button.add_css_class("flat");
     button.set_valign(gtk4::Align::Center);
-    button.set_tooltip_text(Some("Open in Folder"));
+    button.set_tooltip_text(Some(t("storage.open_in_folder")));
     button.update_property(&[gtk4::accessible::Property::Label("Open in Folder")]);
     button.connect_clicked(move |_| {
         navigate(parent_path(&path));

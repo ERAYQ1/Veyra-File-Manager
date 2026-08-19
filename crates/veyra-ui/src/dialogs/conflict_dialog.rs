@@ -11,6 +11,8 @@ use libadwaita::prelude::*;
 
 use veyra_filesystem::{Conflict, ConflictDecision, VeyraPath};
 
+use crate::i18n::{t, t_fmt};
+
 /// Shows the conflict dialog for `conflict`, calling `on_decision` exactly
 /// once with the user's answer (`Cancel` if the dialog is dismissed without
 /// picking a response).
@@ -26,10 +28,10 @@ pub(crate) fn show(
         .unwrap_or_else(|| conflict.destination.to_string());
 
     let dialog = adw::AlertDialog::builder()
-        .heading("File Already Exists")
-        .body(format!(
-            "\"{dest_name}\" already exists in this location.\n\n{}",
-            compare_text(conflict)
+        .heading(t("conflict.heading"))
+        .body(t_fmt(
+            "conflict.body",
+            &[("name", &dest_name), ("compare", &compare_text(conflict))],
         ))
         .build();
 
@@ -39,11 +41,10 @@ pub(crate) fn show(
 
     let rename_entry = gtk4::Entry::new();
     rename_entry.set_text(&suggested_name);
-    rename_entry.set_tooltip_text(Some("New name to save as instead"));
-    rename_entry.update_property(&[gtk4::accessible::Property::Label("New Name")]);
+    rename_entry.set_tooltip_text(Some(t("conflict.rename_tooltip")));
+    rename_entry.update_property(&[gtk4::accessible::Property::Label(t("conflict.new_name"))]);
 
-    let apply_to_all =
-        gtk4::CheckButton::with_label("Apply this choice to all remaining conflicts");
+    let apply_to_all = gtk4::CheckButton::with_label(t("conflict.apply_to_all"));
     apply_to_all.set_margin_top(6);
 
     let extra = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
@@ -52,9 +53,9 @@ pub(crate) fn show(
     dialog.set_extra_child(Some(&extra));
 
     dialog.add_responses(&[
-        ("skip", "Skip"),
-        ("rename", "Rename"),
-        ("replace", "Replace"),
+        ("skip", t("conflict.skip")),
+        ("rename", t("conflict.rename")),
+        ("replace", t("conflict.replace")),
     ]);
     dialog.set_response_appearance("replace", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("rename"));
@@ -90,7 +91,10 @@ pub(crate) fn show(
 fn compare_text(conflict: &Conflict) -> String {
     let existing = describe(&conflict.destination);
     let incoming = describe(&conflict.source);
-    format!("Existing: {existing}\nIncoming: {incoming}")
+    t_fmt(
+        "conflict.compare",
+        &[("existing", &existing), ("incoming", &incoming)],
+    )
 }
 
 fn describe(path: &VeyraPath) -> String {
@@ -99,14 +103,20 @@ fn describe(path: &VeyraPath) -> String {
         gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
         gio::Cancellable::NONE,
     ) else {
-        return "unknown".to_string();
+        return t("conflict.unknown").to_string();
     };
 
     let size = veyra_filesystem::format_size(info.size().max(0) as u64);
     match info.modification_date_time() {
-        Some(modified) => format!(
-            "{size}, modified {}",
-            modified.format("%Y-%m-%d %H:%M").unwrap_or_default()
+        Some(modified) => t_fmt(
+            "conflict.size_modified",
+            &[
+                ("size", &size),
+                (
+                    "date",
+                    &modified.format("%Y-%m-%d %H:%M").unwrap_or_default(),
+                ),
+            ],
         ),
         None => size,
     }

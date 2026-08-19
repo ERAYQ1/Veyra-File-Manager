@@ -14,6 +14,8 @@ use gtk4::prelude::*;
 
 use veyra_filesystem::{format_size, FileItem, VeyraPath};
 
+use crate::i18n::{t, t_fmt, t_plural};
+
 /// The virtual location the sidebar's "Trash" entry navigates to.
 pub(crate) const TRASH_URI: &str = "trash:///";
 
@@ -27,15 +29,19 @@ pub(crate) fn is_trash_location(path: &VeyraPath) -> bool {
 /// "Trash is Empty" message.
 pub(crate) fn format_summary(items: &[FileItem]) -> String {
     if items.is_empty() {
-        return "Trash is Empty".to_string();
+        return t("empty.trash.title").to_string();
     }
     let total: u64 = items.iter().map(|item| item.metadata.size_bytes).sum();
-    let count_label = if items.len() == 1 {
-        "1 item".to_string()
-    } else {
-        format!("{} items", items.len())
-    };
-    format!("Trash — {count_label}, {} total", format_size(total))
+    let count = items.len() as u32;
+    let count_label = t_plural(
+        "status.items_count",
+        count as i64,
+        &[("count", &count.to_string())],
+    );
+    t_fmt(
+        "trash.banner_summary",
+        &[("count_label", &count_label), ("size", &format_size(total))],
+    )
 }
 
 /// The `trash:///`-only info row a panel reveals above its tab strip: item/
@@ -58,12 +64,12 @@ pub(crate) fn build_banner() -> TrashBannerHandles {
     row.set_margin_bottom(6);
     row.add_css_class("card");
 
-    let title_label = gtk4::Label::new(Some("Trash"));
+    let title_label = gtk4::Label::new(Some(t("sidebar.trash")));
     title_label.set_hexpand(true);
     title_label.set_xalign(0.0);
     row.append(&title_label);
 
-    let empty_button = gtk4::Button::with_label("Empty Trash");
+    let empty_button = gtk4::Button::with_label(t("menu.empty_trash"));
     empty_button.add_css_class("destructive-action");
     row.append(&empty_button);
 

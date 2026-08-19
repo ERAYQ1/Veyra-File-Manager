@@ -14,22 +14,23 @@ use libadwaita::prelude::*;
 
 use veyra_filesystem::VeyraPath;
 
+use crate::i18n::{t, t_fmt};
 use crate::network::{self, NetworkProtocol};
 
 /// Shows the dialog parented to `window`. On a successful connection,
 /// `navigate` is called with the mounted location and the dialog closes.
 pub(crate) fn show(window: &adw::ApplicationWindow, navigate: Rc<dyn Fn(VeyraPath)>) {
     let dialog = adw::Dialog::builder()
-        .title("Connect to Server")
+        .title(t("connect.title"))
         .content_width(440)
         .content_height(560)
         .build();
 
     let header = adw::HeaderBar::new();
     header.set_show_end_title_buttons(false);
-    header.set_title_widget(Some(&gtk4::Label::new(Some("Connect to Server"))));
+    header.set_title_widget(Some(&gtk4::Label::new(Some(t("connect.title")))));
 
-    let cancel_button = gtk4::Button::with_label("Cancel");
+    let cancel_button = gtk4::Button::with_label(t("connect.cancel"));
     header.pack_start(&cancel_button);
     {
         let dialog = dialog.clone();
@@ -38,7 +39,7 @@ pub(crate) fn show(window: &adw::ApplicationWindow, navigate: Rc<dyn Fn(VeyraPat
         });
     }
 
-    let connect_button = gtk4::Button::with_label("Connect");
+    let connect_button = gtk4::Button::with_label(t("connect.connect"));
     connect_button.add_css_class("suggested-action");
     connect_button.set_sensitive(false);
     header.pack_end(&connect_button);
@@ -50,15 +51,13 @@ pub(crate) fn show(window: &adw::ApplicationWindow, navigate: Rc<dyn Fn(VeyraPat
     content.set_margin_start(16);
     content.set_margin_end(16);
 
-    let address_label = gtk4::Label::new(Some("Server Address"));
+    let address_label = gtk4::Label::new(Some(t("connect.address_label")));
     address_label.set_xalign(0.0);
     address_label.add_css_class("heading");
     content.append(&address_label);
 
     let address_entry = gtk4::Entry::new();
-    address_entry.set_placeholder_text(Some(
-        "smb://server/share, sftp://user@host/path, ftp://host…",
-    ));
+    address_entry.set_placeholder_text(Some(t("connect.address_placeholder")));
     address_entry.set_activates_default(true);
     content.append(&address_entry);
 
@@ -76,7 +75,7 @@ pub(crate) fn show(window: &adw::ApplicationWindow, navigate: Rc<dyn Fn(VeyraPat
     let status_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     let spinner = gtk4::Spinner::new();
     status_box.append(&spinner);
-    status_box.append(&gtk4::Label::new(Some("Connecting…")));
+    status_box.append(&gtk4::Label::new(Some(t("connect.connecting"))));
     status_box.set_visible(false);
     content.append(&status_box);
 
@@ -135,7 +134,7 @@ pub(crate) fn show(window: &adw::ApplicationWindow, navigate: Rc<dyn Fn(VeyraPat
     }
 
     content.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
-    let recent_label = gtk4::Label::new(Some("Recent Servers"));
+    let recent_label = gtk4::Label::new(Some(t("connect.recent_servers")));
     recent_label.set_xalign(0.0);
     recent_label.add_css_class("heading");
     recent_label.add_css_class("dim-label");
@@ -261,9 +260,10 @@ fn recent_row(
 
     let remove_button = gtk4::Button::from_icon_name("edit-delete-symbolic");
     remove_button.add_css_class("flat");
-    remove_button.set_tooltip_text(Some("Remove from history"));
-    remove_button.update_property(&[gtk4::accessible::Property::Label(&format!(
-        "Remove {uri} from history"
+    remove_button.set_tooltip_text(Some(t("connect.remove_from_history")));
+    remove_button.update_property(&[gtk4::accessible::Property::Label(&t_fmt(
+        "connect.remove_uri_from_history",
+        &[("uri", uri)],
     ))]);
     {
         let uri = uri.to_string();

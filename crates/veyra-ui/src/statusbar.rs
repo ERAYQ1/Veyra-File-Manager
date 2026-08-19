@@ -1,5 +1,7 @@
 use gtk4::prelude::*;
 
+use crate::i18n::t_plural;
+
 /// Handles to the two status bar labels: item count (left) and free disk
 /// space for the current location (right).
 #[derive(Clone)]
@@ -16,7 +18,7 @@ pub(crate) fn build() -> StatusBarHandles {
     widget.set_margin_top(4);
     widget.set_margin_bottom(4);
 
-    let left_label = gtk4::Label::new(Some("0 items"));
+    let left_label = gtk4::Label::new(Some(&t_plural("status.items_count", 0, &[("count", "0")])));
     left_label.set_xalign(0.0);
     left_label.add_css_class("dim-label");
 

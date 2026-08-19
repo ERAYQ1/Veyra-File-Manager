@@ -38,7 +38,7 @@ use crate::dev_tools::{self, ChecksumResult};
 use crate::dialogs::checksum_dialog;
 use crate::dialogs::file_associations_dialog;
 use crate::fs_async;
-use crate::i18n::t;
+use crate::i18n::{t, t_fmt};
 use crate::open_with;
 use crate::privileged;
 use crate::thumbnails::ThumbnailService;
@@ -71,7 +71,7 @@ fn show_dialog(
     on_permissions_changed: Rc<dyn Fn()>,
 ) {
     let dialog = adw::PreferencesDialog::builder()
-        .title("Properties")
+        .title(t("properties.title"))
         .content_width(480)
         .content_height(560)
         .build();
@@ -100,29 +100,31 @@ fn show_dialog(
             move |result| match result {
                 Ok(info) => {
                     disk_usage_row.set_subtitle(&info.disk_usage_bytes.map_or_else(
-                        || "Unknown".to_string(),
+                        || t("properties.unknown").to_string(),
                         |b| {
-                            format!(
-                                "{} ({} bytes)",
-                                veyra_filesystem::format_size(b),
-                                format_bytes_grouped(b)
+                            t_fmt(
+                                "properties.size_with_bytes",
+                                &[
+                                    ("size", &veyra_filesystem::format_size(b)),
+                                    ("bytes", &format_bytes_grouped(b)),
+                                ],
                             )
                         },
                     ));
                     device_row.set_subtitle(
                         &info
                             .device_id
-                            .map_or_else(|| "Unknown".to_string(), |d| d.to_string()),
+                            .map_or_else(|| t("properties.unknown").to_string(), |d| d.to_string()),
                     );
                     filesystem_row.set_subtitle(
                         &info
                             .filesystem_type
-                            .unwrap_or_else(|| "Unknown".to_string()),
+                            .unwrap_or_else(|| t("properties.unknown").to_string()),
                     );
                 }
                 Err(err) => {
-                    disk_usage_row.set_subtitle("Unavailable");
-                    device_row.set_subtitle("Unavailable");
+                    disk_usage_row.set_subtitle(t("properties.unavailable"));
+                    device_row.set_subtitle(t("properties.unavailable"));
                     filesystem_row.set_subtitle(&err.to_string());
                 }
             },
@@ -142,13 +144,18 @@ fn show_dialog(
             move |result| {
                 spinner.set_visible(false);
                 match result {
-                    Ok(count) => contains_row.set_subtitle(&format!(
-                        "{} files, {} folders ({})",
-                        count.file_count,
-                        count.dir_count,
-                        veyra_filesystem::format_size(count.total_size)
+                    Ok(count) => contains_row.set_subtitle(&t_fmt(
+                        "properties.contains_summary",
+                        &[
+                            ("files", &count.file_count.to_string()),
+                            ("folders", &count.dir_count.to_string()),
+                            ("size", &veyra_filesystem::format_size(count.total_size)),
+                        ],
                     )),
-                    Err(err) => contains_row.set_subtitle(&format!("Unavailable: {err}")),
+                    Err(err) => contains_row.set_subtitle(&t_fmt(
+                        "properties.contains_unavailable",
+                        &[("error", &err.to_string())],
+                    )),
                 }
             },
         );
@@ -170,7 +177,7 @@ fn build_general_page(
     dialog: &adw::PreferencesDialog,
 ) -> GeneralPageHandles {
     let page = adw::PreferencesPage::builder()
-        .title("General")
+        .title(t("properties.general"))
         .icon_name("dialog-information-symbolic")
         .build();
 
@@ -193,7 +200,7 @@ fn build_general_page(
     let info_group = adw::PreferencesGroup::new();
     info_group.add(
         &adw::ActionRow::builder()
-            .title("Type")
+            .title(t("properties.type"))
             .subtitle(describe_type(item))
             .title_lines(1)
             .subtitle_lines(2)
@@ -204,7 +211,7 @@ fn build_general_page(
     if matches!(item.kind(), FileKind::Regular) {
         let default_app = open_with::default_app(&item.metadata.mime_type);
         let default_app_row = adw::ActionRow::builder()
-            .title("Default Application")
+            .title(t("properties.default_application"))
             .title_lines(1)
             .subtitle_lines(1)
             .build();
@@ -221,11 +228,11 @@ fn build_general_page(
         let app_text = default_app
             .as_ref()
             .map(|a| a.name().to_string())
-            .unwrap_or_else(|| "None".to_string());
+            .unwrap_or_else(|| t("file_assoc.none").to_string());
         app_label.set_text(&app_text);
         suffix_box.append(&app_label);
 
-        let change_button = gtk4::Button::with_label("Change…");
+        let change_button = gtk4::Button::with_label(t("file_assoc.change"));
         change_button.add_css_class("flat");
         change_button.set_valign(gtk4::Align::Center);
 
@@ -239,7 +246,7 @@ fn build_general_page(
                     let text = app
                         .as_ref()
                         .map(|a| a.name().to_string())
-                        .unwrap_or_else(|| "None".to_string());
+                        .unwrap_or_else(|| t("file_assoc.none").to_string());
                     app_label.set_text(&text);
                 })
             };
@@ -256,7 +263,7 @@ fn build_general_page(
     }
 
     let location_row = adw::ActionRow::builder()
-        .title("Location")
+        .title(t("properties.location"))
         .subtitle(parent_display(&item.path))
         .title_lines(1)
         .subtitle_lines(2)
@@ -264,8 +271,9 @@ fn build_general_page(
     let copy_path_button = gtk4::Button::from_icon_name("edit-copy-symbolic");
     copy_path_button.set_valign(gtk4::Align::Center);
     copy_path_button.add_css_class("flat");
-    copy_path_button.set_tooltip_text(Some("Copy Path"));
-    copy_path_button.update_property(&[gtk4::accessible::Property::Label("Copy Path")]);
+    copy_path_button.set_tooltip_text(Some(t("properties.copy_path")));
+    copy_path_button
+        .update_property(&[gtk4::accessible::Property::Label(t("properties.copy_path"))]);
     {
         let path = item.path.clone();
         copy_path_button.connect_clicked(move |button| {
@@ -277,11 +285,13 @@ fn build_general_page(
 
     info_group.add(
         &adw::ActionRow::builder()
-            .title("Size")
-            .subtitle(format!(
-                "{} ({} bytes)",
-                item.metadata.size_human(),
-                format_bytes_grouped(item.metadata.size_bytes)
+            .title(t("properties.size"))
+            .subtitle(t_fmt(
+                "properties.size_with_bytes",
+                &[
+                    ("size", &item.metadata.size_human()),
+                    ("bytes", &format_bytes_grouped(item.metadata.size_bytes)),
+                ],
             ))
             .title_lines(1)
             .subtitle_lines(2)
@@ -289,8 +299,8 @@ fn build_general_page(
     );
 
     let disk_usage_row = adw::ActionRow::builder()
-        .title("Disk Usage")
-        .subtitle("Calculating…")
+        .title(t("properties.disk_usage"))
+        .subtitle(t("properties.calculating"))
         .title_lines(1)
         .subtitle_lines(2)
         .build();
@@ -298,8 +308,8 @@ fn build_general_page(
 
     let contains = if item.kind().is_directory() {
         let row = adw::ActionRow::builder()
-            .title("Contains")
-            .subtitle("Calculating…")
+            .title(t("properties.contains"))
+            .subtitle(t("properties.calculating"))
             .title_lines(1)
             .subtitle_lines(2)
             .build();
@@ -315,9 +325,18 @@ fn build_general_page(
     page.add(&info_group);
 
     let time_group = adw::PreferencesGroup::new();
-    time_group.add(&timestamp_row("Created", item.metadata.created));
-    time_group.add(&timestamp_row("Modified", item.metadata.modified));
-    time_group.add(&timestamp_row("Accessed", item.metadata.accessed));
+    time_group.add(&timestamp_row(
+        t("properties.created"),
+        item.metadata.created,
+    ));
+    time_group.add(&timestamp_row(
+        t("properties.modified"),
+        item.metadata.modified,
+    ));
+    time_group.add(&timestamp_row(
+        t("properties.accessed"),
+        item.metadata.accessed,
+    ));
     page.add(&time_group);
 
     // Faz 41: checksums are opt-in (a "Calculate Checksums" button, not an
@@ -414,9 +433,9 @@ fn build_checksums_group(
                     sha512_row.fail(&err.to_string());
                 }
                 None => {
-                    md5_row.fail("Unavailable");
-                    sha256_row.fail("Unavailable");
-                    sha512_row.fail("Unavailable");
+                    md5_row.fail(t("properties.unavailable"));
+                    sha256_row.fail(t("properties.unavailable"));
+                    sha512_row.fail(t("properties.unavailable"));
                 }
             },
         );
@@ -433,14 +452,14 @@ struct AdvancedPageHandles {
 
 fn build_advanced_page(item: &FileItem) -> AdvancedPageHandles {
     let page = adw::PreferencesPage::builder()
-        .title("Advanced")
+        .title(t("properties.advanced"))
         .icon_name("applications-engineering-symbolic")
         .build();
 
     let group = adw::PreferencesGroup::new();
     group.add(
         &adw::ActionRow::builder()
-            .title("MIME Type")
+            .title(t("properties.mime_type"))
             .subtitle(item.metadata.mime_type.clone())
             .title_lines(1)
             .subtitle_lines(2)
@@ -448,26 +467,26 @@ fn build_advanced_page(item: &FileItem) -> AdvancedPageHandles {
     );
     group.add(
         &adw::ActionRow::builder()
-            .title("Inode")
+            .title(t("properties.inode"))
             .subtitle(
                 item.metadata
                     .inode
-                    .map_or_else(|| "Unknown".to_string(), |i| i.to_string()),
+                    .map_or_else(|| t("properties.unknown").to_string(), |i| i.to_string()),
             )
             .title_lines(1)
             .subtitle_lines(2)
             .build(),
     );
     let device_row = adw::ActionRow::builder()
-        .title("Device")
-        .subtitle("Calculating…")
+        .title(t("properties.device"))
+        .subtitle(t("properties.calculating"))
         .title_lines(1)
         .subtitle_lines(2)
         .build();
     group.add(&device_row);
     let filesystem_row = adw::ActionRow::builder()
-        .title("Filesystem")
-        .subtitle("Calculating…")
+        .title(t("properties.filesystem"))
+        .subtitle(t("properties.calculating"))
         .title_lines(1)
         .subtitle_lines(2)
         .build();
@@ -476,27 +495,28 @@ fn build_advanced_page(item: &FileItem) -> AdvancedPageHandles {
 
     if let FileKind::Symlink { target, is_broken } = item.kind() {
         let link_group = adw::PreferencesGroup::builder()
-            .title("Symbolic Link")
+            .title(t("properties.symbolic_link"))
             .build();
-        let target_text = target
-            .as_ref()
-            .map_or_else(|| "Unknown".to_string(), |t| t.display().to_string());
+        let target_text = target.as_ref().map_or_else(
+            || t("properties.unknown").to_string(),
+            |target| target.display().to_string(),
+        );
         link_group.add(
             &adw::ActionRow::builder()
-                .title("Target")
+                .title(t("properties.target"))
                 .subtitle(target_text)
                 .title_lines(1)
                 .subtitle_lines(2)
                 .build(),
         );
         let status = if *is_broken {
-            "Broken — target does not exist"
+            t("properties.link_broken")
         } else {
-            "Valid"
+            t("properties.link_valid")
         };
         link_group.add(
             &adw::ActionRow::builder()
-                .title("Status")
+                .title(t("properties.status"))
                 .subtitle(status)
                 .title_lines(1)
                 .subtitle_lines(2)
@@ -533,19 +553,21 @@ fn build_permissions_page(
     let state = Rc::new(Cell::new(permissions));
 
     let page = adw::PreferencesPage::builder()
-        .title("Permissions")
+        .title(t("properties.permissions"))
         .icon_name("system-lock-screen-symbolic")
         .build();
 
-    let ownership_group = adw::PreferencesGroup::builder().title("Ownership").build();
+    let ownership_group = adw::PreferencesGroup::builder()
+        .title(t("properties.ownership"))
+        .build();
     ownership_group.add(
         &adw::ActionRow::builder()
-            .title("Owner")
+            .title(t("properties.owner"))
             .subtitle(
                 item.metadata
                     .owner
                     .clone()
-                    .unwrap_or_else(|| "Unknown".to_string()),
+                    .unwrap_or_else(|| t("properties.unknown").to_string()),
             )
             .title_lines(1)
             .subtitle_lines(2)
@@ -553,12 +575,12 @@ fn build_permissions_page(
     );
     ownership_group.add(
         &adw::ActionRow::builder()
-            .title("Group")
+            .title(t("properties.group"))
             .subtitle(
                 item.metadata
                     .group
                     .clone()
-                    .unwrap_or_else(|| "Unknown".to_string()),
+                    .unwrap_or_else(|| t("properties.unknown").to_string()),
             )
             .title_lines(1)
             .subtitle_lines(2)
@@ -569,7 +591,7 @@ fn build_permissions_page(
     // Faz 28: Editable octal mode entry with validation
     let mode_group = adw::PreferencesGroup::new();
     let mode_row = adw::ActionRow::builder()
-        .title("Mode")
+        .title(t("properties.mode"))
         .subtitle(mode_subtitle(permissions))
         .title_lines(1)
         .subtitle_lines(2)
@@ -580,9 +602,9 @@ fn build_permissions_page(
     mode_entry.set_halign(gtk4::Align::End);
     mode_entry.set_valign(gtk4::Align::Center);
     mode_entry.add_css_class("monospace");
-    mode_entry.update_property(&[gtk4::accessible::Property::Label(
-        "Permissions Mode (Octal)",
-    )]);
+    mode_entry.update_property(&[gtk4::accessible::Property::Label(t(
+        "properties.mode_accessible_label",
+    ))]);
     let mode_error_label = gtk4::Label::new(Some(""));
     mode_error_label.add_css_class("dim-label");
     mode_error_label.add_css_class("caption");
@@ -598,11 +620,11 @@ fn build_permissions_page(
     let mut special_switches: Option<(adw::SwitchRow, adw::SwitchRow, adw::SwitchRow)> = None;
     if !matches!(item.kind(), FileKind::Symlink { .. }) {
         let special_group = adw::PreferencesGroup::builder()
-            .title("Special Permissions")
+            .title(t("properties.special_permissions"))
             .build();
 
         let suid_switch = adw::SwitchRow::builder()
-            .title("Set User ID (SUID)")
+            .title(t("properties.suid"))
             .active(permissions.is_setuid())
             .build();
         special_group.add(&suid_switch);
@@ -617,7 +639,7 @@ fn build_permissions_page(
         );
 
         let sgid_switch = adw::SwitchRow::builder()
-            .title("Set Group ID (SGID)")
+            .title(t("properties.sgid"))
             .active(permissions.is_setgid())
             .build();
         special_group.add(&sgid_switch);
@@ -632,7 +654,7 @@ fn build_permissions_page(
         );
 
         let sticky_switch = adw::SwitchRow::builder()
-            .title("Sticky Bit")
+            .title(t("properties.sticky"))
             .active(permissions.is_sticky())
             .build();
         special_group.add(&sticky_switch);
@@ -651,7 +673,7 @@ fn build_permissions_page(
     }
 
     let (owner_group, owner_switches) = build_class_group(
-        "Owner",
+        t("properties.owner"),
         permissions.is_owner_readable(),
         permissions.is_owner_writable(),
         permissions.is_owner_executable(),
@@ -686,7 +708,7 @@ fn build_permissions_page(
     );
 
     let (group_group, group_switches) = build_class_group(
-        "Group",
+        t("properties.group"),
         permissions.is_group_readable(),
         permissions.is_group_writable(),
         permissions.is_group_executable(),
@@ -721,7 +743,7 @@ fn build_permissions_page(
     );
 
     let (other_group, other_switches) = build_class_group(
-        "Others",
+        t("properties.others"),
         permissions.is_other_readable(),
         permissions.is_other_writable(),
         permissions.is_other_executable(),
@@ -815,14 +837,14 @@ fn build_permissions_page(
                             entry.set_text(&previous.octal_string());
                             show_chmod_error_simple(
                                 &dialog_for_result,
-                                "Couldn't Change Permissions",
+                                t("properties.chmod_error_heading"),
                                 &err,
                             );
                         }
                     },
                 );
             } else {
-                mode_error_label.set_text("Invalid mode");
+                mode_error_label.set_text(t("properties.invalid_mode"));
             }
         });
     }
@@ -830,7 +852,7 @@ fn build_permissions_page(
     if matches!(item.kind(), FileKind::Regular) {
         let execute_group = adw::PreferencesGroup::new();
         let execute_switch = adw::SwitchRow::builder()
-            .title("Allow executing file as program")
+            .title(t("properties.allow_execute"))
             .active(permissions.is_executable())
             .build();
         execute_group.add(&execute_switch);
@@ -853,7 +875,7 @@ fn build_permissions_page(
     // Faz 28: "Apply Permissions to Enclosed Files" button for directories
     if item.kind().is_directory() {
         let recursive_group = adw::PreferencesGroup::new();
-        let apply_button = gtk4::Button::with_label("Apply Permissions to Enclosed Files…");
+        let apply_button = gtk4::Button::with_label(t("properties.apply_recursive"));
         apply_button.add_css_class("suggested-action");
         let apply_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
         apply_box.set_margin_top(6);
@@ -870,14 +892,23 @@ fn build_permissions_page(
             apply_button.connect_clicked(move |_| {
                 let current_perms = state.get();
                 let confirm_dialog = adw::AlertDialog::builder()
-                    .heading("Apply Permissions Recursively")
-                    .body(format!(
-                        "This will change permissions for every file and folder inside {}. This cannot be undone.",
-                        path.file_name().unwrap_or_else(|| "this folder".to_string())
+                    .heading(t("properties.apply_recursive_heading"))
+                    .body(t_fmt(
+                        "properties.apply_recursive_body",
+                        &[(
+                            "name",
+                            &path
+                                .file_name()
+                                .unwrap_or_else(|| t("properties.this_folder").to_string()),
+                        )],
                     ))
                     .build();
-                confirm_dialog.add_responses(&[("cancel", "Cancel"), ("apply", "Apply")]);
-                confirm_dialog.set_response_appearance("apply", adw::ResponseAppearance::Destructive);
+                confirm_dialog.add_responses(&[
+                    ("cancel", t("properties.cancel")),
+                    ("apply", t("properties.apply")),
+                ]);
+                confirm_dialog
+                    .set_response_appearance("apply", adw::ResponseAppearance::Destructive);
                 confirm_dialog.set_default_response(Some("cancel"));
                 confirm_dialog.set_close_response("cancel");
 
@@ -908,13 +939,16 @@ fn build_class_group(
     (adw::SwitchRow, adw::SwitchRow, adw::SwitchRow),
 ) {
     let group = adw::PreferencesGroup::builder().title(title).build();
-    let read_row = adw::SwitchRow::builder().title("Read").active(read).build();
+    let read_row = adw::SwitchRow::builder()
+        .title(t("properties.read"))
+        .active(read)
+        .build();
     let write_row = adw::SwitchRow::builder()
-        .title("Write")
+        .title(t("properties.write"))
         .active(write)
         .build();
     let execute_row = adw::SwitchRow::builder()
-        .title("Execute")
+        .title(t("properties.execute"))
         .active(execute)
         .build();
     group.add(&read_row);
@@ -994,7 +1028,7 @@ fn show_chmod_error_simple(
         .heading(heading)
         .body(err.to_string())
         .build();
-    dialog.add_responses(&[("ok", "OK")]);
+    dialog.add_responses(&[("ok", t("properties.ok"))]);
     dialog.set_default_response(Some("ok"));
     dialog.set_close_response("ok");
     dialog.present(Some(parent));
@@ -1002,10 +1036,10 @@ fn show_chmod_error_simple(
 
 fn show_chmod_error(parent: &impl IsA<gtk4::Widget>, err: &veyra_filesystem::FsError) {
     let dialog = adw::AlertDialog::builder()
-        .heading("Couldn't Change Permissions")
+        .heading(t("properties.chmod_error_heading"))
         .body(err.to_string())
         .build();
-    dialog.add_responses(&[("ok", "OK")]);
+    dialog.add_responses(&[("ok", t("properties.ok"))]);
     dialog.set_default_response(Some("ok"));
     dialog.set_close_response("ok");
     dialog.present(Some(parent));
@@ -1030,13 +1064,13 @@ fn show_recursive_chmod_dialog(
                 Ok(outcome) => {
                     if outcome.errors.is_empty() {
                         let success_dialog = adw::AlertDialog::builder()
-                            .heading("Permissions Applied")
-                            .body(format!(
-                                "Successfully changed permissions for {} items.",
-                                outcome.succeeded
+                            .heading(t("properties.chmod_success_heading"))
+                            .body(t_fmt(
+                                "properties.chmod_success_body",
+                                &[("count", &outcome.succeeded.to_string())],
                             ))
                             .build();
-                        success_dialog.add_responses(&[("ok", "OK")]);
+                        success_dialog.add_responses(&[("ok", t("properties.ok"))]);
                         success_dialog.present(Some(&parent));
                     } else if outcome
                         .errors
@@ -1047,14 +1081,16 @@ fn show_recursive_chmod_dialog(
                         show_recursive_chmod_retry_admin(&parent, &path_for_result, mode);
                     } else {
                         let error_dialog = adw::AlertDialog::builder()
-                            .heading("Permissions Partially Applied")
-                            .body(format!(
-                                "Successfully changed {} items, but {} failed.",
-                                outcome.succeeded,
-                                outcome.errors.len()
+                            .heading(t("properties.chmod_partial_heading"))
+                            .body(t_fmt(
+                                "properties.chmod_partial_body",
+                                &[
+                                    ("succeeded", &outcome.succeeded.to_string()),
+                                    ("failed", &outcome.errors.len().to_string()),
+                                ],
                             ))
                             .build();
-                        error_dialog.add_responses(&[("ok", "OK")]);
+                        error_dialog.add_responses(&[("ok", t("properties.ok"))]);
                         error_dialog.present(Some(&parent));
                     }
                 }
@@ -1079,10 +1115,13 @@ fn show_recursive_chmod_retry_admin(
     let path = path.clone();
     let parent_rc = Rc::new(parent.clone());
     let dialog = adw::AlertDialog::builder()
-        .heading("Insufficient Permissions")
-        .body("Some files couldn't be changed due to insufficient permissions.")
+        .heading(t("properties.insufficient_permissions_heading"))
+        .body(t("properties.insufficient_permissions_body"))
         .build();
-    dialog.add_responses(&[("cancel", "Cancel"), ("retry", "Retry as Administrator")]);
+    dialog.add_responses(&[
+        ("cancel", t("properties.cancel")),
+        ("retry", t("properties.retry_as_admin")),
+    ]);
     dialog.set_response_appearance("retry", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("retry"));
 
@@ -1097,7 +1136,7 @@ fn show_recursive_chmod_retry_admin(
                     if let Err(err) = result {
                         show_privileged_error(
                             parent_for_inner.as_ref(),
-                            "Couldn't Apply Permissions as Root",
+                            t("properties.chmod_root_error_heading"),
                             &err,
                         );
                     }
@@ -1119,7 +1158,7 @@ fn show_privileged_error(
         .heading(heading)
         .body(err.to_string())
         .build();
-    dialog.add_responses(&[("ok", "OK")]);
+    dialog.add_responses(&[("ok", t("properties.ok"))]);
     dialog.set_default_response(Some("ok"));
     dialog.set_close_response("ok");
     dialog.present(Some(parent));
@@ -1135,7 +1174,7 @@ fn mode_subtitle(permissions: FilePermissions) -> String {
 
 fn timestamp_row(title: &str, value: Option<DateTime<Utc>>) -> adw::ActionRow {
     let subtitle = value.map_or_else(
-        || "Unknown".to_string(),
+        || t("properties.unknown").to_string(),
         |dt| {
             dt.with_timezone(&Local)
                 .format("%Y-%m-%d %H:%M:%S")
@@ -1156,15 +1195,15 @@ fn timestamp_row(title: &str, value: Option<DateTime<Utc>>) -> adw::ActionRow {
 /// system database doesn't recognize it).
 fn describe_type(item: &FileItem) -> String {
     match item.kind() {
-        FileKind::Directory => "Folder".to_string(),
+        FileKind::Directory => t("properties.type_folder").to_string(),
         FileKind::Symlink {
             is_broken: true, ..
-        } => "Broken Symbolic Link".to_string(),
-        FileKind::Symlink { .. } => "Symbolic Link".to_string(),
-        FileKind::Fifo => "Named Pipe (FIFO)".to_string(),
-        FileKind::Socket => "Socket".to_string(),
-        FileKind::BlockDevice => "Block Device".to_string(),
-        FileKind::CharDevice => "Character Device".to_string(),
+        } => t("properties.type_broken_symlink").to_string(),
+        FileKind::Symlink { .. } => t("properties.symbolic_link").to_string(),
+        FileKind::Fifo => t("properties.type_fifo").to_string(),
+        FileKind::Socket => t("properties.type_socket").to_string(),
+        FileKind::BlockDevice => t("properties.type_block").to_string(),
+        FileKind::CharDevice => t("properties.type_char").to_string(),
         FileKind::Unknown => item.metadata.mime_type.clone(),
         FileKind::Regular => {
             let description = gio::content_type_get_description(&item.metadata.mime_type);

@@ -127,6 +127,7 @@ impl TabPage {
     /// Re-evaluates the combined search/quick-filter after either changes.
     pub(crate) fn refresh_filter(&self) {
         self.filter.changed(gtk4::FilterChange::Different);
+        crate::window::update_empty_state(&self.state);
     }
 }
 

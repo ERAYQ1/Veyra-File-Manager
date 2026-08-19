@@ -23,6 +23,7 @@ use veyra_filesystem::{format_size, FileItem, FileKind, FsError, VeyraPath};
 
 use crate::config::SharedSettings;
 use crate::fs_async;
+use crate::i18n::t;
 
 /// `PreviewPanelHandles::widget` is the single top-level widget callers
 /// embed in the window layout; every other field is an internal handle used
@@ -58,8 +59,8 @@ pub(crate) fn build(settings: SharedSettings) -> PreviewPanelHandles {
 
     let empty_page = adw::StatusPage::builder()
         .icon_name("view-reveal-symbolic")
-        .title("No Selection")
-        .description("Select a file to preview")
+        .title(t("preview.empty.title"))
+        .description(t("preview.empty.description"))
         .vexpand(true)
         .build();
     stack.add_named(&empty_page, Some("empty"));
@@ -116,7 +117,7 @@ fn loading_page() -> gtk4::Box {
     spinner.set_width_request(32);
     spinner.set_height_request(32);
 
-    let label = gtk4::Label::new(Some("Loading preview…"));
+    let label = gtk4::Label::new(Some(t("preview.loading")));
     label.add_css_class("dim-label");
 
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
@@ -194,7 +195,7 @@ fn info_page() -> (
     meta.set_justify(gtk4::Justification::Center);
     meta.set_halign(gtk4::Align::Center);
 
-    let open_button = gtk4::Button::with_label("Open in Default App");
+    let open_button = gtk4::Button::with_label(t("preview.open_in_default_app"));
     open_button.set_halign(gtk4::Align::Center);
     open_button.set_margin_top(12);
     open_button.add_css_class("pill");
@@ -240,7 +241,7 @@ pub(crate) fn show(handles: &PreviewPanelHandles, item: Option<FileItem>) {
         FileKind::Directory => show_directory(handles, generation, item),
         FileKind::Symlink {
             is_broken: true, ..
-        } => show_error(handles, &item, "Broken symbolic link"),
+        } => show_error(handles, &item, t("preview.error.broken_symlink")),
         FileKind::Symlink { target, .. } => show_symlink(handles, &item, target),
         FileKind::Regular => show_regular(handles, generation, item),
         other => show_info_card(
@@ -264,7 +265,7 @@ fn show_regular(handles: &PreviewPanelHandles, generation: u64, item: FileItem) 
             handles,
             &item,
             "x-office-document-symbolic",
-            "PDF Document",
+            t("preview.kind.pdf"),
             true,
         );
     } else if mime.starts_with("audio/") {
@@ -272,7 +273,7 @@ fn show_regular(handles: &PreviewPanelHandles, generation: u64, item: FileItem) 
             handles,
             &item,
             "audio-x-generic-symbolic",
-            "Audio File",
+            t("preview.kind.audio"),
             true,
         );
     } else if mime.starts_with("video/") {
@@ -280,7 +281,7 @@ fn show_regular(handles: &PreviewPanelHandles, generation: u64, item: FileItem) 
             handles,
             &item,
             "video-x-generic-symbolic",
-            "Video File",
+            t("preview.kind.video"),
             true,
         );
     } else if is_archive_mime(&mime) {
@@ -288,7 +289,7 @@ fn show_regular(handles: &PreviewPanelHandles, generation: u64, item: FileItem) 
             handles,
             &item,
             "package-x-generic-symbolic",
-            "Archive",
+            t("preview.kind.archive"),
             true,
         );
     } else {
@@ -296,7 +297,7 @@ fn show_regular(handles: &PreviewPanelHandles, generation: u64, item: FileItem) 
             handles,
             &item,
             crate::views::icon_name_for(&item),
-            "File",
+            t("preview.kind.file"),
             true,
         );
     }
@@ -449,7 +450,7 @@ fn show_directory(handles: &PreviewPanelHandles, generation: u64, item: FileItem
             .info_icon
             .set_icon_name(Some(crate::views::icon_name_for(&item)));
         handles.info_title.set_label(item.name());
-        handles.info_subtitle.set_label("Folder");
+        handles.info_subtitle.set_label(t("preview.kind.folder"));
         handles
             .info_meta
             .set_label(&format!("{}\n{}", item.path, modified_label(&item)));
@@ -473,7 +474,9 @@ fn show_directory(handles: &PreviewPanelHandles, generation: u64, item: FileItem
                         .info_icon
                         .set_icon_name(Some(crate::views::icon_name_for(&item)));
                     handles_done.info_title.set_label(item.name());
-                    handles_done.info_subtitle.set_label("Folder");
+                    handles_done
+                        .info_subtitle
+                        .set_label(t("preview.kind.folder"));
                     let meta = format!(
                         "{}\n{}\n{}",
                         item.path,
@@ -502,10 +505,10 @@ fn show_symlink(
         .info_icon
         .set_icon_name(Some(crate::views::icon_name_for(item)));
     handles.info_title.set_label(item.name());
-    handles.info_subtitle.set_label("Symbolic Link");
+    handles.info_subtitle.set_label(t("preview.kind.symlink"));
     let target_label = target
-        .map(|t| t.display().to_string())
-        .unwrap_or_else(|| "(unknown target)".to_string());
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| t("preview.symlink.unknown_target").to_string());
     let meta = format!("→ {target_label}\n{}", modified_label(item));
     handles.info_meta.set_label(&meta);
     handles.info_open_button.set_visible(true);
@@ -537,7 +540,7 @@ fn show_error(handles: &PreviewPanelHandles, item: &FileItem, reason: &str) {
     handles
         .info_icon
         .set_icon_name(Some("dialog-warning-symbolic"));
-    handles.info_title.set_label("Unable to Preview File");
+    handles.info_title.set_label(t("preview.error.unable"));
     handles.info_subtitle.set_label(reason);
     handles.info_meta.set_label(item.name());
     handles.info_open_button.set_visible(true);
@@ -565,11 +568,11 @@ fn entry_count_label(count: u32) -> String {
 
 fn kind_label(kind: &FileKind) -> &'static str {
     match kind {
-        FileKind::Fifo => "Named Pipe",
-        FileKind::Socket => "Socket",
-        FileKind::BlockDevice => "Block Device",
-        FileKind::CharDevice => "Character Device",
-        _ => "Special File",
+        FileKind::Fifo => t("preview.kind.pipe"),
+        FileKind::Socket => t("preview.kind.socket"),
+        FileKind::BlockDevice => t("preview.kind.block_device"),
+        FileKind::CharDevice => t("preview.kind.char_device"),
+        _ => t("preview.kind.special"),
     }
 }
 
@@ -668,8 +671,8 @@ mod tests {
 
     #[test]
     fn kind_label_covers_special_files() {
-        assert_eq!(kind_label(&FileKind::Fifo), "Named Pipe");
-        assert_eq!(kind_label(&FileKind::Socket), "Socket");
-        assert_eq!(kind_label(&FileKind::Unknown), "Special File");
+        assert_eq!(kind_label(&FileKind::Fifo), t("preview.kind.pipe"));
+        assert_eq!(kind_label(&FileKind::Socket), t("preview.kind.socket"));
+        assert_eq!(kind_label(&FileKind::Unknown), t("preview.kind.special"));
     }
 }

@@ -14,6 +14,7 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use crate::file_associations;
+use crate::i18n::t;
 use crate::open_with;
 
 /// Shows the File Associations dialog over `window`, listing all registered
@@ -21,18 +22,18 @@ use crate::open_with;
 /// the default application for each type.
 pub(crate) fn show(window: &adw::ApplicationWindow) {
     let dialog = adw::Dialog::builder()
-        .title("File Associations")
+        .title(t("file_assoc.title"))
         .content_width(520)
         .content_height(640)
         .build();
 
     let header = adw::HeaderBar::new();
     header.set_show_end_title_buttons(false);
-    header.set_title_widget(Some(&gtk4::Label::new(Some("File Associations"))));
+    header.set_title_widget(Some(&gtk4::Label::new(Some(t("file_assoc.title")))));
 
     let close_button = gtk4::Button::from_icon_name("window-close-symbolic");
-    close_button.set_tooltip_text(Some("Close"));
-    close_button.update_property(&[gtk4::accessible::Property::Label("Close")]);
+    close_button.set_tooltip_text(Some(t("file_assoc.close")));
+    close_button.update_property(&[gtk4::accessible::Property::Label(t("file_assoc.close"))]);
     header.pack_end(&close_button);
     {
         let dialog = dialog.clone();
@@ -48,7 +49,7 @@ pub(crate) fn show(window: &adw::ApplicationWindow) {
     content.set_margin_end(16);
 
     let search_entry = gtk4::SearchEntry::new();
-    search_entry.set_placeholder_text(Some("Search file types or MIME…"));
+    search_entry.set_placeholder_text(Some(t("file_assoc.search_placeholder")));
     content.append(&search_entry);
 
     let list = gtk4::ListBox::new();
@@ -155,7 +156,7 @@ fn build_file_type_row(
     update_app_label(&app_label, &entry.default_app);
     suffix_box.append(&app_label);
 
-    let change_button = gtk4::Button::with_label("Change…");
+    let change_button = gtk4::Button::with_label(t("file_assoc.change"));
     change_button.add_css_class("flat");
     change_button.set_valign(gtk4::Align::Center);
 
@@ -189,7 +190,7 @@ fn update_app_label(label: &gtk4::Label, app: &Option<gio::AppInfo>) {
     let text = app
         .as_ref()
         .map(|a| a.name().to_string())
-        .unwrap_or_else(|| "None".to_string());
+        .unwrap_or_else(|| t("file_assoc.none").to_string());
     label.set_text(&text);
 }
 
@@ -205,16 +206,18 @@ pub(crate) fn pick_default_app(
     let content_type = content_type.to_string();
 
     let dialog = adw::Dialog::builder()
-        .title("Select Application")
+        .title(t("file_assoc.select_application"))
         .content_width(400)
         .content_height(480)
         .build();
 
     let header = adw::HeaderBar::new();
     header.set_show_end_title_buttons(false);
-    header.set_title_widget(Some(&gtk4::Label::new(Some("Select Application"))));
+    header.set_title_widget(Some(&gtk4::Label::new(Some(t(
+        "file_assoc.select_application",
+    )))));
 
-    let cancel_button = gtk4::Button::with_label("Cancel");
+    let cancel_button = gtk4::Button::with_label(t("open_with.cancel"));
     header.pack_start(&cancel_button);
     {
         let dialog = dialog.clone();
@@ -223,7 +226,7 @@ pub(crate) fn pick_default_app(
         });
     }
 
-    let select_button = gtk4::Button::with_label("Set Default");
+    let select_button = gtk4::Button::with_label(t("file_assoc.set_default"));
     select_button.add_css_class("suggested-action");
     select_button.set_sensitive(false);
     header.pack_end(&select_button);
@@ -236,10 +239,10 @@ pub(crate) fn pick_default_app(
     content.set_margin_end(16);
 
     let search_entry = gtk4::SearchEntry::new();
-    search_entry.set_placeholder_text(Some("Search Applications…"));
+    search_entry.set_placeholder_text(Some(t("open_with.search_placeholder")));
     content.append(&search_entry);
 
-    let recommended_label = gtk4::Label::new(Some("Recommended Applications"));
+    let recommended_label = gtk4::Label::new(Some(t("open_with.recommended")));
     recommended_label.set_xalign(0.0);
     recommended_label.add_css_class("heading");
     content.append(&recommended_label);
@@ -250,7 +253,7 @@ pub(crate) fn pick_default_app(
     recommended_list.add_css_class("boxed-list");
     content.append(&recommended_list);
 
-    let all_label = gtk4::Label::new(Some("All Applications"));
+    let all_label = gtk4::Label::new(Some(t("open_with.all_applications")));
     all_label.set_xalign(0.0);
     all_label.add_css_class("heading");
     all_label.add_css_class("dim-label");

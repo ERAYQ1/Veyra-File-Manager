@@ -21,6 +21,8 @@ use gtk4::prelude::*;
 
 use veyra_filesystem::{FileItem, VeyraPath};
 
+use crate::i18n::t;
+
 /// The virtual location the sidebar's "Recent" entry navigates to.
 pub(crate) const RECENT_URI: &str = "recent:///";
 
@@ -183,20 +185,18 @@ pub(crate) fn build_banner(privacy_mode: Rc<RefCell<bool>>) -> RecentBannerHandl
     row.set_margin_bottom(6);
     row.add_css_class("card");
 
-    let title_label = gtk4::Label::new(Some("Recent Files"));
+    let title_label = gtk4::Label::new(Some(t("sidebar.recent_files")));
     title_label.set_hexpand(true);
     title_label.set_xalign(0.0);
     row.append(&title_label);
 
-    let switch_label = gtk4::Label::new(Some("Privacy Mode"));
+    let switch_label = gtk4::Label::new(Some(t("recent.privacy_mode")));
     row.append(&switch_label);
 
     let privacy_switch = gtk4::Switch::new();
     privacy_switch.set_valign(gtk4::Align::Center);
-    privacy_switch.set_tooltip_text(Some(
-        "When on, opening files here won't be added to Recent Files",
-    ));
-    privacy_switch.update_property(&[gtk4::accessible::Property::Label("Privacy Mode")]);
+    privacy_switch.set_tooltip_text(Some(t("recent.privacy_mode_tooltip")));
+    privacy_switch.update_property(&[gtk4::accessible::Property::Label(t("recent.privacy_mode"))]);
     {
         let privacy_mode = privacy_mode.clone();
         privacy_switch.connect_state_set(move |switch, state| {
@@ -207,7 +207,7 @@ pub(crate) fn build_banner(privacy_mode: Rc<RefCell<bool>>) -> RecentBannerHandl
     }
     row.append(&privacy_switch);
 
-    let clear_button = gtk4::Button::with_label("Clear History");
+    let clear_button = gtk4::Button::with_label(t("recent.clear_history"));
     clear_button.add_css_class("destructive-action");
     row.append(&clear_button);
 

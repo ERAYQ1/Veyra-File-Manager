@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use gtk4::gio;
+use libadwaita as adw;
 
 use veyra_filesystem::{GitFileStatus, OperationControl, VeyraPath};
 
@@ -33,6 +34,24 @@ pub(crate) struct AppState {
     /// Faz 40: `current_dir`'s per-file Git status, refreshed by
     /// `window::update_git_file_statuses` on every navigation/reload.
     pub git_statuses: SharedGitStatuses,
+    /// Faz 50: this tab's empty-state overlay page (`AdwStatusPage`),
+    /// shown instead of the Icon/Compact/Details content whenever the
+    /// current listing has zero visible items. Built and reassigned onto
+    /// this field in `window::open_tab` once the real widget exists;
+    /// `window::update_empty_state` is the only thing that mutates it
+    /// afterwards.
+    pub empty_page: adw::StatusPage,
+    /// Faz 50: the same underlying `model`, filtered by this tab's live
+    /// search/quick-filter/hidden-files filter — its `n_items()` is what
+    /// `window::update_empty_state` checks, so "no search results" and
+    /// "empty folder" can be told apart from the filtered count alone.
+    /// Reassigned in `window::open_tab` once the tab's real filter exists.
+    pub empty_filter_model: gtk4::FilterListModel,
+    /// Faz 50: mirrors the tab's live search query text so
+    /// `window::update_empty_state` can tell "no search results" apart from
+    /// "empty folder" without needing the full `TabPage`. Reassigned in
+    /// `window::open_tab` to share the same `Rc` as `TabPage::search_query`.
+    pub search_query: Rc<RefCell<String>>,
 }
 
 pub(crate) type SharedState = Rc<RefCell<AppState>>;
@@ -45,6 +64,12 @@ impl AppState {
             model: gio::ListStore::new::<gtk4::glib::BoxedAnyObject>(),
             load_control: None,
             git_statuses: Rc::new(RefCell::new(HashMap::new())),
+            empty_page: adw::StatusPage::new(),
+            empty_filter_model: gtk4::FilterListModel::new(
+                None::<gio::ListStore>,
+                None::<gtk4::CustomFilter>,
+            ),
+            search_query: Rc::new(RefCell::new(String::new())),
         }))
     }
 

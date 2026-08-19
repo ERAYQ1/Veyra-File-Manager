@@ -11,6 +11,8 @@ use gtk4::prelude::*;
 use veyra_filesystem::{format_size, VeyraPath};
 use veyra_search::SearchResult;
 
+use crate::i18n::t;
+
 #[derive(Clone)]
 pub(crate) struct SearchResultsHandles {
     pub revealer: gtk4::Revealer,
@@ -57,7 +59,7 @@ pub(crate) fn update(
     }
 
     if results.is_empty() {
-        let label = gtk4::Label::new(Some("No matches"));
+        let label = gtk4::Label::new(Some(t("empty.search.title")));
         label.add_css_class("dim-label");
         label.set_margin_top(8);
         label.set_margin_bottom(8);

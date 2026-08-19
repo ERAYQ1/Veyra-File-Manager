@@ -1,5 +1,31 @@
 # Changelog
 
+## Faz 50 — Final UI/UX Polish & Production Quality Audit
+
+Boş durum ekranları, tam i18n taraması ve kısayol/buton doğrulaması içeren bir cila fazı. En büyük bulgu: `veyra-ui`'de hiçbir yerde `AdwStatusPage` tabanlı boş-durum ekranı yoktu (boş klasör/arama/çöp kutusu sessizce boş bir liste gösteriyordu) ve 130'dan fazla arayüz metni doğrudan İngilizce literal olarak kodlanmıştı — `i18n::t()`'nin hiç çağrılmadığı, `Properties` diyaloğu gibi tüm bir pencere dahil.
+
+### Eklenenler
+- **Boş durum ekranı (`window.rs`, `state.rs`, `tab_page.rs`):** Her sekme artık kendi `AdwStatusPage`'ini, ana `Icon`/`Compact`/`Details` görünüm yığınının üzerine bindirilmiş bir `GtkOverlay` içinde taşıyor (`can_target(false)` — sürükle-bırak boş klasöre yine çalışıyor). `update_empty_state()`, `AppState`'e yeni eklenen özel bir `GtkFilterListModel`'in (`empty_filter_model`, ana modelle aynı filtreyi paylaşır) süzülmüş öge sayısına bakarak bağlama göre karar veriyor: Çöp Kutusu konumu > etkin arama sorgusu > düz "Klasör Boş". Yalnızca bir tarama gerçekten tamamlandıktan sonra (`load_control` boşaldıktan sonra) veya `refresh_filter()` sonrasında çağrılıyor — akan (chunked) bir taramanın ilk anlık 0 ögesi asla "Klasör Boş" ekranını yanlışlıkla göstermiyor (Kural #30).
+- **i18n tamlığı (`i18n.rs`, +200'den fazla yeni EN/TR anahtarı):** Sidebar (Places/Bookmarks/Devices/Network başlıkları, tüm XDG klasör etiketleri), Önizleme kenar çubuğu, Trash/Recent bantları, Connect to Server, Open With, File Associations, Command Palette, Disk Analyzer, Conflict diyaloğu ve **Properties penceresinin tamamı** (General/Permissions/Advanced sayfaları, ~75 literal) artık `t()`/`t_fmt()` üzerinden çekiliyor. `cargo test`'teki `every_en_key_has_a_tr_counterpart`/`every_tr_key_exists_in_en`/`no_duplicate_keys_within_a_table` testleri her yeni anahtarı doğruluyor.
+- **Birim testleri (`window.rs`):** Boş-durum karar mantığı, GTK/`libadwaita` widget'larından bağımsız saf bir `empty_state_content(is_trash, query_active)` fonksiyonuna ayrıştırıldı (libadwaita ana-thread kilidi `cargo test`'in test-başına-thread modeliyle çakıştığından, gerçek `AdwStatusPage` inşa eden testler mümkün değil) — 3 yeni test, Çöp Kutusu > arama > klasör önceliğini doğruluyor.
+
+### Doğrulanan (değişiklik gerekmedi)
+- Kısayol/Komut Paleti senkronizasyonu: `shortcuts.rs`/`command_palette.rs` ve yardım diyalogları, ivme (accelerator) tablosunu her zaman `Application::accels_for_action()`'dan canlı okuyor — tek doğruluk kaynağı, drift riski yok.
+- Sembolik simge bütünlüğü: taranan tüm `icon_name` çağrıları `-symbolic` sonekli.
+- TODO/FIXME/placeholder/Lorem ipsum: sıfır bulgu.
+
+### Bilinen Sınırlamalar
+- Komut Paleti'nin 40+ `CommandItem::title` ve Kısayollar yardımının 30+ `ShortcutEntry::label` alanı hâlâ sabit İngilizce literal — bunları `t()`'ye taşımak ayrı bir fazı hak eden geniş bir refactor (statik `&'static str` tablo → çalışma zamanı çeviri).
+- Diyalog/kart marjinleri için merkezi bir boşluk sabiti yok (6/12/18px kuralı her çağrı sitesinde elle tutarlı tutuluyor); ölçülebilir bir HIG ihlali bulunmadı, yalnızca bir refactor fırsatı.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 538 → 541 (workspace genelinde), tamamı geçti.
+
+### Sıradaki Faz
+Faz 51 onay bekliyor.
+
 ## Faz 49 — Performance Benchmarks & 1M Scaling Suite
 
 100 / 1.000 / 10.000 / 100.000 / 1.000.000 ölçeklerinde dizin tarama verimini, `FAST_ATTRIBUTES` vs `FULL_ATTRIBUTES` tembel metaveri kazanımını, gerçek işlem RSS'i üzerinden sınırlı bellek kullanımını, FTS5 arama gecikmesini, thumbnail L1 önbellek erişim hızını ve kopyalama/taşıma verimini ölçen bir performans kıyaslama paketi eklendi; sonuçlar `docs/benchmarks.md`'de tablolanıp `docs/performance-budget.md`'nin hedef bütçeleriyle karşılaştırıldı.

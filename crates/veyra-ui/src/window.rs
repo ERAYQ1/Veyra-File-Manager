@@ -13,7 +13,7 @@ use veyra_filesystem::{FileItem, OperationControl, OperationKind, OperationReque
 use veyra_search::SearchIndex;
 
 use crate::dnd;
-use crate::i18n::{t, t_plural};
+use crate::i18n::{t, t_fmt, t_plural};
 use crate::operations::OperationEvent;
 use crate::preview::{self, PreviewPanelHandles};
 use crate::split_view::{self, Chrome, Panel, PanelId, Panels};
@@ -1594,7 +1594,9 @@ fn setup_archive_actions(
             let progress = progress.clone();
             let archive_path = item.path;
 
-            let file_dialog = gtk4::FileDialog::builder().title("Extract to…").build();
+            let file_dialog = gtk4::FileDialog::builder()
+                .title(t("archive.extract_to"))
+                .build();
             let window_for_dialog = window.clone();
             let window_for_result = window.clone();
             file_dialog.select_folder(
@@ -2827,6 +2829,33 @@ fn open_tab(
     let sort_sync_guard = Rc::new(std::cell::Cell::new(false));
     let view_stack = gtk4::Stack::new();
 
+    // Faz 50: a dedicated filtered (unsorted — sorting never changes an
+    // item's count) view of `model` purely for `update_empty_state` to read
+    // `n_items()` from, independent of which of the three real views is
+    // currently visible.
+    {
+        let model = state.borrow().model.clone();
+        let empty_filter_model = gtk4::FilterListModel::new(Some(model), Some(filter.clone()));
+        let mut state_mut = state.borrow_mut();
+        state_mut.empty_filter_model = empty_filter_model;
+        state_mut.search_query = search_query.clone();
+    }
+
+    let empty_page = adw::StatusPage::builder()
+        .icon_name("folder-open-symbolic")
+        .vexpand(true)
+        .hexpand(true)
+        .visible(false)
+        .build();
+    // Passes pointer events (drag-and-drop onto an empty folder, in
+    // particular) straight through to the view underneath instead of the
+    // status page intercepting them.
+    empty_page.set_can_target(false);
+    state.borrow_mut().empty_page = empty_page.clone();
+    let view_overlay = gtk4::Overlay::new();
+    view_overlay.set_child(Some(&view_stack));
+    view_overlay.add_overlay(&empty_page);
+
     // `on_open` is wired into the views before this tab's own `TabPage`
     // exists (the views need it at construction time); the slot is filled
     // in once the tab is fully built, and `on_open` is only ever invoked
@@ -2939,7 +2968,7 @@ fn open_tab(
         };
     }
 
-    let adw_page = tab_view.append(&view_stack);
+    let adw_page = tab_view.append(&view_overlay);
 
     let tab = TabPage {
         state,
@@ -3784,6 +3813,11 @@ fn load_directory(state: &SharedState, chrome: &Chrome, path: VeyraPath) {
     }
 
     chrome.status_left.set_label(t("status.loading"));
+    // Hides whatever empty-state page the previous location may have been
+    // showing immediately, so navigating away from an empty folder never
+    // leaves its "Folder is Empty" page on screen over the new location's
+    // still-loading content.
+    state.borrow().empty_page.set_visible(false);
 
     let state_for_done = state.clone();
     let chrome_for_done = chrome.clone();
@@ -3857,9 +3891,10 @@ fn load_directory(state: &SharedState, chrome: &Chrome, path: VeyraPath) {
                 model_for_chunk.append(&gtk4::glib::BoxedAnyObject::new(item));
             }
             let count = model_for_chunk.n_items();
-            chrome_for_chunk
-                .status_left
-                .set_label(&format!("Loading… ({})", count_label(count)));
+            chrome_for_chunk.status_left.set_label(&t_fmt(
+                "status.loading_count",
+                &[("count", &count_label(count))],
+            ));
         },
         move |result: Result<(), veyra_filesystem::FsError>| {
             if control_for_done.is_cancelled() {
@@ -3874,13 +3909,15 @@ fn load_directory(state: &SharedState, chrome: &Chrome, path: VeyraPath) {
                         .status_left
                         .set_label(&format!("{} ({size})", count_label(count)));
                     update_free_space(&state_for_done, &chrome_for_done);
+                    update_empty_state(&state_for_done);
                 }
                 Err(err) => {
                     tracing::warn!(error = %err, "failed to read directory");
                     chrome_for_done
                         .status_left
-                        .set_label(&format!("Error: {err}"));
+                        .set_label(&t_fmt("status.error", &[("message", &err.to_string())]));
                     chrome_for_done.status_right.set_label("");
+                    update_empty_state(&state_for_done);
                 }
             }
         },
@@ -3914,12 +3951,71 @@ fn on_directory_loaded(
             }
             chrome.status_left.set_label(&count_label(count));
             update_free_space(state, chrome);
+            update_empty_state(state);
         }
         Err(err) => {
             tracing::warn!(error = %err, "failed to read directory");
-            chrome.status_left.set_label(&format!("Error: {err}"));
+            chrome
+                .status_left
+                .set_label(&t_fmt("status.error", &[("message", &err.to_string())]));
             chrome.status_right.set_label("");
+            update_empty_state(state);
         }
+    }
+}
+
+/// Faz 50: shows/hides `state`'s empty-state overlay (folder empty / no
+/// search results / trash empty) from its filtered item count. Only ever
+/// called once a load has genuinely finished (never mid-scan — Rule #30: a
+/// huge directory legitimately reads 0 items for a moment as its first chunk
+/// streams in) or once a search/quick-filter/hidden-files change has been
+/// re-applied to already-loaded content.
+pub(crate) fn update_empty_state(state: &SharedState) {
+    let state_ref = state.borrow();
+    let count = state_ref.empty_filter_model.n_items();
+    if count > 0 {
+        state_ref.empty_page.set_visible(false);
+        return;
+    }
+    let is_trash = trash::is_trash_location(&state_ref.current_dir);
+    let query_active = !state_ref.search_query.borrow().is_empty();
+    let (icon, title, description) = empty_state_content(is_trash, query_active);
+    state_ref.empty_page.set_icon_name(Some(icon));
+    state_ref.empty_page.set_title(title);
+    state_ref.empty_page.set_description(Some(description));
+    state_ref.empty_page.set_visible(true);
+}
+
+/// The icon name, title, and description `update_empty_state` shows for a
+/// zero-item listing, picked by context: Trash takes priority over an
+/// active search query (an empty Trash while also searching still reads as
+/// "Trash is Empty", not "No Results Found"), which in turn takes priority
+/// over the plain empty-folder message. Factored out as a pure function
+/// (no `AppState`/GTK types) so it's unit-testable without `gtk4::init()` —
+/// `libadwaita` widgets are main-thread-locked at construction, which
+/// conflicts with `cargo test`'s per-test threads.
+fn empty_state_content(
+    is_trash: bool,
+    query_active: bool,
+) -> (&'static str, &'static str, &'static str) {
+    if is_trash {
+        (
+            "user-trash-symbolic",
+            t("empty.trash.title"),
+            t("empty.trash.description"),
+        )
+    } else if query_active {
+        (
+            "system-search-symbolic",
+            t("empty.search.title"),
+            t("empty.search.description"),
+        )
+    } else {
+        (
+            "folder-open-symbolic",
+            t("empty.folder.title"),
+            t("empty.folder.description"),
+        )
     }
 }
 
@@ -3977,6 +4073,27 @@ fn add_dev_icon_search_path(window: &adw::ApplicationWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_state_content_prioritizes_trash_over_an_active_search_query() {
+        let (icon, title, _) = empty_state_content(true, true);
+        assert_eq!(icon, "user-trash-symbolic");
+        assert_eq!(title, t("empty.trash.title"));
+    }
+
+    #[test]
+    fn empty_state_content_shows_search_message_when_query_is_active_and_not_trash() {
+        let (icon, title, _) = empty_state_content(false, true);
+        assert_eq!(icon, "system-search-symbolic");
+        assert_eq!(title, t("empty.search.title"));
+    }
+
+    #[test]
+    fn empty_state_content_shows_folder_message_when_no_query_and_not_trash() {
+        let (icon, title, _) = empty_state_content(false, false);
+        assert_eq!(icon, "folder-open-symbolic");
+        assert_eq!(title, t("empty.folder.title"));
+    }
 
     #[test]
     fn tab_title_uses_home_label_for_home_directory() {

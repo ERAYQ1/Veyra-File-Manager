@@ -20,6 +20,7 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use crate::command_palette::{self, CommandItem};
+use crate::i18n::t;
 use crate::shortcuts;
 
 /// Shows the Command Palette over `window`. Selecting a command (click,
@@ -31,13 +32,13 @@ pub(crate) fn show(window: &adw::ApplicationWindow) {
     let all_commands = Rc::new(command_palette::all_commands());
 
     let dialog = adw::Dialog::builder()
-        .title("Command Palette")
+        .title(t("palette.title"))
         .content_width(560)
         .content_height(480)
         .build();
 
     let search_entry = gtk4::SearchEntry::new();
-    search_entry.set_placeholder_text(Some("Type a command or search…"));
+    search_entry.set_placeholder_text(Some(t("palette.search_placeholder")));
     search_entry.set_margin_top(12);
     search_entry.set_margin_bottom(4);
     search_entry.set_margin_start(12);
