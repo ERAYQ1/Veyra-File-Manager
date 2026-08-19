@@ -9,9 +9,8 @@ mod root_guard;
 use std::process::ExitCode;
 
 use veyra_core::XdgDirs;
-use veyra_filesystem::VeyraPath;
 
-const APP_ID: &str = "io.github.erayq1.Veyra";
+const APP_ID: &str = veyra_ui::APP_ID;
 const APP_NAME: &str = "veyra";
 
 fn main() -> ExitCode {
@@ -51,12 +50,12 @@ fn main() -> ExitCode {
         "starting Veyra"
     );
 
-    // First CLI arg, if given, is the directory to open at (used by
-    // "Open in New Window" to relaunch pointed at the source item's
-    // directory; also handy for `veyra /some/path` from a shell/terminal).
-    let start_dir = std::env::args().nth(1).map(|arg| VeyraPath::parse(&arg));
-
-    let exit_code = veyra_ui::run(APP_ID, start_dir, &xdg_dirs.cache_dir);
+    // Faz 44: CLI argument parsing (a directory/file path, `--new-window`,
+    // `--preferences`) now happens inside `veyra_ui::run`'s `GApplication`
+    // `command-line` handler, which also transparently receives argv from
+    // any later `veyra ...` invocation GIO forwards to this already-running
+    // primary instance — not just this process's own argv.
+    let exit_code = veyra_ui::run(APP_ID, &xdg_dirs.cache_dir);
 
     tracing::info!(code = exit_code.value(), "Veyra shut down");
 

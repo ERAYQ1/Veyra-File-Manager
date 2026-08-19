@@ -24,7 +24,7 @@ use crate::views::ViewMode;
 use crate::widgets::progress_toast::ProgressToastHandles;
 use crate::{
     archive_ops, breadcrumbs, dialogs, fs_async, headerbar, open_with, operations, recent,
-    shortcuts, sidebar, terminal, trash, undo, widgets,
+    shortcuts, sidebar, system_integration, terminal, trash, undo, widgets,
 };
 
 /// A single Copy/Cut clipboard slot, shared across both panels and all their
@@ -236,6 +236,62 @@ pub(crate) fn build_window(
         })
     };
 
+    // Faz 44: backs the `win.open-external-path` action a second CLI
+    // invocation (`veyra /some/path`, forwarded here by `lib.rs`'s
+    // `GApplication` `command-line` handler) or `--new-window`'s own extra
+    // path arguments drive. A directory opens as a new tab in the focused
+    // panel, same as `open_in_new_tab` above; a file's parent directory
+    // opens instead, with the file itself selected once its listing loads
+    // (`reveal_and_select`) — the CLI/desktop-manager convention for
+    // "open this file's location and point at it".
+    let open_external_path: Rc<dyn Fn(VeyraPath)> = {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        let has_clipboard = has_clipboard.clone();
+        let split_active = split_active.clone();
+        let refresh_preview = refresh_preview.clone();
+        let thumbnails = thumbnails.clone();
+        let dnd_execute = dnd_execute.clone();
+        Rc::new(move |path: VeyraPath| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let is_dir = path.as_local_path().is_none_or(|p| p.is_dir());
+            if is_dir {
+                open_tab(
+                    &panel.tab_view,
+                    &panel.registry,
+                    &panel.chrome,
+                    has_clipboard.clone(),
+                    split_active.clone(),
+                    refresh_preview.clone(),
+                    thumbnails.clone(),
+                    dnd_execute.clone(),
+                    path,
+                );
+                return;
+            }
+            let (Some(parent), Some(target_name)) = (
+                path.as_local_path()
+                    .and_then(Path::parent)
+                    .map(|p| VeyraPath::from_local(p.to_path_buf())),
+                path.file_name(),
+            ) else {
+                return;
+            };
+            let tab = open_tab(
+                &panel.tab_view,
+                &panel.registry,
+                &panel.chrome,
+                has_clipboard.clone(),
+                split_active.clone(),
+                refresh_preview.clone(),
+                thumbnails.clone(),
+                dnd_execute.clone(),
+                parent,
+            );
+            reveal_and_select(&tab, target_name);
+        })
+    };
+
     let content_page = adw::NavigationPage::new(&content_paned, t("panel.files_page_title"));
     let sidebar_refresh_all: Rc<dyn Fn()> = {
         let panels = panels.clone();
@@ -337,6 +393,7 @@ pub(crate) fn build_window(
     setup_network_actions(&window, navigate);
     setup_command_palette_actions(app, &window, &panels, &focused, &header, refresh_preview);
     setup_file_associations_action(&window);
+    setup_external_open_action(&window, open_external_path);
 
     // Faz 25: loaded/applied last so a user's `~/.config/veyra/shortcuts.json`
     // customization (or, absent one, `default_shortcuts()`, which mirrors
@@ -492,6 +549,75 @@ fn setup_file_associations_action(window: &adw::ApplicationWindow) {
         });
     }
     window.add_action(&action);
+}
+
+/// Registers the Faz 44 `win.open-external-path` action: a string-parameter
+/// action rather than a plain `win.*` toggle because its target (which path
+/// to open) comes from outside the window entirely — `lib.rs`'s
+/// `GApplication` `command-line` handler, driving a second `veyra <path>`
+/// CLI invocation or `--new-window <path>` forwarded to this process.
+fn setup_external_open_action(
+    window: &adw::ApplicationWindow,
+    open_external_path: Rc<dyn Fn(VeyraPath)>,
+) {
+    let action = gio::SimpleAction::new("open-external-path", Some(glib::VariantTy::STRING));
+    action.connect_activate(move |_, parameter| {
+        if let Some(path_str) = parameter.and_then(glib::Variant::get::<String>) {
+            open_external_path(VeyraPath::parse(&path_str));
+        }
+    });
+    window.add_action(&action);
+}
+
+/// Selects `target_name` in `tab`'s active view as soon as it appears in the
+/// (possibly still-streaming, per Faz 11's chunked `read_dir`) directory
+/// listing — the Faz 44 "open a file and have it revealed/selected in its
+/// parent folder" behavior a CLI `veyra /path/to/file.txt` invocation and a
+/// future "Show in File Manager" D-Bus call both need. Searches the active
+/// *selection* model (the filtered/sorted view each `MultiSelection` wraps),
+/// not the tab's raw `AppState::model`, so the found position is one
+/// `select_item` can use directly.
+fn reveal_and_select(tab: &TabPage, target_name: String) {
+    if try_select_by_name(tab, &target_name) {
+        return;
+    }
+    let raw_model = tab.state.borrow().model.clone();
+    let tab = tab.clone();
+    let handler_id: Rc<RefCell<Option<glib::SignalHandlerId>>> = Rc::new(RefCell::new(None));
+    let id = {
+        let tab = tab.clone();
+        let handler_id = handler_id.clone();
+        raw_model.connect_items_changed(move |model, _position, _removed, _added| {
+            if try_select_by_name(&tab, &target_name) {
+                if let Some(id) = handler_id.borrow_mut().take() {
+                    model.disconnect(id);
+                }
+            }
+        })
+    };
+    *handler_id.borrow_mut() = Some(id);
+}
+
+/// Finds `target_name` in `tab`'s currently active selection model and, if
+/// present, clears any existing selection and selects it. Returns whether it
+/// was found, so `reveal_and_select` knows whether to keep waiting for more
+/// of the directory listing to stream in.
+fn try_select_by_name(tab: &TabPage, target_name: &str) -> bool {
+    let selection = tab.selections.active(&tab.view_stack);
+    for position in 0..selection.n_items() {
+        let Some(object) = selection.item(position) else {
+            continue;
+        };
+        let Ok(boxed) = object.downcast::<gtk4::glib::BoxedAnyObject>() else {
+            continue;
+        };
+        if boxed.borrow::<FileItem>().name() == target_name {
+            selection.unselect_all();
+            selection.select_item(position, true);
+            return true;
+        }
+    }
+    false
 }
 
 /// Wires a panel's own close/detach/tab-switch bookkeeping and its five
@@ -2450,16 +2576,25 @@ fn setup_trash_actions(
             let window_for_confirm = window.clone();
             let panels = panels.clone();
             let confirm_trash_empty = panels.left.chrome.settings.borrow().confirm_trash_empty;
+            let window_for_notify = window_for_confirm.clone();
             let run_empty = move || {
                 let panels_for_done = panels.clone();
+                let window_for_notify = window_for_notify.clone();
                 fs_async::run_blocking(veyra_filesystem::empty_trash, move |result| {
-                    if let Err(err) = result {
-                        tracing::warn!(error = %err, "failed to empty trash");
-                        show_error_dialog(
-                            &window_for_confirm,
-                            "Unable to Empty Trash",
-                            &err.to_string(),
-                        );
+                    match result {
+                        Ok(()) => system_integration::notify_operation_complete(
+                            &window_for_notify,
+                            "Operation Completed",
+                            "Trash emptied",
+                        ),
+                        Err(err) => {
+                            tracing::warn!(error = %err, "failed to empty trash");
+                            show_error_dialog(
+                                &window_for_confirm,
+                                "Unable to Empty Trash",
+                                &err.to_string(),
+                            );
+                        }
                     }
                     refresh_trash_panels(&panels_for_done);
                 });
@@ -2966,6 +3101,7 @@ fn spawn_new_window(path: &VeyraPath) {
         return;
     };
     if let Err(err) = std::process::Command::new(exe)
+        .arg("--new-window")
         .arg(path.to_string())
         .spawn()
     {
@@ -3020,6 +3156,7 @@ fn run_bulk_operation(
                     for (state, chrome) in &refresh_targets {
                         refresh(state, chrome);
                     }
+                    notify_bulk_operation_complete(&window, kind, &outcome);
                     // Faz 33: Move/Copy/Trash successes become an undo
                     // record; a permanent delete instead purges any pending
                     // record referencing what it just removed (Rule #39 — a
@@ -3077,6 +3214,32 @@ fn run_bulk_operation(
             }
         }
     });
+}
+
+/// Faz 44 requirement D: notifies the desktop once a bulk Copy/Move/Trash/
+/// Delete finishes, but (via `system_integration::notify_operation_complete`)
+/// only when the window isn't currently focused — a focused window already
+/// shows completion via the progress toast. A no-op for an empty outcome
+/// (e.g. every item was a conflict the user cancelled).
+fn notify_bulk_operation_complete(
+    window: &adw::ApplicationWindow,
+    kind: OperationKind,
+    outcome: &veyra_filesystem::OperationOutcome,
+) {
+    let (verb, count) = match kind {
+        OperationKind::Copy => ("Copied", outcome.copied.len()),
+        OperationKind::Move => ("Moved", outcome.moved.len()),
+        OperationKind::Trash => ("Moved to Trash", outcome.trashed.len()),
+        OperationKind::Delete => ("Deleted", outcome.completed.len()),
+    };
+    if count == 0 {
+        return;
+    }
+    system_integration::notify_operation_complete(
+        window,
+        "Operation Completed",
+        &format!("{verb} {count} item{}", if count == 1 { "" } else { "s" }),
+    );
 }
 
 /// Faz 28: Shows retry-as-admin dialog for bulk operations that failed with
@@ -3295,6 +3458,11 @@ fn run_archive_operation(
                             chrome.status_left.set_label(t("status.cancelled"));
                         }
                         Ok(outcome) => {
+                            system_integration::notify_operation_complete(
+                                &window,
+                                "Operation Completed",
+                                &format!("{verb} finished"),
+                            );
                             for (name, err) in &outcome.errors {
                                 tracing::warn!(entry = %name, error = %err, "archive operation error");
                             }

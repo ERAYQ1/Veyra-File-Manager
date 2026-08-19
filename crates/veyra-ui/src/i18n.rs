@@ -502,6 +502,28 @@ const EN: &[(&str, &str)] = &[
         "prefs.advanced.developer_mode.subtitle",
         "Adds path/URI copying, checksums, editor launch, and a Git status badge",
     ),
+    // --- Preferences: Advanced — System Integration (Faz 44) ---
+    (
+        "prefs.advanced.group.system_integration",
+        "System Integration",
+    ),
+    (
+        "prefs.advanced.default_file_manager.title",
+        "Default File Manager",
+    ),
+    (
+        "prefs.advanced.default_file_manager.subtitle_default",
+        "Veyra is your default file manager",
+    ),
+    (
+        "prefs.advanced.default_file_manager.subtitle_not_default",
+        "Veyra is not your default file manager",
+    ),
+    (
+        "prefs.advanced.default_file_manager.error",
+        "Couldn't set Veyra as the default file manager",
+    ),
+    ("prefs.advanced.default_file_manager.button", "Set as Default"),
     // --- Developer Mode dialogs (Faz 39) ---
     ("dev.checksum.title", "Checksums"),
     ("dev.checksum.close", "Close"),
@@ -823,6 +845,22 @@ const TR: &[(&str, &str)] = &[
         "prefs.advanced.developer_mode.subtitle",
         "Yol/URI kopyalama, sağlama toplamları, düzenleyici başlatma ve Git durum rozeti ekler",
     ),
+    // --- Tercihler: Gelişmiş — Sistem Entegrasyonu (Faz 44) ---
+    ("prefs.advanced.group.system_integration", "Sistem Entegrasyonu"),
+    ("prefs.advanced.default_file_manager.title", "Varsayılan Dosya Yöneticisi"),
+    (
+        "prefs.advanced.default_file_manager.subtitle_default",
+        "Veyra varsayılan dosya yöneticiniz",
+    ),
+    (
+        "prefs.advanced.default_file_manager.subtitle_not_default",
+        "Veyra varsayılan dosya yöneticiniz değil",
+    ),
+    (
+        "prefs.advanced.default_file_manager.error",
+        "Veyra varsayılan dosya yöneticisi olarak ayarlanamadı",
+    ),
+    ("prefs.advanced.default_file_manager.button", "Varsayılan Yap"),
     // --- Geliştirici Modu diyalogları (Faz 39) ---
     ("dev.checksum.title", "Sağlama Toplamları"),
     ("dev.checksum.close", "Kapat"),

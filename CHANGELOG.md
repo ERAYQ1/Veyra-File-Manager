@@ -1,5 +1,33 @@
 # Changelog
 
+## Faz 44 — System Integration (Linux Sistem & Masaüstü Entegrasyonu)
+
+Veyra'yı Linux masaüstünün doğal bir parçası haline getiren sistem entegrasyonu: `.desktop` dosyası zenginleştirildi, varsayılan dosya yöneticisi durumu Ayarlar'dan sorgulanıp ayarlanabiliyor, tekil örnek (`GApplication`) artık gerçek `command-line` işleme ile çalışıyor (CLI çoklu dizin/dosya açma, `--new-window`, `--preferences`), ve uzun süren arka plan işlemleri pencere odakta değilken masaüstü bildirimi gönderiyor.
+
+### Eklenenler
+- **`data/io.github.erayq1.Veyra.desktop`:** `MimeType=inode/directory;x-scheme-handler/file;`, `Keywords=`, `Actions=NewWindow;Preferences;` (+ karşılık gelen `[Desktop Action …]` blokları, `veyra --new-window %f` / `veyra --preferences`), `X-GNOME-UsesNotifications=true`, `Categories`'e `Utility` eklendi.
+- **`crates/veyra-ui/src/system_integration.rs` (yeni modül):** `is_default_file_manager()`/`set_as_default_file_manager()` (`gio::AppInfo::default_for_type`/`gio::DesktopAppInfo::set_as_default_for_type`, `inode/directory`), `notify_operation_complete(window, title, body)` (pencere odakta değilse `gio::Notification` gönderir), ve GTK'dan bağımsız, birim testli `parse_args` (CLI argv ayrıştırma: `--new-window`, `--preferences`, çıplak yol argümanları).
+- **`crates/veyra-ui/src/lib.rs`:** `run()` artık `gio::ApplicationFlags::HANDLES_COMMAND_LINE` ile tek bir `command-line` sinyali üzerinden çalışıyor — aynı süreçteki birincil örneğe D-Bus üzerinden iletilen her `veyra ...` çağrısı (ikinci bir terminalden dahi) bu tek noktadan geçiyor: argümansız/çıplak yol → mevcut pencereye sekme, `--new-window` → süreç içinde gerçek yeni bir pencere, `--preferences` → `win.show-preferences` eylemi. Süreç boyunca tek bir paylaşılan `settings` referansı (ilk pencerede yüklenir) her yeni pencerede yeniden kullanılıyor.
+- **`crates/veyra-ui/src/window.rs`:** `win.open-external-path` (string parametreli) eylemi + `reveal_and_select` — bir dosya yolu verildiğinde üst klasörü sekmede açıp, dizin taraması (Faz 11 chunked `read_dir`) dosyayı üretir üretmez aktif görünümde seçiyor. `spawn_new_window` ("Open in New Window") artık `--new-window` bayrağıyla çağırıyor. Bulk/arşiv işlemleri ve çöp boşaltma tamamlandığında `system_integration::notify_operation_complete` çağrısı eklendi.
+- **`dialogs/preferences_dialog.rs` (Advanced sekmesi):** "System Integration" grubu — "Default File Manager" satırı, güncel durumu (`prefs.advanced.default_file_manager.subtitle_default/not_default`) gösterip "Set as Default" butonuyla `set_as_default_file_manager()` çağırıyor.
+- **`i18n.rs`:** `prefs.advanced.group.system_integration`/`default_file_manager.*` anahtarları, `EN` + `TR`.
+- **`crates/veyra-app/src/main.rs`:** CLI argüman ayrıştırma tamamen `veyra_ui::run`'a taşındı; `main` artık yalnızca XDG dizinlerini/loglamayı kurup `veyra_ui::run(APP_ID, cache_dir)` çağırıyor. `APP_ID` artık `veyra_ui::APP_ID`'den tek kaynaktan geliyor.
+
+### Kapsam kararları
+- `HANDLES_OPEN` yerine yalnızca `HANDLES_COMMAND_LINE` seçildi — ikisini birden kullanmak iki ayrı GIO sinyalinin (`open` ve `command-line`) hangi argümanı hangisinin işleyeceğini koordine etmeyi gerektirirdi; tek sinyalde tüm mantığı (dizin/dosya/bayrak) elle ayrıştırmak daha az yüzey alanı bırakıyor.
+- "Open in New Window" (sağ tık) ile düz `veyra /dizin` CLI çağrısı aynı `argv` şeklini (`veyra <path>`) paylaştığından, ayrım açık bir `--new-window` bayrağıyla yapılıyor — sağ tık eylemi bunu geçiyor, kullanıcının terminalden yazdığı çağrı geçmiyor (dolayısıyla mevcut pencereye sekme olarak ekleniyor, Faz 44 gereksinim C).
+- Bildirimler yalnızca pencere odakta değilken gönderiliyor (`GtkWindow::is_active`) — odaktaki pencere zaten ilerleme tostu/durum çubuğuyla tamamlanmayı gösteriyor, bildirim orada gürültü olurdu.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 444 → 452, tamamı geçti (yeni: `veyra-ui::system_integration` 11 test — CLI ayrıştırma + `.desktop` dosyası sözdizim doğrulaması).
+- `cargo build --workspace`: temiz, 0 warning.
+- Manuel çalışma zamanı doğrulaması (gerçek `DISPLAY`/D-Bus oturumu ile): birincil örnek başlatıldı, ikinci `veyra /tmp` çağrısı birincil pencereye D-Bus üzerinden iletilip hızlıca çıktı (yeni pencere açmadı), `veyra --new-window /tmp` aynı süreçte gerçek ikinci bir pencere oluşturdu (log'da ikinci "building window").
+
+### Sıradaki Faz
+- Faz 45 onay bekliyor.
+
 ## Faz 43 — Smart Storage Dashboard (`veyra-filesystem` entegrasyonu / `veyra-ui`)
 
 Tek bir pencerede kök dosya sisteminin doluluk durumunu, Home dizinindeki en büyük klasörleri, en son kullanılan dosyaları ve mükerrer dosya temizleme fırsatını gösteren **Smart Storage Dashboard** eklendi — kenar çubuğundaki yeni "Storage" satırından, komut paletinden (`Ctrl+K`) veya `Ctrl+Shift+I` kısayolundan açılıyor.

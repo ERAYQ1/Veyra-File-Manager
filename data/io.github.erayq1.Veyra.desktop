@@ -5,7 +5,17 @@ Comment=Modern Linux File Manager
 Exec=veyra %U
 Icon=io.github.erayq1.Veyra
 Terminal=false
-Categories=System;FileTools;FileManager;GTK;
-MimeType=inode/directory;
+Categories=System;FileTools;FileManager;Utility;GTK;
+MimeType=inode/directory;x-scheme-handler/file;
+Keywords=files;folders;browser;manager;explorer;veyra;
+Actions=NewWindow;Preferences;
 StartupNotify=true
-X-GNOME-UsesNotifications=false
+X-GNOME-UsesNotifications=true
+
+[Desktop Action NewWindow]
+Name=New Window
+Exec=veyra --new-window %f
+
+[Desktop Action Preferences]
+Name=Preferences
+Exec=veyra --preferences

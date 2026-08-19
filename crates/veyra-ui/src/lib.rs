@@ -37,6 +37,7 @@ mod sorting;
 mod split_view;
 mod state;
 mod statusbar;
+mod system_integration;
 mod tab_page;
 mod terminal;
 mod thumbnails;
@@ -50,58 +51,150 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
+use gtk4::gio;
 use gtk4::glib;
 use libadwaita::prelude::*;
 use libadwaita::Application;
 
 use veyra_filesystem::VeyraPath;
 
-/// Builds and runs the Veyra GTK application under the given D-Bus
-/// application ID, starting in `start_dir` (the user's home directory when
-/// `None` — the default first-launch location, and what "Open in New
-/// Window" passes explicitly to open at the source item's directory).
+/// The D-Bus application ID Veyra registers under — must match `Icon=`/
+/// `Exec=`'s counterpart in `data/io.github.erayq1.Veyra.desktop` and the
+/// desktop file's own basename, since GIO resolves "am I the default file
+/// manager" (`system_integration::is_default_file_manager`) and "set myself
+/// as default" by looking up `"{APP_ID}.desktop"`.
+pub const APP_ID: &str = "io.github.erayq1.Veyra";
+
+/// Builds and runs the Veyra GTK application. Every open/activate/CLI
+/// argument for the process's entire lifetime (including re-invocations of
+/// `veyra ...` from a second terminal, which GIO transparently forwards to
+/// this already-running primary instance over D-Bus — see Faz 44) funnels
+/// through the single `command-line` handler below, so there is exactly one
+/// place that decides whether an argument opens a tab in an existing
+/// window, forces a new window, or opens Preferences.
+///
 /// `cache_dir` is where the Faz 9 search index database lives
 /// (`<cache_dir>/search_index.db`).
 ///
 /// Blocks the calling thread until the GTK main loop exits. Must be called on
 /// the same thread the process started on (GTK main thread requirement).
-pub fn run(app_id: &str, start_dir: Option<VeyraPath>, cache_dir: &Path) -> glib::ExitCode {
-    let app = Application::builder().application_id(app_id).build();
+pub fn run(app_id: &str, cache_dir: &Path) -> glib::ExitCode {
+    let app = Application::builder()
+        .application_id(app_id)
+        .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
+        .build();
 
     let default_icon_name = app_id.to_string();
     let cache_dir = cache_dir.to_path_buf();
-    app.connect_activate(move |app| {
-        tracing::info!("activating primary window");
+    // Faz 44: every window built in this process shares one `settings`
+    // (loaded once, on the first window) rather than each window re-reading
+    // `settings.json` independently — a second window opened via
+    // "Open in New Window"/`--new-window` should reflect live Preferences
+    // changes made in the first, not a stale on-disk snapshot from whenever
+    // it happened to start.
+    let settings: Rc<RefCell<Option<config::SharedSettings>>> = Rc::new(RefCell::new(None));
+    let windows: Rc<RefCell<Vec<libadwaita::ApplicationWindow>>> =
+        Rc::new(RefCell::new(Vec::new()));
 
-        // Faz 34: `VeyraSettings::load()` is the single source of truth for
-        // every user preference from here on — the theme applies before the
-        // window is even built, and the loaded value (rather than a
-        // hardcoded `ColorScheme::Default`) is what a corrupt/missing
-        // `settings.json` falls back to via `VeyraSettings::default()`.
-        let settings = config::VeyraSettings::load();
-        veyra_core::security::set_sanitize_log_paths(settings.sanitize_log_paths);
-        i18n::set_locale(settings.language.resolve());
-        libadwaita::StyleManager::default().set_color_scheme(settings.color_scheme.to_adw());
-        config::apply_accent_color(settings.accent_color);
-        let settings: config::SharedSettings = Rc::new(RefCell::new(settings));
+    app.connect_command_line(move |app, cmdline| {
+        let argv = cmdline.arguments();
+        let args: Vec<String> = argv
+            .iter()
+            .skip(1)
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let parsed = system_integration::parse_args(&args);
 
-        if let Some(display) = gtk4::gdk::Display::default() {
-            let icon_theme = gtk4::IconTheme::for_display(&display);
-            icon_theme.add_search_path("data/icons");
+        if parsed.new_window || windows.borrow().is_empty() {
+            let start_dir = parsed
+                .paths
+                .first()
+                .map(|p| VeyraPath::parse(p))
+                .unwrap_or_else(|| VeyraPath::from_local(glib::home_dir()));
+            let window = build_window(app, start_dir, &cache_dir, &default_icon_name, &settings);
+            {
+                let windows = windows.clone();
+                window.connect_close_request(move |closed| {
+                    windows.borrow_mut().retain(|w| w != closed);
+                    glib::Propagation::Proceed
+                });
+            }
+            windows.borrow_mut().push(window);
         }
-        gtk4::Window::set_default_icon_name(&default_icon_name);
 
-        let start_dir = start_dir
-            .clone()
-            .unwrap_or_else(|| VeyraPath::from_local(glib::home_dir()));
-        window::build_window(app, start_dir, &cache_dir, settings).present();
+        let target = windows
+            .borrow()
+            .last()
+            .cloned()
+            .expect("a window always exists past the block above");
+
+        // A fresh `--new-window` already opened its one path as the
+        // window's own `start_dir`; anything beyond the first path (or
+        // every path, for a plain `veyra /dir1 /dir2` with no
+        // `--new-window`) still needs to land as its own tab.
+        let remaining_paths: &[String] = if parsed.new_window {
+            parsed.paths.get(1..).unwrap_or(&[])
+        } else {
+            &parsed.paths
+        };
+        for path in remaining_paths {
+            gtk4::prelude::ActionGroupExt::activate_action(
+                &target,
+                "win.open-external-path",
+                Some(&path.to_variant()),
+            );
+        }
+        if parsed.preferences {
+            gtk4::prelude::ActionGroupExt::activate_action(&target, "win.show-preferences", None);
+        }
+
+        target.present();
+        0
     });
 
-    // `start_dir` is already resolved above from our own arg parsing
-    // (`main.rs`); passing the real `argv` back into `GApplication` here
-    // would make it apply its own default "open files" command-line
-    // handling to that same path argument (which this app doesn't opt
-    // into via `HANDLES_OPEN`/`HANDLES_COMMAND_LINE`) instead of a plain
-    // activation.
-    app.run_with_args::<&str>(&[])
+    app.run()
+}
+
+/// Builds one new top-level window: on its very first call, loads and
+/// caches `settings` for the whole process; every later call (a second
+/// window in this same process) reuses that shared handle instead of
+/// re-reading `settings.json`.
+fn build_window(
+    app: &Application,
+    start_dir: VeyraPath,
+    cache_dir: &Path,
+    default_icon_name: &str,
+    settings: &Rc<RefCell<Option<config::SharedSettings>>>,
+) -> libadwaita::ApplicationWindow {
+    tracing::info!("building window");
+
+    let shared_settings = {
+        let mut slot = settings.borrow_mut();
+        if let Some(existing) = slot.as_ref() {
+            existing.clone()
+        } else {
+            // Faz 34: `VeyraSettings::load()` is the single source of truth
+            // for every user preference from here on — the theme applies
+            // before the window is even built, and the loaded value (rather
+            // than a hardcoded `ColorScheme::Default`) is what a corrupt/
+            // missing `settings.json` falls back to via
+            // `VeyraSettings::default()`.
+            let loaded = config::VeyraSettings::load();
+            veyra_core::security::set_sanitize_log_paths(loaded.sanitize_log_paths);
+            i18n::set_locale(loaded.language.resolve());
+            libadwaita::StyleManager::default().set_color_scheme(loaded.color_scheme.to_adw());
+            config::apply_accent_color(loaded.accent_color);
+            let shared: config::SharedSettings = Rc::new(RefCell::new(loaded));
+            *slot = Some(shared.clone());
+            shared
+        }
+    };
+
+    if let Some(display) = gtk4::gdk::Display::default() {
+        let icon_theme = gtk4::IconTheme::for_display(&display);
+        icon_theme.add_search_path("data/icons");
+    }
+    gtk4::Window::set_default_icon_name(default_icon_name);
+
+    window::build_window(app, start_dir, cache_dir, shared_settings)
 }

@@ -753,6 +753,8 @@ fn advanced_page(
     developer_group.add(&developer_mode_row);
     page.add(&developer_group);
 
+    page.add(&system_integration_group());
+
     let g = group(t("prefs.advanced.group.reset"));
 
     let (reset_row, reset_button) = action_row_button(
@@ -808,6 +810,52 @@ fn advanced_page(
     g.add(&reset_row);
     page.add(&g);
     page
+}
+
+/// Faz 44: the Advanced page's "Default File Manager" row — status subtitle
+/// and a "Set as Default" button, wired to `gio::AppInfo::default_for_type`/
+/// `set_as_default_for_type` via `crate::system_integration`. Its own group
+/// (not folded into "Developer") since it's ordinary-user-facing, unlike
+/// everything else on this page.
+fn system_integration_group() -> adw::PreferencesGroup {
+    let g = group(t("prefs.advanced.group.system_integration"));
+
+    let row = adw::ActionRow::builder()
+        .title(t("prefs.advanced.default_file_manager.title"))
+        .subtitle(default_file_manager_subtitle())
+        .build();
+    let button = gtk4::Button::builder()
+        .label(t("prefs.advanced.default_file_manager.button"))
+        .valign(gtk4::Align::Center)
+        .sensitive(!crate::system_integration::is_default_file_manager())
+        .build();
+    {
+        let row = row.clone();
+        let button = button.clone();
+        button.connect_clicked(move |button| {
+            match crate::system_integration::set_as_default_file_manager() {
+                Ok(()) => {
+                    row.set_subtitle(default_file_manager_subtitle());
+                    button.set_sensitive(!crate::system_integration::is_default_file_manager());
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "failed to set Veyra as default file manager");
+                    row.set_subtitle(t("prefs.advanced.default_file_manager.error"));
+                }
+            }
+        });
+    }
+    row.add_suffix(&button);
+    g.add(&row);
+    g
+}
+
+fn default_file_manager_subtitle() -> &'static str {
+    if crate::system_integration::is_default_file_manager() {
+        t("prefs.advanced.default_file_manager.subtitle_default")
+    } else {
+        t("prefs.advanced.default_file_manager.subtitle_not_default")
+    }
 }
 
 fn format_kb(kb: usize) -> String {
