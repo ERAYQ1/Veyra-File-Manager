@@ -304,6 +304,13 @@ pub(crate) fn install_panel_css(display: &gtk4::gdk::Display) {
         ".veyra-panel { border: 2px solid transparent; }\n\
          .veyra-panel.veyra-active-panel { border: 2px solid @accent_color; border-radius: 6px; }\n\
          .veyra-hidden-item { opacity: 0.55; font-style: italic; }\n\
+         .veyra-git-badge { font-size: smaller; font-weight: bold; margin-left: 4px; }\n\
+         .veyra-git-badge.veyra-git-modified { color: #e5a50a; }\n\
+         .veyra-git-badge.veyra-git-staged { color: #26a269; }\n\
+         .veyra-git-badge.veyra-git-untracked { color: #3584e4; }\n\
+         .veyra-git-badge.veyra-git-ignored { color: alpha(currentColor, 0.45); }\n\
+         .veyra-git-badge.veyra-git-conflicted { color: #e01b24; }\n\
+         .veyra-git-badge.veyra-git-deleted { color: #c64600; }\n\
          *:focus-visible { outline: 2px solid @accent_color; outline-offset: 2px; }",
     );
     gtk4::style_context_add_provider_for_display(

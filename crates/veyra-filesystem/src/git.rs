@@ -17,6 +17,7 @@
 //! run_blocking` (Rule #11/#14), same as every other `veyra-filesystem`
 //! query.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -176,6 +177,155 @@ fn count_xy(rest: &str, status: &mut GitRepoStatus) {
     if y != '.' {
         status.modified += 1;
     }
+}
+
+/// Faz 40: a single file's Git status, for per-row badges in the Icon/
+/// Compact/Details views. Coarser than `git status`'s raw index/worktree
+/// pair — one status per file, picked by `classify_xy`'s priority order —
+/// since a row only has room for one small badge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GitFileStatus {
+    /// `M` — unstaged change to a tracked file.
+    Modified,
+    /// `A`/`S` — staged (index) change.
+    Staged,
+    /// `??` — untracked.
+    Untracked,
+    /// `!!` — ignored (`.gitignore`).
+    Ignored,
+    /// `UU` and friends — an unresolved merge conflict.
+    Conflicted,
+    /// `D` — deleted (staged or unstaged).
+    Deleted,
+    /// Not reported by `git status` at all: no change.
+    Clean,
+}
+
+impl GitFileStatus {
+    /// The short badge text a file-row indicator renders, e.g. `M`, `??`.
+    pub fn badge_text(self) -> &'static str {
+        match self {
+            GitFileStatus::Modified => "M",
+            GitFileStatus::Staged => "A",
+            GitFileStatus::Untracked => "??",
+            GitFileStatus::Ignored => "!",
+            GitFileStatus::Conflicted => "C",
+            GitFileStatus::Deleted => "D",
+            GitFileStatus::Clean => "",
+        }
+    }
+
+    /// The screen-reader word for this status (Kural #28), e.g. in
+    /// `"README.md, File, Modified"`.
+    pub fn accessible_word(self) -> &'static str {
+        match self {
+            GitFileStatus::Modified => "Modified",
+            GitFileStatus::Staged => "Staged",
+            GitFileStatus::Untracked => "Untracked",
+            GitFileStatus::Ignored => "Ignored",
+            GitFileStatus::Conflicted => "Conflicted",
+            GitFileStatus::Deleted => "Deleted",
+            GitFileStatus::Clean => "Clean",
+        }
+    }
+}
+
+/// Classifies one `git status --porcelain -z`'s two-character `XY` code
+/// into a single `GitFileStatus`, most-severe first: an unresolved conflict
+/// always wins over a plain staged/modified change, and a deletion is
+/// reported distinctly from an ordinary content edit.
+fn classify_xy(xy: &str) -> GitFileStatus {
+    let mut chars = xy.chars();
+    let x = chars.next().unwrap_or(' ');
+    let y = chars.next().unwrap_or(' ');
+
+    if xy == "??" {
+        return GitFileStatus::Untracked;
+    }
+    if xy == "!!" {
+        return GitFileStatus::Ignored;
+    }
+    if x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D') {
+        return GitFileStatus::Conflicted;
+    }
+    if x == 'D' || y == 'D' {
+        return GitFileStatus::Deleted;
+    }
+    if x != ' ' {
+        return GitFileStatus::Staged;
+    }
+    if y != ' ' {
+        return GitFileStatus::Modified;
+    }
+    GitFileStatus::Clean
+}
+
+/// Runs `git status --porcelain --ignored=matching -uall -z` at the repository
+/// containing `dir` and returns the Git status of every entry that lives
+/// directly inside `dir` (not deeper subdirectories), keyed by file name.
+///
+/// `-z` NUL-terminates entries instead of quoting/escaping unusual names,
+/// so this handles Unicode and space-containing file names (Kural #35)
+/// without a quoted-path parser; a rename/copy entry's extra "original
+/// path" token is simply skipped, since a row only ever shows the file's
+/// current name.
+///
+/// Returns an empty map if `dir` isn't inside a Git repository, or if `git`
+/// itself fails to run — same "just don't show a badge" fallback as
+/// `git_status`'s badge, since a missing status is not a user-facing error
+/// (Kural #17). This is a blocking call (subprocess spawn); callers run it
+/// off the GTK main thread via `fs_async::run_blocking` (Rule #11/#14).
+pub fn query_dir_git_statuses(dir: &Path) -> HashMap<String, GitFileStatus> {
+    let mut result = HashMap::new();
+
+    let Some(root) = find_git_root(dir) else {
+        return result;
+    };
+    let Ok(output) = Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["status", "--porcelain", "--ignored=matching", "-uall", "-z"])
+        .output()
+    else {
+        return result;
+    };
+    if !output.status.success() {
+        return result;
+    }
+
+    let rel_dir = dir.strip_prefix(&root).unwrap_or_else(|_| Path::new(""));
+
+    let mut tokens = output
+        .stdout
+        .split(|&b| b == 0)
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+
+    while let Some(entry) = tokens.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+        let xy = &entry[0..2];
+        let mut path = entry[3..].to_string();
+        // Renamed/copied entries carry a second NUL-separated token (the
+        // original path) that this per-directory badge view has no use for.
+        if xy.contains('R') || xy.contains('C') {
+            let _ = tokens.next();
+        }
+        if path.ends_with('/') {
+            path.pop();
+        }
+
+        let rel_path = Path::new(&path);
+        if rel_path.parent() != Some(rel_dir) {
+            continue;
+        }
+        let Some(file_name) = rel_path.file_name() else {
+            continue;
+        };
+        result.insert(file_name.to_string_lossy().into_owned(), classify_xy(xy));
+    }
+
+    result
 }
 
 #[cfg(test)]
@@ -345,5 +495,86 @@ mod tests {
         let status = parse_porcelain_v2("");
         assert_eq!(status.branch, "HEAD (detached)");
         assert!(!status.is_dirty());
+    }
+
+    #[test]
+    fn classify_xy_covers_every_status() {
+        assert_eq!(classify_xy("??"), GitFileStatus::Untracked);
+        assert_eq!(classify_xy("!!"), GitFileStatus::Ignored);
+        assert_eq!(classify_xy("UU"), GitFileStatus::Conflicted);
+        assert_eq!(classify_xy("AA"), GitFileStatus::Conflicted);
+        assert_eq!(classify_xy("DD"), GitFileStatus::Conflicted);
+        assert_eq!(classify_xy(" D"), GitFileStatus::Deleted);
+        assert_eq!(classify_xy("D "), GitFileStatus::Deleted);
+        assert_eq!(classify_xy("A "), GitFileStatus::Staged);
+        assert_eq!(classify_xy("M "), GitFileStatus::Staged);
+        assert_eq!(classify_xy(" M"), GitFileStatus::Modified);
+        assert_eq!(classify_xy("  "), GitFileStatus::Clean);
+    }
+
+    #[test]
+    fn query_dir_git_statuses_outside_a_repo_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(query_dir_git_statuses(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn query_dir_git_statuses_reports_modified_staged_untracked_and_ignored() {
+        let repo = init_repo();
+        std::fs::write(repo.path().join("a.txt"), b"a").unwrap();
+        std::fs::write(repo.path().join(".gitignore"), b"build/\n").unwrap();
+        commit_all(repo.path(), "initial");
+
+        std::fs::write(repo.path().join("a.txt"), b"a changed").unwrap();
+        std::fs::write(repo.path().join("staged.txt"), b"s").unwrap();
+        git(repo.path(), &["add", "staged.txt"]);
+        std::fs::write(repo.path().join("new.txt"), b"n").unwrap();
+        std::fs::create_dir(repo.path().join("build")).unwrap();
+        std::fs::write(repo.path().join("build").join("out.o"), b"o").unwrap();
+
+        let statuses = query_dir_git_statuses(repo.path());
+        assert_eq!(statuses.get("a.txt"), Some(&GitFileStatus::Modified));
+        assert_eq!(statuses.get("staged.txt"), Some(&GitFileStatus::Staged));
+        assert_eq!(statuses.get("new.txt"), Some(&GitFileStatus::Untracked));
+        assert_eq!(statuses.get("build"), Some(&GitFileStatus::Ignored));
+    }
+
+    #[test]
+    fn query_dir_git_statuses_reports_a_conflict() {
+        let repo = init_repo();
+        std::fs::write(repo.path().join("a.txt"), b"base").unwrap();
+        commit_all(repo.path(), "base");
+        git(repo.path(), &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(repo.path().join("a.txt"), b"feature").unwrap();
+        commit_all(repo.path(), "feature change");
+        git(repo.path(), &["checkout", "-q", "main"]);
+        std::fs::write(repo.path().join("a.txt"), b"main").unwrap();
+        commit_all(repo.path(), "main change");
+        let _ = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["merge", "-q", "feature"])
+            .output();
+
+        let statuses = query_dir_git_statuses(repo.path());
+        assert_eq!(statuses.get("a.txt"), Some(&GitFileStatus::Conflicted));
+    }
+
+    #[test]
+    fn query_dir_git_statuses_only_matches_entries_directly_inside_dir() {
+        let repo = init_repo();
+        std::fs::create_dir(repo.path().join("sub")).unwrap();
+        std::fs::write(repo.path().join("sub").join("nested.txt"), b"n").unwrap();
+        commit_all(repo.path(), "initial");
+        std::fs::write(repo.path().join("sub").join("nested.txt"), b"changed").unwrap();
+
+        let root_statuses = query_dir_git_statuses(repo.path());
+        assert!(!root_statuses.contains_key("nested.txt"));
+
+        let sub_statuses = query_dir_git_statuses(&repo.path().join("sub"));
+        assert_eq!(
+            sub_statuses.get("nested.txt"),
+            Some(&GitFileStatus::Modified)
+        );
     }
 }

@@ -1,5 +1,31 @@
 # Changelog
 
+## Faz 40 — Git Integration: Dosya Bazlı Durum Rozetleri (`veyra-filesystem` / `veyra-ui`)
+
+Faz 39'un repo seviyesindeki headerbar rozetinin ("main ↑2 ↓1 *") yanına, açık dizindeki her dosyanın kendi Git durumunu gösteren küçük, salt-okunur rozetler eklendi — Icon, Compact ve Details görünümlerinin üçünde de.
+
+### Eklenenler
+- **`crates/veyra-filesystem/src/git.rs`:** `GitFileStatus` (`Modified`/`Staged`/`Untracked`/`Ignored`/`Conflicted`/`Deleted`/`Clean`) — `badge_text()` (`M`/`A`/`??`/`!`/`C`/`D`) ve `accessible_word()` (ekran okuyucu için tam sözcük) taşıyor. `query_dir_git_statuses(dir)` — `git status --porcelain --ignored=matching -uall -z` çıktısını ayrıştırıp yalnızca `dir`'in doğrudan içindeki girdileri (alt dizinlere inmeden) dosya adı → durum eşlemesine çeviren saf argv tabanlı fonksiyon; `-z` NUL sonlandırması sayesinde Unicode/boşluklu dosya adları tırnaklama sorunu olmadan işleniyor (Kural #35). `--ignored=matching` yoksayılmış dizinleri tek bir `"!! build/"` girdisi olarak bırakırken `-uall` takip edilmeyen dosyaları ayrı ayrı listeliyor — ikisinin birlikte kullanılması, dizin rozetleri ile dosya rozetlerinin aynı komuttan doğru şekilde çıkmasını sağlıyor. `classify_xy` çakışmayı (`UU`/`AA`/`DD`) her zaman staged/modified'ın önüne alıyor. Repo dışında veya `git` çalıştırılamazsa boş harita döner — rozet sessizce gizlenir (Kural #15/#17/#18). Blocking bir çağrı; çağıranlar `fs_async::run_blocking` üzerinden arka planda çalıştırıyor (Kural #11/#14).
+- **`crates/veyra-ui/src/state.rs`:** `AppState.git_statuses: SharedGitStatuses` (`Rc<RefCell<HashMap<String, GitFileStatus>>>`) — açık dizinin dosya bazlı durum haritası, tüm görünümlerin satır fabrikalarıyla paylaşılıyor.
+- **`crates/veyra-ui/src/window.rs`:** `update_git_file_statuses` — her gezinmede (`update_chrome` içinden) `query_dir_git_statuses`'u arka planda çalıştırıp haritayı günceller, ardından `ListStore::items_changed` ile o anda ekranda bağlı satırları yeniden bağlanmaya zorlayarak rozetleri tazeler (yapısal bir değişiklik olmadan, sadece rebind). Tab o sırada başka bir yere gitmişse sonuç atılır (Kural #17), tıpkı `update_git_badge` gibi.
+- **`crates/veyra-ui/src/views/mod.rs`:** `build_grid_view` (Icon/Compact'ın paylaştığı fabrika) artık isim etiketinin yanına küçük bir rozet `Label` ekliyor; `apply_git_badge` metni/CSS sınıfını/görünürlüğü ayarlıyor, `git_status_for` dosya adıyla haritadan arıyor, `accessible_description_with_git` ekran okuyucu açıklamasına durumu ekliyor (ör. `"README.md, File, Modified"`, Kural #28/#37).
+- **`crates/veyra-ui/src/views/details_view.rs`:** İsim sütunu aynı rozet/erişilebilirlik desenini paylaşıyor — ayrı bir Git sütunu yerine mevcut isim hücresine entegre edildi.
+- **`crates/veyra-ui/src/split_view.rs`:** `.veyra-git-badge` ve altı durum-renkli varyantı (`modified` turuncu, `staged` yeşil, `untracked` mavi, `ignored` soluk, `conflicted` kırmızı, `deleted` koyu turuncu) panel CSS'ine eklendi.
+
+### Kapsam kararları
+- Rozetler yalnızca açık dizinin **doğrudan** çocukları için hesaplanıyor; alt dizinler içindeki değişiklikler üst klasöre yansıtılmıyor (spesifikasyon "dosya bazlı" diyor, derin toplama istemiyor) — `git status`'un kendisi de zaten alt dizin içeriğini üst dizine katlamıyor.
+- Rozet görünürlüğü depo tespitine bağlı (harita doluysa rozet var), Developer Mode anahtarına bağlı değil — Dolphin/Nautilus'ta Git rozetleri genel kullanıcı özelliği, ileri düzey bir geliştirici aracı değil; spesifikasyonun "otomatik olarak (veya Developer Mode açıkken)" ifadesi iki ayrı tetikleyici değil, aynı davranışın iki anlatımı olarak okundu.
+- Details görünümünde ayrı bir Git sütunu yerine isim hücresine rozet eklendi (spesifikasyonun kendi sunduğu iki seçenekten biri) — yeni bir sütun, sıralama/genişlik/gizleme mantığını tekrar gerektirirdi.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warning.
+- `cargo test --workspace`: 418 → 426, tamamı geçti (yeni: `veyra-filesystem::git` 6 test — `classify_xy` her durumu kapsıyor, repo dışı boş harita, modified/staged/untracked/ignored karışık senaryo, gerçek bir merge çakışması, alt dizin girdilerinin üst dizine sızmadığının doğrulanması; `veyra-ui::views` 3 test — erişilebilirlik açıklamasına durumun eklenmesi/eklenmemesi, her durumun boş olmayan bir CSS sınıfına sahip olması).
+- `cargo build --workspace`: temiz, 0 warning.
+
+### Sıradaki Faz
+Faz 41 — onay bekleniyor.
+
 ## Faz 39 — Developer Mode & Git Integration (`veyra-filesystem` / `veyra-ui`)
 
 Git deposu algılama/durum motoru ve sağ-tık "Developer" alt menüsü (yol/URI kopyalama, harici düzenleyici, MD5/SHA-256 sağlama toplamları, meta veri inceleyici) — `Ctrl+Shift+D` ile açılıp kapanan, Ayarlar → Advanced'ta kalıcı bir anahtar.

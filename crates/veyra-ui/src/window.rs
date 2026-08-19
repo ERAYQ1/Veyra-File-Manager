@@ -2658,6 +2658,7 @@ fn open_tab(
     let details_sort_columns_slot;
     {
         let model = state.borrow().model.clone();
+        let git_statuses = state.borrow().git_statuses.clone();
         let filter = filter.clone();
         let on_open = on_open.clone();
 
@@ -2676,6 +2677,7 @@ fn open_tab(
             thumbnails.clone(),
             dnd_wiring.clone(),
             chrome.settings.clone(),
+            git_statuses.clone(),
         );
         view_stack.add_named(&icon_widget, Some(ViewMode::Icon.stack_name()));
 
@@ -2694,6 +2696,7 @@ fn open_tab(
             thumbnails.clone(),
             dnd_wiring.clone(),
             chrome.settings.clone(),
+            git_statuses.clone(),
         );
         view_stack.add_named(&compact_widget, Some(ViewMode::Compact.stack_name()));
 
@@ -2713,6 +2716,7 @@ fn open_tab(
             thumbnails,
             dnd_wiring,
             chrome.settings.clone(),
+            git_statuses,
         );
         let details_selection = details.selection;
         view_stack.add_named(&details.widget, Some(ViewMode::Details.stack_name()));
@@ -3438,6 +3442,42 @@ fn update_chrome(tab: &TabPage, chrome: &Chrome) {
     chrome.status_left.set_label(&count_label(item_count));
     update_free_space(&tab.state, chrome);
     update_git_badge(&tab.state, chrome, &current_dir);
+    update_git_file_statuses(&tab.state, &current_dir);
+}
+
+/// Faz 40: recomputes `state`'s per-file Git status map for `path` and, once
+/// it lands, forces every currently bound row to rebind so its badge
+/// reflects the fresh result. Runs off the GTK main thread (Rule #11/#14,
+/// same as `update_git_badge`); discarded if the tab has since navigated
+/// elsewhere (Rule #17).
+fn update_git_file_statuses(state: &SharedState, path: &VeyraPath) {
+    let Some(local) = path.as_local_path().map(Path::to_path_buf) else {
+        let state_ref = state.borrow();
+        let had_entries = !state_ref.git_statuses.borrow().is_empty();
+        state_ref.git_statuses.borrow_mut().clear();
+        let count = state_ref.model.n_items();
+        if had_entries && count > 0 {
+            state_ref.model.items_changed(0, count, count);
+        }
+        return;
+    };
+
+    let state_for_done = state.clone();
+    let path_for_done = path.clone();
+    fs_async::run_blocking(
+        move || veyra_filesystem::query_dir_git_statuses(&local),
+        move |statuses| {
+            let state_ref = state_for_done.borrow();
+            if state_ref.current_dir != path_for_done {
+                return;
+            }
+            *state_ref.git_statuses.borrow_mut() = statuses;
+            let count = state_ref.model.n_items();
+            if count > 0 {
+                state_ref.model.items_changed(0, count, count);
+            }
+        },
+    );
 }
 
 /// Faz 39: recomputes and shows/hides `chrome`'s Git status badge for

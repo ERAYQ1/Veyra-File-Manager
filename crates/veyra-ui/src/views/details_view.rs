@@ -11,6 +11,7 @@ use veyra_filesystem::FileItem;
 use crate::config::SharedSettings;
 use crate::dnd::DndWiring;
 use crate::sorting::{SortConfig, SortKey, SortOrder};
+use crate::state::SharedGitStatuses;
 use crate::thumbnails::ThumbnailService;
 use crate::views::{attach_click_policy, icon_name_for, item_at};
 
@@ -51,6 +52,7 @@ pub(crate) fn build_details_view(
     thumbnails: Rc<ThumbnailService>,
     dnd_wiring: DndWiring,
     settings: SharedSettings,
+    git_statuses: SharedGitStatuses,
 ) -> DetailsViewHandles {
     let DetailsSortWiring {
         sort_config,
@@ -65,7 +67,12 @@ pub(crate) fn build_details_view(
     let sort_model = gtk4::SortListModel::new(Some(filtered), Some(sorter.clone()));
     let selection = gtk4::MultiSelection::new(Some(sort_model));
 
-    let name_col = name_column(thumbnails, dnd_wiring.clone(), selection.clone());
+    let name_col = name_column(
+        thumbnails,
+        dnd_wiring.clone(),
+        selection.clone(),
+        git_statuses,
+    );
     column_view.append_column(&name_col);
     let size_col = text_column("Size", 100, size_label, |a, b| {
         a.metadata.size_bytes.cmp(&b.metadata.size_bytes)
@@ -180,6 +187,7 @@ fn name_column(
     thumbnails: Rc<ThumbnailService>,
     dnd_wiring: DndWiring,
     selection: gtk4::MultiSelection,
+    git_statuses: SharedGitStatuses,
 ) -> gtk4::ColumnViewColumn {
     let factory = gtk4::SignalListItemFactory::new();
     let thumbnails_for_unbind = thumbnails.clone();
@@ -202,6 +210,13 @@ fn name_column(
         label.set_xalign(0.0);
         label.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
         row.append(&label);
+
+        // Faz 40: Git status badge, hidden until `connect_bind` finds a
+        // non-clean status for this row's file.
+        let badge = gtk4::Label::new(None);
+        badge.add_css_class("veyra-git-badge");
+        badge.set_visible(false);
+        row.append(&badge);
 
         list_item.set_child(Some(&row));
 
@@ -243,9 +258,16 @@ fn name_column(
         }
         if let Some(label) = child.and_then(|w| w.downcast::<gtk4::Label>().ok()) {
             label.set_text(file_item.name());
+            child = label.next_sibling();
+        } else {
+            child = None;
+        }
+        let status = crate::views::git_status_for(&git_statuses, &file_item);
+        if let Some(badge) = child.and_then(|w| w.downcast::<gtk4::Label>().ok()) {
+            crate::views::apply_git_badge(&badge, status);
         }
         row.update_property(&[gtk4::accessible::Property::Label(
-            &crate::views::accessible_description_for(&file_item),
+            &crate::views::accessible_description_with_git(&file_item, status),
         )]);
     });
 

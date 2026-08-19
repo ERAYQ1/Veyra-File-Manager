@@ -1,11 +1,18 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gtk4::gio;
 
-use veyra_filesystem::{OperationControl, VeyraPath};
+use veyra_filesystem::{GitFileStatus, OperationControl, VeyraPath};
 
 use crate::history::History;
+
+/// File name → Git status for the entries directly inside `current_dir`,
+/// shared with every view's row factory so a background `query_dir_git_
+/// statuses` result can update already-bound rows' badges (Faz 40). Empty
+/// whenever `current_dir` isn't inside a Git repository.
+pub(crate) type SharedGitStatuses = Rc<RefCell<HashMap<String, GitFileStatus>>>;
 
 /// Shared, mutable window state: the current location, navigation history,
 /// and the single source-of-truth item model every view (Icon/Compact/
@@ -23,6 +30,9 @@ pub(crate) struct AppState {
     /// stops it immediately (Rule #13) instead of letting a stale listing
     /// keep appending to a model the user has already left.
     pub load_control: Option<OperationControl>,
+    /// Faz 40: `current_dir`'s per-file Git status, refreshed by
+    /// `window::update_git_file_statuses` on every navigation/reload.
+    pub git_statuses: SharedGitStatuses,
 }
 
 pub(crate) type SharedState = Rc<RefCell<AppState>>;
@@ -34,6 +44,7 @@ impl AppState {
             history: History::new(),
             model: gio::ListStore::new::<gtk4::glib::BoxedAnyObject>(),
             load_control: None,
+            git_statuses: Rc::new(RefCell::new(HashMap::new())),
         }))
     }
 

@@ -5,6 +5,7 @@ use gtk4::prelude::*;
 
 use crate::config::SharedSettings;
 use crate::dnd::DndWiring;
+use crate::state::SharedGitStatuses;
 use crate::thumbnails::ThumbnailService;
 use crate::views::{build_grid_view, build_selection, item_at};
 
@@ -23,6 +24,7 @@ pub(crate) fn build_icon_view(
     thumbnails: Rc<ThumbnailService>,
     dnd_wiring: DndWiring,
     settings: SharedSettings,
+    git_statuses: SharedGitStatuses,
 ) -> (gtk4::Widget, gtk4::MultiSelection) {
     let selection = build_selection(model, filter, Some(sorter.clone()));
     let selection_for_activate = selection.clone();
@@ -44,6 +46,7 @@ pub(crate) fn build_icon_view(
         dnd_wiring,
         settings,
         on_activate,
+        git_statuses,
     );
     grid_view.set_min_columns(2);
     crate::context_menu::attach(

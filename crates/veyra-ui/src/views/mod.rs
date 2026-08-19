@@ -11,10 +11,11 @@ pub(crate) use compact_view::build_compact_view;
 pub(crate) use details_view::{build_details_view, DetailsSortWiring};
 pub(crate) use icon_view::build_icon_view;
 
-use veyra_filesystem::{FileItem, FileKind};
+use veyra_filesystem::{FileItem, FileKind, GitFileStatus};
 
 use crate::config::{ClickPolicy, SharedSettings};
 use crate::dnd::{self, DndWiring};
+use crate::state::SharedGitStatuses;
 use crate::thumbnails::ThumbnailService;
 
 /// The three directory presentation modes, all sharing one `SortConfig`-
@@ -107,6 +108,7 @@ pub(crate) fn build_grid_view(
     dnd_wiring: DndWiring,
     settings: SharedSettings,
     on_activate: Rc<dyn Fn(u32)>,
+    git_statuses: SharedGitStatuses,
 ) -> gtk4::GridView {
     let factory = gtk4::SignalListItemFactory::new();
 
@@ -144,6 +146,13 @@ pub(crate) fn build_grid_view(
             }
             item_box.append(&label);
 
+            // Faz 40: Git status badge, hidden until `connect_bind` finds a
+            // non-clean status for this row's file in `git_statuses`.
+            let badge = gtk4::Label::new(None);
+            badge.add_css_class("veyra-git-badge");
+            badge.set_visible(false);
+            item_box.append(&badge);
+
             list_item.set_child(Some(&item_box));
 
             attach_row_dnd(&item_box, list_item, &dnd_wiring, &selection);
@@ -153,6 +162,7 @@ pub(crate) fn build_grid_view(
     {
         let thumbnails = thumbnails.clone();
         let icon_size = icon_size.clone();
+        let git_statuses = git_statuses.clone();
         factory.connect_bind(move |_, list_item| {
             let list_item = list_item
                 .downcast_ref::<gtk4::ListItem>()
@@ -190,9 +200,16 @@ pub(crate) fn build_grid_view(
             if let Some(label) = child.and_then(|w| w.downcast::<gtk4::Label>().ok()) {
                 label.set_text(file_item.name());
                 label.set_tooltip_text(Some(file_item.name()));
+                child = label.next_sibling();
+            } else {
+                child = None;
+            }
+            let status = git_status_for(&git_statuses, &file_item);
+            if let Some(badge) = child.and_then(|w| w.downcast::<gtk4::Label>().ok()) {
+                apply_git_badge(&badge, status);
             }
             item_box.update_property(&[gtk4::accessible::Property::Label(
-                &accessible_description_for(&file_item),
+                &accessible_description_with_git(&file_item, status),
             )]);
         });
     }
@@ -382,6 +399,79 @@ pub(crate) fn accessible_description_for(item: &FileItem) -> String {
     }
 }
 
+/// Faz 40: every CSS class `apply_git_badge` may set, so it can be cleared
+/// unconditionally before applying the current status (recycled list items
+/// must not keep a previous row's status class, same as `veyra-hidden-item`
+/// above).
+const GIT_BADGE_CSS_CLASSES: &[&str] = &[
+    "veyra-git-modified",
+    "veyra-git-staged",
+    "veyra-git-untracked",
+    "veyra-git-ignored",
+    "veyra-git-conflicted",
+    "veyra-git-deleted",
+];
+
+fn git_status_css_class(status: GitFileStatus) -> &'static str {
+    match status {
+        GitFileStatus::Modified => "veyra-git-modified",
+        GitFileStatus::Staged => "veyra-git-staged",
+        GitFileStatus::Untracked => "veyra-git-untracked",
+        GitFileStatus::Ignored => "veyra-git-ignored",
+        GitFileStatus::Conflicted => "veyra-git-conflicted",
+        GitFileStatus::Deleted => "veyra-git-deleted",
+        GitFileStatus::Clean => "",
+    }
+}
+
+/// `item`'s Git status, looked up by file name in the tab's shared map —
+/// `None` for a `Clean` entry (nothing in the map) as well as for a
+/// directory the map has no data for at all, so callers only ever need to
+/// branch on `Some`/`None`.
+pub(crate) fn git_status_for(
+    git_statuses: &SharedGitStatuses,
+    item: &FileItem,
+) -> Option<GitFileStatus> {
+    git_statuses.borrow().get(item.name()).copied()
+}
+
+/// Applies `status` to a row's Git badge label (Faz 40): text, status-
+/// colored CSS class, and visibility. Recycled rows always pass through
+/// here on bind, so a `None` status must un-badge a row that previously
+/// showed one.
+pub(crate) fn apply_git_badge(badge: &gtk4::Label, status: Option<GitFileStatus>) {
+    for class in GIT_BADGE_CSS_CLASSES {
+        badge.remove_css_class(class);
+    }
+    match status {
+        Some(status) => {
+            badge.set_text(status.badge_text());
+            badge.add_css_class(git_status_css_class(status));
+            badge.set_tooltip_text(Some(status.accessible_word()));
+            badge.set_visible(true);
+        }
+        None => {
+            badge.set_text("");
+            badge.set_tooltip_text(None);
+            badge.set_visible(false);
+        }
+    }
+}
+
+/// `accessible_description_for` with `status` appended, e.g. `"README.md,
+/// File, Modified"` (Kural #28/#37) — the screen-reader-only counterpart to
+/// the visual badge `apply_git_badge` draws.
+pub(crate) fn accessible_description_with_git(
+    item: &FileItem,
+    status: Option<GitFileStatus>,
+) -> String {
+    let base = accessible_description_for(item);
+    match status {
+        Some(status) => format!("{base}, {}", status.accessible_word()),
+        None => base,
+    }
+}
+
 /// Standard Adwaita/GNOME symbolic icon name for `item`.
 pub(crate) fn icon_name_for(item: &FileItem) -> &'static str {
     match item.kind() {
@@ -504,6 +594,38 @@ mod tests {
             FileKind::Unknown,
         ] {
             assert!(!kind_word(&item("x", kind, 0)).is_empty());
+        }
+    }
+
+    #[test]
+    fn accessible_description_with_git_appends_the_status_word() {
+        let description = accessible_description_with_git(
+            &item("README.md", FileKind::Regular, 10),
+            Some(GitFileStatus::Modified),
+        );
+        assert_eq!(description, "README.md, File, 10 B, Modified");
+    }
+
+    #[test]
+    fn accessible_description_with_git_matches_the_plain_form_when_clean() {
+        let file_item = item("README.md", FileKind::Regular, 10);
+        assert_eq!(
+            accessible_description_with_git(&file_item, None),
+            accessible_description_for(&file_item)
+        );
+    }
+
+    #[test]
+    fn git_status_css_class_covers_every_non_clean_status() {
+        for status in [
+            GitFileStatus::Modified,
+            GitFileStatus::Staged,
+            GitFileStatus::Untracked,
+            GitFileStatus::Ignored,
+            GitFileStatus::Conflicted,
+            GitFileStatus::Deleted,
+        ] {
+            assert!(!git_status_css_class(status).is_empty());
         }
     }
 }
