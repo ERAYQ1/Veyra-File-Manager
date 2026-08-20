@@ -777,6 +777,12 @@ const EN: &[(&str, &str)] = &[
         "prefs.privacy.sanitize_logs.subtitle",
         "Log only file names instead of full paths",
     ),
+    ("prefs.privacy.open_log_dir.title", "Open Log Directory"),
+    (
+        "prefs.privacy.open_log_dir.subtitle",
+        "Opens the folder holding veyra.log and its rotated backups",
+    ),
+    ("prefs.privacy.open_log_dir.button", "Open"),
     ("prefs.privacy.group.crash_reports", "Crash Reports"),
     (
         "prefs.privacy.save_crash_reports.title",
@@ -1457,6 +1463,12 @@ const TR: &[(&str, &str)] = &[
         "prefs.privacy.sanitize_logs.subtitle",
         "Tam yol yerine yalnızca dosya adını günlükle",
     ),
+    ("prefs.privacy.open_log_dir.title", "Günlük Klasörünü Aç"),
+    (
+        "prefs.privacy.open_log_dir.subtitle",
+        "veyra.log ve döndürülmüş yedeklerini içeren klasörü açar",
+    ),
+    ("prefs.privacy.open_log_dir.button", "Aç"),
     ("prefs.privacy.group.crash_reports", "Çökme Raporları"),
     ("prefs.privacy.save_crash_reports.title", "Yerel Çökme Raporlarını Kaydet"),
     (

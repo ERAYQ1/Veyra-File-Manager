@@ -6,6 +6,7 @@
 pub mod config;
 pub mod crash_report;
 pub mod error;
+pub mod logging_sanitizer;
 pub mod security;
 
 pub use config::XdgDirs;

@@ -710,6 +710,31 @@ fn privacy_page(settings: &SharedSettings) -> adw::PreferencesPage {
         });
     }
     logging_group.add(&sanitize_row);
+
+    let (open_log_dir_row, open_log_dir_button) = action_row_button(
+        t("prefs.privacy.open_log_dir.title"),
+        t("prefs.privacy.open_log_dir.subtitle"),
+        t("prefs.privacy.open_log_dir.button"),
+    );
+    open_log_dir_button.connect_clicked(|button| {
+        let Some(log_dir) = veyra_core::XdgDirs::resolve("veyra")
+            .ok()
+            .and_then(|dirs| dirs.log_file().parent().map(|p| p.to_path_buf()))
+        else {
+            return;
+        };
+        let file = gtk4::gio::File::for_path(&log_dir);
+        gtk4::FileLauncher::new(Some(&file)).launch(
+            button.root().and_downcast_ref::<gtk4::Window>(),
+            gtk4::gio::Cancellable::NONE,
+            |result| {
+                if let Err(err) = result {
+                    tracing::warn!(error = %err, "failed to open log directory");
+                }
+            },
+        );
+    });
+    logging_group.add(&open_log_dir_row);
     page.add(&logging_group);
 
     let crash_group = group(t("prefs.privacy.group.crash_reports"));

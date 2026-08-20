@@ -58,9 +58,13 @@ impl XdgDirs {
         Ok(())
     }
 
-    /// Path to the structured log file under the state directory.
+    /// Path to the structured log file, under a `logs/` subdirectory of the
+    /// state directory (Faz 54C) — not created by [`Self::ensure_created`],
+    /// since `logging::init` creates it itself right before opening the
+    /// file, the same way `crash_report::CrashReport::write` owns creating
+    /// its own `crashes/` subdirectory.
     pub fn log_file(&self) -> PathBuf {
-        self.state_dir.join("veyra.log")
+        self.state_dir.join("logs").join("veyra.log")
     }
 
     /// Directory Faz 53's crash reports are written to and read back from.
@@ -118,7 +122,7 @@ mod tests {
             state_dir: PathBuf::from("/x/state"),
             data_dir: PathBuf::from("/x/data"),
         };
-        assert_eq!(dirs.log_file(), PathBuf::from("/x/state/veyra.log"));
+        assert_eq!(dirs.log_file(), PathBuf::from("/x/state/logs/veyra.log"));
     }
 
     #[test]

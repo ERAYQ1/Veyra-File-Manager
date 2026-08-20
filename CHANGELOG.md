@@ -1,5 +1,21 @@
 # Changelog
 
+## Faz 54 — Structured Logging & Privacy-Hardened Tracing
+
+Günlükleme artık derleme moduna göre otomatik seviye seçiyor (Development'ta `DEBUG`, Production'da `INFO`, `RUST_LOG` her zaman ezer) ve dosyaya yazılan her satır — çağrı sitesinin hatırlayıp hatırlamadığına bakılmaksızın — URI şifreleri, token'lar ve ev dizini için katı bir maskeleme katmanından geçiyor (Kural #23).
+
+### Eklenenler
+- **`crates/veyra-core/src/logging_sanitizer.rs` (yeni):** `redact_uri_credentials` (`sftp://alice:secret123@host` → `sftp://alice:***@host`, `smb://domain;user:password@host` → `smb://domain;user:***@host`, aynı satırdaki birden çok URI'yi de kapsar), `redact_tokens` (`Bearer <token>` ve `token=`/`api_key=`/`apikey=`/`access_token=`/`secret=` değerlerini büyük/küçük harf duyarsız `[REDACTED_TOKEN]` ile değiştirir), `redact_home_path` (`/home/kullanici/...` → `~/[REDACTED_PATH]/...`) ve bunların hepsini sırayla uygulayan `sanitize_log_line`. Aynı modül log dosyası döngüsünü de taşıyor: `rotate_log_if_needed` dosya `MAX_LOG_SIZE_BYTES`'ı (5 MB) aştığında `.1`/`.2`/`.3`'e kaydırıyor, `MAX_LOG_BACKUPS`'ı (3) aşan en eski yedeği siliyor. 26 birim testi her maskeleme kuralını ve rotasyon senaryosunu doğruluyor.
+- **`crates/veyra-app/src/logging.rs` (genişletildi):** `default_level_filter(debug_build: bool)` saf fonksiyonu, `RUST_LOG` ayarlı değilse `cfg!(debug_assertions)`'a göre `"veyra=debug,veyra_ui=debug,veyra_filesystem=debug,veyra_search=debug,warn"` (Development) veya `"veyra=info,veyra_ui=info,veyra_filesystem=info,warn"` (Production) seçiyor — `RUST_LOG` her zaman öncelikli. `init()` artık dosyayı açmadan önce `rotate_log_if_needed` çağırıyor ve dosya yazıcısını `SanitizingWriter`/`SanitizingHandle` ile sarmalıyor: her `tracing` olayının ham baytları, diske değmeden önce `sanitize_log_line`'dan geçiyor (stdout çıktısı sanitize edilmiyor — yalnızca kalıcı dosya).
+- **`crates/veyra-core/src/config.rs`:** `XdgDirs::log_file()` artık `$XDG_STATE_HOME/veyra/logs/veyra.log` döndürüyor (önceki düz `veyra.log`'dan taşındı); `logs/` dizini `crashes/`'in kendi oluşturma deseniyle aynı şekilde `logging::init` tarafından açılmadan hemen önce oluşturuluyor.
+- **Ayarlar entegrasyonu (`dialogs/preferences_dialog.rs`):** Privacy sayfasının Logging grubuna, `veyra.log` ve döndürülmüş yedeklerini tutan klasörü `GtkFileLauncher` ile sistem dosya yöneticisinde açan "Günlük Klasörünü Aç" butonu eklendi.
+- **i18n (`i18n.rs`, +3 EN/TR anahtar çifti):** `prefs.privacy.open_log_dir.*`.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 uyarı.
+- `cargo test --workspace`: tamamı geçti (`veyra-core`: 44, `veyra-app`: 5 dahil).
+
 ## Faz 53 — Privacy-Friendly Crash Reporting & Panic Diagnostics
 
 Veyra artık panik yaşadığında sessizce çöküp bir sonraki oturuma hiçbir iz bırakmıyor: yerel, maskelenmiş bir çökme raporu `$XDG_STATE_HOME/veyra/crashes/`'e yazılıyor ve bir sonraki açılışta kullanıcıya ne olduğunu gösteren bir diyalog sunuluyor — hiçbir veri hiçbir zaman internete gönderilmiyor (Kural #24).
