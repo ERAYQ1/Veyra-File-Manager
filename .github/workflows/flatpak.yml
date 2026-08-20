@@ -1,0 +1,68 @@
+name: Flatpak Manifest Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'build-aux/flatpak/**'
+      - '.github/workflows/flatpak.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'build-aux/flatpak/**'
+      - '.github/workflows/flatpak.yml'
+
+jobs:
+  validate-manifest:
+    name: Validate Flatpak Manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate JSON syntax
+        run: |
+          python3 -m json.tool build-aux/flatpak/io.github.erayq1.Veyra.json > /dev/null
+          python3 -m json.tool build-aux/flatpak/cargo-sources.json > /dev/null
+      - name: Validate manifest required fields
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+
+          with open("build-aux/flatpak/io.github.erayq1.Veyra.json") as f:
+              manifest = json.load(f)
+
+          required = ["id", "runtime", "runtime-version", "sdk", "command", "modules"]
+          missing = [key for key in required if key not in manifest]
+          if missing:
+              print(f"Missing required manifest fields: {missing}")
+              sys.exit(1)
+
+          if manifest["id"] != "io.github.erayq1.Veyra":
+              print(f"Unexpected app id: {manifest['id']}")
+              sys.exit(1)
+          EOF
+      - name: Validate cargo-sources structure
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+
+          with open("build-aux/flatpak/cargo-sources.json") as f:
+              sources = json.load(f)
+
+          if not isinstance(sources, list):
+              print("cargo-sources.json must be a JSON array")
+              sys.exit(1)
+
+          for entry in sources:
+              if "type" not in entry:
+                  print(f"cargo-sources entry missing 'type': {entry}")
+                  sys.exit(1)
+          EOF
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --noninteractive flathub org.gnome.Platform//47 org.gnome.Sdk//47 org.freedesktop.Sdk.Extension.rust-stable//47 || true
+      - name: flatpak-builder manifest lint
+        run: |
+          flatpak-builder --show-manifest build-aux/flatpak/io.github.erayq1.Veyra.json > /dev/null

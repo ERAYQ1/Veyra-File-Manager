@@ -1,5 +1,39 @@
 # Changelog
 
+## Faz 56 — CI/CD Pipeline & Multi-Distro GitHub Actions
+
+Her `push`/`pull_request`'te otomatik format/lint denetimi, Ubuntu/Fedora/
+Arch Linux üçlü test matrisi, sürüm derlemesi ve kurulum doğrulaması
+çalıştıran profesyonel GitHub Actions iş akışları eklendi. Etiketlenmiş
+sürümler (`v*`) otomatik olarak paketlenip GitHub Release'e yayınlanır;
+Flatpak manifest'i her değişiklikte sözdizim/schema açısından doğrulanır.
+
+### Eklenenler
+- **`.github/workflows/ci.yml` (yeni):** `lint` job'ı (`cargo fmt --check`,
+  `cargo clippy -D warnings`), `test-matrix` job'ı (Ubuntu/`fedora:latest`/
+  `archlinux:latest` container'larında `cargo test --workspace`) ve
+  `build-release` job'ı (`cargo build --release --locked`,
+  `make DESTDIR=staging PREFIX=/usr install`, `desktop-file-validate`,
+  `appstreamcli validate`).
+- **`.github/workflows/release.yml` (yeni):** `v*` etiketinde tetiklenir;
+  release binary'i derler, `strip` eder, `.tar.gz` paketi ve SHA-256
+  checksum üretir, `softprops/action-gh-release` ile GitHub Release'e
+  varlıkları ekler.
+- **`.github/workflows/flatpak.yml` (yeni):** Flatpak manifest ve
+  `cargo-sources.json` dosyalarının JSON sözdizimini, zorunlu alanlarını ve
+  `flatpak-builder --show-manifest` ile şema bütünlüğünü doğrular.
+- **`crates/veyra-app/tests/ci_metadata.rs` (yeni, 13 test):** Üç iş
+  akışı dosyasının YAML sözdizim bütünlüğünü, gerekli job adlarını
+  (`lint`, `test-matrix`, `build-release`), dağıtım başına paket
+  bağımlılıklarını (Ubuntu/Fedora/Arch) ve tetikleyici olaylarını
+  (`push`/`pull_request`/`tags: ['v*']`) doğrular.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: temiz.
+- `cargo test --workspace`: 605 test, 0 başarısız (592 önceki test +
+  yeni 13 `ci_metadata` testi).
+
 ## Faz 55 — Comprehensive Documentation Suite
 
 Açık kaynak topluluk standartlarını (GitHub Community Standards) karşılayan

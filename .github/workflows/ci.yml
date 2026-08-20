@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Format & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libglib2.0-dev
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test-matrix:
+    name: Test (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu
+            container: null
+          - name: fedora
+            container: fedora:latest
+          - name: archlinux
+            container: archlinux:latest
+    container: ${{ matrix.container }}
+    steps:
+      - name: Install dependencies (Ubuntu)
+        if: matrix.name == 'ubuntu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libglib2.0-dev
+      - name: Install dependencies (Fedora)
+        if: matrix.name == 'fedora'
+        run: |
+          dnf install -y gtk4-devel libadwaita-devel glib2-devel gcc rust cargo git
+      - name: Install dependencies (Arch Linux)
+        if: matrix.name == 'archlinux'
+        run: |
+          pacman -Syu --noconfirm gtk4 libadwaita glib2 base-devel rust cargo git
+      - uses: actions/checkout@v4
+      - name: Configure git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.name == 'ubuntu'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+      - name: cargo test --workspace
+        run: cargo test --workspace --verbose
+
+  build-release:
+    name: Release Build & Install Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libglib2.0-dev \
+            desktop-file-utils appstream
+      - name: cargo build --release
+        run: cargo build --release --locked --workspace
+      - name: make install
+        run: make DESTDIR=staging PREFIX=/usr install
+      - name: Validate desktop file
+        run: desktop-file-validate staging/usr/share/applications/io.github.erayq1.Veyra.desktop
+      - name: Validate AppStream metainfo
+        run: appstreamcli validate --no-net staging/usr/share/metainfo/io.github.erayq1.Veyra.metainfo.xml

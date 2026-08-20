@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libglib2.0-dev
+      - name: Build release binary
+        run: cargo build --release --locked --workspace
+      - name: Strip binary
+        run: strip target/release/veyra
+      - name: Package tarball
+        id: package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PKG_NAME="veyra-${GITHUB_REF_NAME}-x86_64-linux"
+          STAGE_DIR="$(mktemp -d)/${PKG_NAME}"
+          mkdir -p "${STAGE_DIR}"
+          cp target/release/veyra "${STAGE_DIR}/"
+          cp -r data "${STAGE_DIR}/"
+          cp README.md LICENSE CHANGELOG.md "${STAGE_DIR}/"
+          tar -czf "${PKG_NAME}.tar.gz" -C "$(dirname "${STAGE_DIR}")" "${PKG_NAME}"
+          sha256sum "${PKG_NAME}.tar.gz" > "${PKG_NAME}.tar.gz.sha256"
+          echo "pkg_name=${PKG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.package.outputs.pkg_name }}.tar.gz
+            ${{ steps.package.outputs.pkg_name }}.tar.gz.sha256
+          generate_release_notes: true
