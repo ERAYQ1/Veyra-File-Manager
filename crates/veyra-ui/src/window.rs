@@ -2444,11 +2444,17 @@ fn setup_terminal_as_root_actions(
             } else {
                 item.path.clone()
             };
+            let Some(local_dir) = target_dir.as_local_path().map(|p| p.to_path_buf()) else {
+                show_error_dialog(
+                    &window,
+                    "Unable to Open Terminal as Root",
+                    "Terminal as root is only available for local filesystem paths.",
+                );
+                return;
+            };
             let window = window.clone();
             fs_async::run_blocking(
-                move || {
-                    crate::privileged::open_terminal_as_root(target_dir.as_local_path().unwrap())
-                },
+                move || crate::privileged::open_terminal_as_root(&local_dir),
                 move |result| {
                     if let Err(err) = result {
                         show_error_dialog(
@@ -2475,9 +2481,17 @@ fn setup_terminal_as_root_actions(
                 return;
             };
             let path = tab.state.borrow().current_dir.clone();
+            let Some(local_dir) = path.as_local_path().map(|p| p.to_path_buf()) else {
+                show_error_dialog(
+                    &window,
+                    "Unable to Open Terminal as Root",
+                    "Terminal as root is only available for local filesystem paths.",
+                );
+                return;
+            };
             let window = window.clone();
             fs_async::run_blocking(
-                move || crate::privileged::open_terminal_as_root(path.as_local_path().unwrap()),
+                move || crate::privileged::open_terminal_as_root(&local_dir),
                 move |result| {
                     if let Err(err) = result {
                         show_error_dialog(

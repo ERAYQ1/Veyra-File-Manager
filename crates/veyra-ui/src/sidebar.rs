@@ -256,9 +256,41 @@ pub(crate) fn build(
 
     let scrolled = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
+        .vexpand(true)
         .child(&root)
         .build();
-    scrolled.upcast()
+
+    let footer_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    footer_box.set_margin_start(8);
+    footer_box.set_margin_end(8);
+    footer_box.set_margin_top(6);
+    footer_box.set_margin_bottom(8);
+    footer_box.append(&preferences_button());
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    outer.append(&scrolled);
+    outer.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
+    outer.append(&footer_box);
+    outer.upcast()
+}
+
+/// The Faz 59 sidebar footer entry: a compact, flat "Preferences" button
+/// pinned below the scrollable Places/Bookmarks/Devices/Network content,
+/// firing the same `win.show-preferences` action as the Command Palette
+/// entry and the `Ctrl+,` accelerator (see `shortcuts.rs`).
+fn preferences_button() -> gtk4::Button {
+    let button = gtk4::Button::builder().css_classes(["flat"]).build();
+    button.set_action_name(Some("win.show-preferences"));
+    button.set_tooltip_text(Some(t("sidebar.preferences_tooltip")));
+    button.update_property(&[gtk4::accessible::Property::Label(t("sidebar.preferences"))]);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    content.append(&gtk4::Image::from_icon_name("preferences-system-symbolic"));
+    let label = gtk4::Label::new(Some(t("sidebar.preferences")));
+    label.set_xalign(0.0);
+    content.append(&label);
+    button.set_child(Some(&content));
+    button
 }
 
 /// The Faz 43 "Storage" row: unlike every other Places entry, it doesn't

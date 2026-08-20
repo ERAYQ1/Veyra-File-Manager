@@ -1,6 +1,6 @@
 # Testing Guide
 
-Veyra's workspace carries 616 passing tests (`cargo test --workspace`,
+Veyra's workspace carries 619 passing tests (`cargo test --workspace`,
 verified against this document's own commit — re-run the count yourself
 with the command below, since it grows every phase):
 

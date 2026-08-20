@@ -15,6 +15,14 @@ use crate::queue::OperationControl;
 use super::format::ArchiveFormat;
 use super::security::sanitize_entry_path;
 
+/// Defense-in-depth cap on the total decompressed size an extraction may
+/// write to disk, regardless of what the archive's own metadata claims
+/// (Rule #21) — the zip/tar/7z formats all let a small compressed input
+/// expand to an arbitrarily large decompressed one ("zip bomb"), so the
+/// limit is enforced against actual bytes written by [`write_entry_file`],
+/// not against any size field read from the archive.
+const MAX_EXTRACTION_TOTAL_BYTES: u64 = 50 * 1024 * 1024 * 1024;
+
 /// Why an archive entry was not written to disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkipReason {
@@ -57,12 +65,13 @@ pub fn extract_archive(
         ArchiveFormat::Zip => extract_zip(&archive_local, &dest_local, control, &mut on_progress),
         ArchiveFormat::Tar => {
             let file = fs::File::open(&archive_local).map_err(|e| io_err(archive_path, e))?;
-            extract_tar(file, &dest_local, control, &mut on_progress)
+            extract_tar(file, &archive_local, &dest_local, control, &mut on_progress)
         }
         ArchiveFormat::TarGz => {
             let file = fs::File::open(&archive_local).map_err(|e| io_err(archive_path, e))?;
             extract_tar(
                 flate2::read::GzDecoder::new(file),
+                &archive_local,
                 &dest_local,
                 control,
                 &mut on_progress,
@@ -72,6 +81,7 @@ pub fn extract_archive(
             let file = fs::File::open(&archive_local).map_err(|e| io_err(archive_path, e))?;
             extract_tar(
                 xz2::read::XzDecoder::new_multi_decoder(file),
+                &archive_local,
                 &dest_local,
                 control,
                 &mut on_progress,
@@ -81,7 +91,13 @@ pub fn extract_archive(
             let file = fs::File::open(&archive_local).map_err(|e| io_err(archive_path, e))?;
             let decoder = zstd::stream::read::Decoder::new(file)
                 .map_err(|e| FsError::Archive(e.to_string()))?;
-            extract_tar(decoder, &dest_local, control, &mut on_progress)
+            extract_tar(
+                decoder,
+                &archive_local,
+                &dest_local,
+                control,
+                &mut on_progress,
+            )
         }
         ArchiveFormat::SevenZip => {
             extract_7z(&archive_local, &dest_local, control, &mut on_progress)
@@ -113,13 +129,55 @@ fn plan_entry(dest_root: &Path, raw_name: &str, is_dir: bool, is_symlink: bool) 
     }
 }
 
-fn write_entry_file(path: &Path, reader: &mut (impl Read + ?Sized)) -> io::Result<()> {
+/// What went wrong writing a single extracted entry to disk.
+#[derive(Debug)]
+enum WriteEntryError {
+    Io(io::Error),
+    /// Writing this entry would push the archive's total decompressed
+    /// output past [`MAX_EXTRACTION_TOTAL_BYTES`] — extraction must abort
+    /// rather than skip-and-continue, since a zip bomb's later entries are
+    /// exactly as dangerous as its first.
+    LimitExceeded,
+}
+
+impl From<io::Error> for WriteEntryError {
+    fn from(source: io::Error) -> Self {
+        WriteEntryError::Io(source)
+    }
+}
+
+fn write_entry_file(
+    path: &Path,
+    reader: &mut (impl Read + ?Sized),
+    remaining_budget: &mut u64,
+) -> Result<(), WriteEntryError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let mut out = fs::File::create(path)?;
-    io::copy(reader, &mut out)?;
+    // Reads at most one byte past the remaining budget, so a written count
+    // over budget unambiguously means the entry itself would have exceeded
+    // the limit had it not been capped.
+    let mut limited = reader.take(remaining_budget.saturating_add(1));
+    let written = io::copy(&mut limited, &mut out)?;
+    if written > *remaining_budget {
+        return Err(WriteEntryError::LimitExceeded);
+    }
+    *remaining_budget -= written;
     Ok(())
+}
+
+fn extraction_limit_error(archive_path: &Path) -> FsError {
+    FsError::Io {
+        path: VeyraPath::from_local(archive_path.to_path_buf()),
+        source: io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "archive extraction stopped: total extracted size exceeds the {} GB safety limit (zip bomb protection)",
+                MAX_EXTRACTION_TOTAL_BYTES / (1024 * 1024 * 1024)
+            ),
+        ),
+    }
 }
 
 fn extract_zip(
@@ -133,6 +191,7 @@ fn extract_zip(
         zip::ZipArchive::new(file).map_err(|e| FsError::Archive(format!("invalid zip: {e}")))?;
     let file_count = archive.len();
     let mut outcome = ArchiveOutcome::default();
+    let mut remaining_budget = MAX_EXTRACTION_TOTAL_BYTES;
 
     for index in 0..file_count {
         if control.wait_if_paused() {
@@ -167,10 +226,15 @@ fn extract_zip(
                     outcome.extracted.push(path);
                 }
             }
-            EntryPlan::File(path) => match write_entry_file(&path, &mut entry) {
-                Ok(()) => outcome.extracted.push(path),
-                Err(e) => outcome.errors.push((name, local_io_err_msg(e))),
-            },
+            EntryPlan::File(path) => {
+                match write_entry_file(&path, &mut entry, &mut remaining_budget) {
+                    Ok(()) => outcome.extracted.push(path),
+                    Err(WriteEntryError::LimitExceeded) => {
+                        return Err(extraction_limit_error(archive_path))
+                    }
+                    Err(WriteEntryError::Io(e)) => outcome.errors.push((name, local_io_err_msg(e))),
+                }
+            }
         }
     }
 
@@ -179,12 +243,14 @@ fn extract_zip(
 
 fn extract_tar(
     reader: impl Read,
+    archive_path: &Path,
     dest_root: &Path,
     control: &OperationControl,
     on_progress: &mut impl FnMut(Progress),
 ) -> Result<ArchiveOutcome, FsError> {
     let mut archive = tar::Archive::new(reader);
     let mut outcome = ArchiveOutcome::default();
+    let mut remaining_budget = MAX_EXTRACTION_TOTAL_BYTES;
 
     let entries = archive
         .entries()
@@ -236,10 +302,15 @@ fn extract_tar(
                     outcome.extracted.push(path);
                 }
             }
-            EntryPlan::File(path) => match write_entry_file(&path, &mut entry) {
-                Ok(()) => outcome.extracted.push(path),
-                Err(e) => outcome.errors.push((name, local_io_err_msg(e))),
-            },
+            EntryPlan::File(path) => {
+                match write_entry_file(&path, &mut entry, &mut remaining_budget) {
+                    Ok(()) => outcome.extracted.push(path),
+                    Err(WriteEntryError::LimitExceeded) => {
+                        return Err(extraction_limit_error(archive_path))
+                    }
+                    Err(WriteEntryError::Io(e)) => outcome.errors.push((name, local_io_err_msg(e))),
+                }
+            }
         }
     }
 
@@ -267,6 +338,8 @@ fn extract_7z(
     let file_count = reader.archive().files.len();
     let mut outcome = ArchiveOutcome::default();
     let mut index = 0usize;
+    let mut remaining_budget = MAX_EXTRACTION_TOTAL_BYTES;
+    let mut limit_hit = false;
 
     reader
         .for_each_entries(|entry, entry_reader| {
@@ -292,15 +365,27 @@ fn extract_7z(
                     Ok(()) => outcome.extracted.push(path),
                     Err(e) => outcome.errors.push((name, local_io_err_msg(e))),
                 },
-                EntryPlan::File(path) => match write_entry_file(&path, entry_reader) {
-                    Ok(()) => outcome.extracted.push(path),
-                    Err(e) => outcome.errors.push((name, local_io_err_msg(e))),
-                },
+                EntryPlan::File(path) => {
+                    match write_entry_file(&path, entry_reader, &mut remaining_budget) {
+                        Ok(()) => outcome.extracted.push(path),
+                        Err(WriteEntryError::LimitExceeded) => {
+                            limit_hit = true;
+                            return Ok(false);
+                        }
+                        Err(WriteEntryError::Io(e)) => {
+                            outcome.errors.push((name, local_io_err_msg(e)))
+                        }
+                    }
+                }
             }
 
             Ok(true)
         })
         .map_err(|e| FsError::Archive(format!("7z extraction failed: {e}")))?;
+
+    if limit_hit {
+        return Err(extraction_limit_error(archive_path));
+    }
 
     Ok(outcome)
 }
@@ -428,5 +513,37 @@ mod tests {
 
         assert!(outcome.errors.is_empty());
         assert_eq!(fs::read(dest.join("nested/hello.txt")).unwrap(), b"world");
+    }
+
+    #[test]
+    fn write_entry_file_stays_within_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("small.bin");
+        let mut budget = 10u64;
+
+        write_entry_file(&path, &mut &b"hello"[..], &mut budget).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"hello");
+        assert_eq!(budget, 5);
+    }
+
+    #[test]
+    fn write_entry_file_rejects_entry_over_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bomb.bin");
+        let mut budget = 3u64;
+
+        let err = write_entry_file(&path, &mut &b"way too much data"[..], &mut budget)
+            .expect_err("entry larger than the remaining budget must be rejected");
+
+        assert!(matches!(err, WriteEntryError::LimitExceeded));
+    }
+
+    #[test]
+    fn extraction_limit_error_reports_the_archive_path() {
+        let path = Path::new("/tmp/bomb.zip");
+        let err = extraction_limit_error(path);
+        assert!(matches!(err, FsError::Io { .. }));
+        assert!(err.to_string().contains("50 GB safety limit"));
     }
 }

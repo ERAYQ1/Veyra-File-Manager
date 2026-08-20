@@ -61,16 +61,25 @@ pub fn redact_uri_credentials(text: &str) -> String {
 /// Markers whose value (up to the next whitespace/separator) is a
 /// credential and gets replaced with `[REDACTED_TOKEN]` — the marker text
 /// itself is kept so the log line still shows *that* a token was there.
-const KEY_VALUE_TOKEN_MARKERS: [&str; 5] =
-    ["token=", "api_key=", "apikey=", "access_token=", "secret="];
+const KEY_VALUE_TOKEN_MARKERS: [&str; 8] = [
+    "token=",
+    "api_key=",
+    "apikey=",
+    "access_token=",
+    "secret=",
+    "password=",
+    "passwd=",
+    "credential=",
+];
 
 /// The `Bearer ` HTTP auth-header scheme — same treatment, but
 /// space-separated rather than `=`-separated.
 const BEARER_MARKER: &str = "Bearer ";
 
 /// Masks `Bearer <token>` and `key=<token>`-style credentials (`token=`,
-/// `api_key=`, `apikey=`, `access_token=`, `secret=`) with
-/// `[REDACTED_TOKEN]`, matching each marker case-insensitively but leaving
+/// `api_key=`, `apikey=`, `access_token=`, `secret=`, `password=`,
+/// `passwd=`, `credential=`) with `[REDACTED_TOKEN]`, matching each marker
+/// case-insensitively but leaving
 /// its original casing in the output. A marker with nothing after it (end
 /// of string, or immediately followed by a separator) is left alone —
 /// there's no value to redact.
@@ -244,6 +253,15 @@ mod tests {
             "request?token=[REDACTED_TOKEN]&user=bob"
         );
         assert_eq!(redact_tokens("api_key=sk-xyz"), "api_key=[REDACTED_TOKEN]");
+        assert_eq!(
+            redact_tokens("password=hunter2"),
+            "password=[REDACTED_TOKEN]"
+        );
+        assert_eq!(redact_tokens("passwd=hunter2"), "passwd=[REDACTED_TOKEN]");
+        assert_eq!(
+            redact_tokens("credential=abc123"),
+            "credential=[REDACTED_TOKEN]"
+        );
     }
 
     #[test]

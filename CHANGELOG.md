@@ -1,5 +1,42 @@
 # Changelog
 
+## Faz 59 — Sidebar Tercihler Butonu ve Denetim Bulgularının Kapatılması
+
+Faz 58 denetiminde işaretlenen LOW/INFO düzeyindeki güvenlik savunma
+maddeleri kapatıldı ve kenar çubuğuna kalıcı bir Tercihler girişi eklendi.
+
+### Eklendi
+- **Kenar çubuğu Tercihler butonu:** `sidebar.rs`'de kaydırılabilir
+  Places/Bookmarks/Devices/Network içeriğinin altına, ayırıcı bir çizgiyle
+  sabitlenmiş kompakt bir "Tercihler" butonu eklendi. Aynı
+  `win.show-preferences` eylemini (Komut Paleti'ndeki ve `Ctrl+,`
+  kısayolundaki ile aynı) tetikler, `preferences-system-symbolic` ikonu ve
+  `.flat` stiliyle. Yeni `sidebar.preferences` / `sidebar.preferences_tooltip`
+  i18n anahtarları EN/TR ikisine de eklendi (parite testi geçiyor).
+- **Zip bomb savunması:** `veyra-filesystem/src/archive/extract.rs` artık
+  toplam çıkarılan (decompressed) boyutu, arşivin kendi metadata'sına değil
+  gerçekten diske yazılan bayt sayısına göre izliyor; 50 GB'lık
+  `MAX_EXTRACTION_TOTAL_BYTES` sınırı aşılırsa extract_zip/extract_tar/
+  extract_7z işlemi tamamen durdurup `FsError::Io` döndürür (skip-and-continue
+  değil, çünkü bir zip bomb'un sonraki girdileri ilkinden daha az tehlikeli
+  değildir).
+- **Hassas ortam değişkeni maskeleme genişletmesi:** `crash_report.rs`
+  içindeki `SENSITIVE_ENV_FRAGMENTS`'e `CREDENTIAL`, `PRIVATE`, `SIGNATURE`,
+  `COOKIE`, `SESSIONID` eklendi. Bilinçli olarak çıplak `SESSION` fragmanı
+  kullanılmadı — bu, `DESKTOP_SESSION`/`XDG_SESSION_TYPE` gibi zararsız ve
+  teşhis için faydalı masaüstü değişkenlerini de maskeleyip mevcut testleri
+  kırardı; `SESSIONID` aynı güvenlik amacına daha dar bir eşleşmeyle ulaşır.
+- **Token maskeleme genişletmesi:** `logging_sanitizer.rs` içindeki
+  `KEY_VALUE_TOKEN_MARKERS`'a `password=`, `passwd=`, `credential=`
+  eklendi.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 uyarı.
+- `cargo test --workspace`: **619 test, 0 başarısız** (yeni: zip bomb
+  bütçe testleri, genişletilmiş env/token maskeleme testleri).
+- README ve `docs/testing.md` test rozeti 619'a senkronize edildi.
+
 ## Proje Temizliği ve .gitignore Güçlendirmesi
 
 ### Değişti

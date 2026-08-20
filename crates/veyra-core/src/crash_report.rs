@@ -43,7 +43,24 @@ pub const MAX_RETAINED_REPORTS: usize = 5;
 /// session tokens, API keys, and similar credentials must never end up on
 /// disk even though the rest of the environment (`DESKTOP_SESSION`,
 /// `LANG`, …) is genuinely useful for debugging a crash.
-const SENSITIVE_ENV_FRAGMENTS: [&str; 5] = ["TOKEN", "KEY", "SECRET", "AUTH", "PASS"];
+// Note: "SESSION" alone is deliberately excluded — it would flag ubiquitous
+// benign desktop vars like `DESKTOP_SESSION` and `XDG_SESSION_TYPE` (useful
+// diagnostic context in a crash report, not secrets). `SESSIONID` catches
+// actual session-identifier secrets (`SESSIONID`, `PHP_SESSIONID`, ...)
+// without that collision; `SESSION_TOKEN`/`SESSION_SECRET`-style keys are
+// already caught by the `TOKEN`/`SECRET` fragments below.
+const SENSITIVE_ENV_FRAGMENTS: [&str; 10] = [
+    "TOKEN",
+    "KEY",
+    "SECRET",
+    "AUTH",
+    "PASS",
+    "CREDENTIAL",
+    "PRIVATE",
+    "SIGNATURE",
+    "COOKIE",
+    "SESSIONID",
+];
 
 /// Whether `key` looks like it holds a secret, per
 /// [`SENSITIVE_ENV_FRAGMENTS`].
@@ -293,6 +310,11 @@ mod tests {
             "MY_SECRET",
             "AUTH_HEADER",
             "DB_PASSWORD",
+            "AWS_CREDENTIAL_FILE",
+            "SSH_PRIVATE_KEY",
+            "AWS_SIGNATURE_VERSION",
+            "HTTP_COOKIE",
+            "PHP_SESSIONID",
         ] {
             assert!(is_sensitive_env_key(key), "expected {key} to be sensitive");
         }

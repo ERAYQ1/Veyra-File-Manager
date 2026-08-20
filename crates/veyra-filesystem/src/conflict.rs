@@ -41,11 +41,12 @@ impl ConflictDecision {
 
 /// Suggests a non-colliding name for `name` in the style of `report (2).pdf`,
 /// `report (3).pdf`, ... — `exists` is queried for each candidate so the
-/// suggestion is guaranteed free at the time it's returned.
+/// suggestion is guaranteed free at the time it's returned. Returns the
+/// original name with no suffix if no free name is found within 10 000
+/// attempts (defensive cap against a misbehaving `exists` closure).
 pub fn suggest_name(name: &str, exists: impl Fn(&str) -> bool) -> String {
     let (stem, ext) = split_extension(name);
-    let mut n = 2u32;
-    loop {
+    for n in 2u32..=10_000 {
         let candidate = match ext {
             Some(ext) => format!("{stem} ({n}).{ext}"),
             None => format!("{stem} ({n})"),
@@ -53,8 +54,8 @@ pub fn suggest_name(name: &str, exists: impl Fn(&str) -> bool) -> String {
         if !exists(&candidate) {
             return candidate;
         }
-        n += 1;
     }
+    name.to_string()
 }
 
 /// Splits `name` into `(stem, extension)`. Leading-dot names (`.gitignore`)

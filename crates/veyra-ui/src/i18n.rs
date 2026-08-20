@@ -383,6 +383,8 @@ const EN: &[(&str, &str)] = &[
     ("sidebar.recent", "Recent"),
     ("sidebar.recent_files", "Recent Files"),
     ("sidebar.trash", "Trash"),
+    ("sidebar.preferences", "Preferences"),
+    ("sidebar.preferences_tooltip", "Preferences (Ctrl+,)"),
     ("trash.banner_summary", "Trash — {count_label}, {size} total"),
     ("recent.privacy_mode", "Privacy Mode"),
     (
@@ -1208,6 +1210,8 @@ const TR: &[(&str, &str)] = &[
     ("sidebar.recent", "Son Kullanılanlar"),
     ("sidebar.recent_files", "Son Kullanılan Dosyalar"),
     ("sidebar.trash", "Çöp Kutusu"),
+    ("sidebar.preferences", "Tercihler"),
+    ("sidebar.preferences_tooltip", "Tercihler (Ctrl+,)"),
     ("trash.banner_summary", "Çöp Kutusu — {count_label}, toplam {size}"),
     ("recent.privacy_mode", "Gizlilik Modu"),
     (
