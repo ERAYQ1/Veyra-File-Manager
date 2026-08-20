@@ -23,8 +23,8 @@ use crate::undo::{SharedUndoStack, UndoStack, UndoableAction};
 use crate::views::ViewMode;
 use crate::widgets::progress_toast::ProgressToastHandles;
 use crate::{
-    archive_ops, breadcrumbs, dialogs, fs_async, headerbar, open_with, operations, recent,
-    shortcuts, sidebar, system_integration, terminal, trash, undo, widgets,
+    archive_ops, breadcrumbs, dialogs, error_ux, fs_async, headerbar, open_with, operations,
+    recent, shortcuts, sidebar, system_integration, terminal, trash, undo, widgets,
 };
 
 /// A single Copy/Cut clipboard slot, shared across both panels and all their
@@ -1520,14 +1520,43 @@ fn setup_archive_actions(
                 move |name, format| {
                     let output_path = child_path(&current_dir, &name);
                     let (control, receiver) =
-                        archive_ops::spawn_compress(output_path, sources, format);
+                        archive_ops::spawn_compress(output_path.clone(), sources.clone(), format);
+                    let respawn_sources = sources.clone();
+                    let respawn_output_path = output_path.clone();
+                    let respawn: ArchiveRespawn = Rc::new(move |location| {
+                        let out = location
+                            .clone()
+                            .unwrap_or_else(|| respawn_output_path.clone());
+                        archive_ops::spawn_compress(out, respawn_sources.clone(), format)
+                    });
+                    let pick_location: ArchiveLocationPicker = Rc::new(|window, on_picked| {
+                        let file_dialog = gtk4::FileDialog::builder()
+                            .title(t("error.action.choose_location"))
+                            .build();
+                        let on_picked = std::cell::RefCell::new(Some(on_picked));
+                        file_dialog.save(Some(window), gio::Cancellable::NONE, move |result| {
+                            let Ok(file) = result else {
+                                return;
+                            };
+                            let Some(path) = file.path() else {
+                                return;
+                            };
+                            if let Some(callback) = on_picked.borrow_mut().take() {
+                                callback(VeyraPath::from_local(path));
+                            }
+                        });
+                    });
                     run_archive_operation(
                         &window_for_confirm,
                         vec![(state, chrome)],
                         &progress,
                         t("toast.compressing"),
+                        "error.headline.compress",
+                        output_path,
                         control,
                         receiver,
+                        respawn,
+                        Some(pick_location),
                     );
                 },
             );
@@ -1561,15 +1590,27 @@ fn setup_archive_actions(
                 .to_string();
             let current_dir = tab.state.borrow().current_dir.clone();
             let destination = child_path(&current_dir, &stem);
+            let archive_path = item.path;
 
-            let (control, receiver) = archive_ops::spawn_extract(item.path, destination);
+            let (control, receiver) =
+                archive_ops::spawn_extract(archive_path.clone(), destination.clone());
+            let respawn_archive_path = archive_path.clone();
+            let respawn: ArchiveRespawn = Rc::new(move |location| {
+                let dest = location.clone().unwrap_or_else(|| destination.clone());
+                archive_ops::spawn_extract(respawn_archive_path.clone(), dest)
+            });
+            let pick_location: ArchiveLocationPicker = extract_location_picker();
             run_archive_operation(
                 &window,
                 vec![(tab.state.clone(), panel.chrome.clone())],
                 &progress,
                 t("toast.extracting"),
+                "error.headline.extract",
+                archive_path,
                 control,
                 receiver,
+                respawn,
+                Some(pick_location),
             );
         });
     }
@@ -1610,20 +1651,54 @@ fn setup_archive_actions(
                         return;
                     };
                     let destination = VeyraPath::from_local(path);
-                    let (control, receiver) = archive_ops::spawn_extract(archive_path, destination);
+                    let (control, receiver) =
+                        archive_ops::spawn_extract(archive_path.clone(), destination.clone());
+                    let respawn_archive_path = archive_path.clone();
+                    let respawn: ArchiveRespawn = Rc::new(move |location| {
+                        let dest = location.clone().unwrap_or_else(|| destination.clone());
+                        archive_ops::spawn_extract(respawn_archive_path.clone(), dest)
+                    });
+                    let pick_location: ArchiveLocationPicker = extract_location_picker();
                     run_archive_operation(
                         &window_for_result,
                         vec![(state, chrome)],
                         &progress,
                         t("toast.extracting"),
+                        "error.headline.extract",
+                        archive_path.clone(),
                         control,
                         receiver,
+                        respawn,
+                        Some(pick_location),
                     );
                 },
             );
         });
     }
     window.add_action(&action_extract_to);
+}
+
+/// Faz 51: the "Choose Another Location" picker shared by both extract
+/// entry points — a plain folder chooser, reused so the recovery flow
+/// doesn't duplicate the dialog wiring per call site.
+fn extract_location_picker() -> ArchiveLocationPicker {
+    Rc::new(|window, on_picked| {
+        let file_dialog = gtk4::FileDialog::builder()
+            .title(t("error.action.choose_location"))
+            .build();
+        let on_picked = std::cell::RefCell::new(Some(on_picked));
+        file_dialog.select_folder(Some(window), gio::Cancellable::NONE, move |result| {
+            let Ok(folder) = result else {
+                return;
+            };
+            let Some(path) = folder.path() else {
+                return;
+            };
+            if let Some(callback) = on_picked.borrow_mut().take() {
+                callback(VeyraPath::from_local(path));
+            }
+        });
+    })
 }
 
 /// Registers the Faz 6/7/8 context-menu `win.*` actions: item actions
@@ -3223,6 +3298,12 @@ fn run_bulk_operation(
                             matches!(e, veyra_filesystem::FsError::PermissionDenied(_))
                         });
 
+                        if let Some((_, chrome)) = refresh_targets.first() {
+                            chrome.status_left.set_label(&format!(
+                                "{} error(s) during operation",
+                                outcome.errors.len()
+                            ));
+                        }
                         if all_permission_denied && crate::privileged::is_available() {
                             show_bulk_retry_admin_dialog(
                                 &window,
@@ -3231,11 +3312,16 @@ fn run_bulk_operation(
                                 &outcome,
                                 refresh_targets.clone(),
                             );
-                        } else if let Some((_, chrome)) = refresh_targets.first() {
-                            chrome.status_left.set_label(&format!(
-                                "{} error(s) during operation",
-                                outcome.errors.len()
-                            ));
+                        } else {
+                            show_bulk_actionable_error(
+                                &window,
+                                refresh_targets.clone(),
+                                &progress,
+                                kind,
+                                destination.clone(),
+                                &outcome,
+                                undo_stack.clone(),
+                            );
                         }
                     }
                     break;
@@ -3269,6 +3355,98 @@ fn notify_bulk_operation_complete(
         "Operation Completed",
         &format!("{verb} {count} item{}", if count == 1 { "" } else { "s" }),
     );
+}
+
+/// Faz 51: Shows the actionable error dialog for a bulk operation's
+/// non-admin-recoverable failures (`show_bulk_retry_admin_dialog` already
+/// owns the all-permission-denied + pkexec case). Classifies the first
+/// failure via `error_ux::classify` and offers Try Again / Choose Another
+/// Location (Copy/Move only) / Skip / Cancel, re-running only the items
+/// that failed.
+#[allow(clippy::too_many_arguments)]
+fn show_bulk_actionable_error(
+    window: &adw::ApplicationWindow,
+    refresh_targets: Vec<(SharedState, Chrome)>,
+    progress: &ProgressToastHandles,
+    kind: OperationKind,
+    destination: Option<VeyraPath>,
+    outcome: &veyra_filesystem::OperationOutcome,
+    undo_stack: SharedUndoStack,
+) {
+    let Some((first_path, first_error)) = outcome.errors.first() else {
+        return;
+    };
+    let headline_key = match kind {
+        OperationKind::Copy => "error.headline.copy",
+        OperationKind::Move => "error.headline.move",
+        OperationKind::Trash => "error.headline.trash",
+        OperationKind::Delete => "error.headline.delete",
+    };
+    let allow_choose_location =
+        matches!(kind, OperationKind::Copy | OperationKind::Move) && destination.is_some();
+    let ctx = error_ux::ErrorContext {
+        headline: t(headline_key).to_string(),
+        allow_choose_location,
+        allow_skip: outcome.errors.len() > 1,
+    };
+    let mut actionable = error_ux::classify(&ctx, first_path, first_error);
+    if outcome.errors.len() > 1 {
+        actionable.target_name = format!(
+            "{} (+{} more)",
+            actionable.target_name,
+            outcome.errors.len() - 1
+        );
+    }
+
+    let failed_paths: Vec<VeyraPath> = outcome.errors.iter().map(|(p, _)| p.clone()).collect();
+    let window = window.clone();
+    let progress = progress.clone();
+    let window_for_show = window.clone();
+
+    dialogs::error_dialog::show(&window_for_show, &actionable, move |action| {
+        let failed_paths = failed_paths.clone();
+        let refresh_targets = refresh_targets.clone();
+        let destination = destination.clone();
+        let undo_stack = undo_stack.clone();
+        let progress = progress.clone();
+        match action {
+            error_ux::RecoveryAction::TryAgain => {
+                run_bulk_operation(
+                    &window,
+                    refresh_targets,
+                    &progress,
+                    kind,
+                    failed_paths,
+                    destination,
+                    &undo_stack,
+                );
+            }
+            error_ux::RecoveryAction::ChooseAnotherLocation => {
+                let file_dialog = gtk4::FileDialog::builder()
+                    .title(t("error.action.choose_location"))
+                    .build();
+                let window_for_result = window.clone();
+                file_dialog.select_folder(Some(&window), gio::Cancellable::NONE, move |result| {
+                    let Ok(folder) = result else {
+                        return;
+                    };
+                    let Some(path) = folder.path() else {
+                        return;
+                    };
+                    run_bulk_operation(
+                        &window_for_result,
+                        refresh_targets,
+                        &progress,
+                        kind,
+                        failed_paths,
+                        Some(VeyraPath::from_local(path)),
+                        &undo_stack,
+                    );
+                });
+            }
+            error_ux::RecoveryAction::Skip | error_ux::RecoveryAction::Cancel => {}
+        }
+    });
 }
 
 /// Faz 28: Shows retry-as-admin dialog for bulk operations that failed with
@@ -3449,20 +3627,41 @@ fn all_tab_refresh_targets(panels: &Panels) -> Vec<(SharedState, Chrome)> {
     targets
 }
 
+/// One Copy/Move-style respawn of a compress/extract run: `None` retries
+/// the exact same request, `Some(path)` swaps in a different output file
+/// (compress) or destination folder (extract).
+type ArchiveSpawn = (
+    veyra_filesystem::OperationControl,
+    async_channel::Receiver<archive_ops::ArchiveEvent>,
+);
+type ArchiveRespawn = Rc<dyn Fn(Option<VeyraPath>) -> ArchiveSpawn>;
+/// Opens whichever chooser fits the operation (a folder picker for
+/// extract, a save-file picker for compress) and calls back with the
+/// chosen path, or does nothing if the user cancels.
+type ArchiveLocationPicker = Rc<dyn Fn(&adw::ApplicationWindow, Box<dyn FnOnce(VeyraPath)>)>;
+
 /// Drives a Faz 19 compress/extract event stream, the archive-ops
 /// counterpart to `run_bulk_operation`: progress updates the same bottom
 /// progress bar (relabeled via `verb`), and completion refreshes every
 /// `(state, chrome)` in `refresh_targets` and surfaces errors/skips on the
 /// first target's status bar. There is no conflict round trip here —
 /// `extract_archive` never prompts, it just skips unsafe/symlink entries
-/// (Rule #21/#22) and reports them in `ArchiveOutcome::skipped`.
+/// (Rule #21/#22) and reports them in `ArchiveOutcome::skipped`. Faz 51:
+/// a hard failure (`Err`) routes through the actionable error dialog,
+/// offering Try Again via `respawn(None)` and, when `pick_location` is
+/// set, Choose Another Location via `respawn(Some(new_path))`.
+#[allow(clippy::too_many_arguments)]
 fn run_archive_operation(
     window: &adw::ApplicationWindow,
     refresh_targets: Vec<(SharedState, Chrome)>,
     progress: &ProgressToastHandles,
     verb: &'static str,
+    headline_key: &'static str,
+    target: VeyraPath,
     control: veyra_filesystem::OperationControl,
     receiver: async_channel::Receiver<archive_ops::ArchiveEvent>,
+    respawn: ArchiveRespawn,
+    pick_location: Option<ArchiveLocationPicker>,
 ) {
     let op_id = widgets::progress_toast::begin_with_verb(progress, &control, verb);
 
@@ -3515,7 +3714,69 @@ fn run_archive_operation(
                         Err(err) => {
                             tracing::warn!(error = %err, "archive operation failed");
                             chrome.status_left.set_label(t("status.archive_failed"));
-                            show_error_dialog(&window, &format!("{verb} Failed"), &err.to_string());
+
+                            let ctx = error_ux::ErrorContext {
+                                headline: t(headline_key).to_string(),
+                                allow_choose_location: pick_location.is_some(),
+                                allow_skip: false,
+                            };
+                            let actionable = error_ux::classify(&ctx, &target, &err);
+
+                            let window2 = window.clone();
+                            let refresh_targets2 = refresh_targets.clone();
+                            let progress2 = progress.clone();
+                            let respawn2 = respawn.clone();
+                            let pick_location2 = pick_location.clone();
+                            let target2 = target.clone();
+                            dialogs::error_dialog::show(&window, &actionable, move |action| {
+                                match action {
+                                    error_ux::RecoveryAction::TryAgain => {
+                                        let (c, r) = respawn2(None);
+                                        run_archive_operation(
+                                            &window2,
+                                            refresh_targets2.clone(),
+                                            &progress2,
+                                            verb,
+                                            headline_key,
+                                            target2.clone(),
+                                            c,
+                                            r,
+                                            respawn2.clone(),
+                                            pick_location2.clone(),
+                                        );
+                                    }
+                                    error_ux::RecoveryAction::ChooseAnotherLocation => {
+                                        let Some(picker) = &pick_location2 else {
+                                            return;
+                                        };
+                                        let window3 = window2.clone();
+                                        let refresh_targets3 = refresh_targets2.clone();
+                                        let progress3 = progress2.clone();
+                                        let respawn3 = respawn2.clone();
+                                        let pick_location3 = pick_location2.clone();
+                                        picker(
+                                            &window2,
+                                            Box::new(move |new_path: VeyraPath| {
+                                                let (c, r) = respawn3(Some(new_path.clone()));
+                                                run_archive_operation(
+                                                    &window3,
+                                                    refresh_targets3,
+                                                    &progress3,
+                                                    verb,
+                                                    headline_key,
+                                                    new_path,
+                                                    c,
+                                                    r,
+                                                    respawn3.clone(),
+                                                    pick_location3,
+                                                );
+                                            }),
+                                        );
+                                    }
+                                    error_ux::RecoveryAction::Skip
+                                    | error_ux::RecoveryAction::Cancel => {}
+                                }
+                            });
                         }
                     }
                     break;

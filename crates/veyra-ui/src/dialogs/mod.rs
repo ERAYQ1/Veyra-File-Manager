@@ -8,6 +8,7 @@ pub(crate) mod delete_confirm;
 pub(crate) mod dev_metadata_dialog;
 pub(crate) mod disk_analyzer_dialog;
 pub(crate) mod empty_trash_confirm;
+pub(crate) mod error_dialog;
 pub(crate) mod file_associations_dialog;
 pub(crate) mod open_with_dialog;
 pub(crate) mod preferences_dialog;

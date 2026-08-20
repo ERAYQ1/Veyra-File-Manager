@@ -36,13 +36,20 @@ use veyra_filesystem::{FileItem, FileKind, FilePermissions, OperationControl, Ve
 
 use crate::dev_tools::{self, ChecksumResult};
 use crate::dialogs::checksum_dialog;
+use crate::dialogs::error_dialog;
 use crate::dialogs::file_associations_dialog;
+use crate::error_ux;
 use crate::fs_async;
 use crate::i18n::{t, t_fmt};
 use crate::open_with;
 use crate::privileged;
 use crate::thumbnails::ThumbnailService;
 use crate::views::icon_name_for;
+
+/// A self-referencing "try this chmod again" closure (Faz 51): each attempt
+/// rebuilds its own retry callback so a repeated failure can keep offering
+/// Try Again without the caller having to hand-roll recursion each time.
+type RetryAttempt = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
 /// Shows the Properties window for `item`, parented to `parent`.
 /// `on_permissions_changed` is called after every successful permission
@@ -801,48 +808,71 @@ fn build_permissions_page(
                 state.set(parsed);
                 mode_row.set_subtitle(&mode_subtitle(parsed));
 
-                let path = path.clone();
-                let state = state.clone();
-                let mode_row = mode_row.clone();
-                let on_changed = on_changed.clone();
-                let dialog_for_result = dialog_for_entry.clone();
-                let entry = entry.clone();
-                let owner_switches = owner_switches.clone();
-                let group_switches = group_switches.clone();
-                let other_switches = other_switches.clone();
-                let special_switches = special_switches.clone();
-                fs_async::run_blocking(
-                    move || veyra_filesystem::set_permissions(&path, parsed),
-                    move |result| match result {
-                        Ok(()) => {
-                            owner_switches.0.set_active(parsed.is_owner_readable());
-                            owner_switches.1.set_active(parsed.is_owner_writable());
-                            owner_switches.2.set_active(parsed.is_owner_executable());
-                            group_switches.0.set_active(parsed.is_group_readable());
-                            group_switches.1.set_active(parsed.is_group_writable());
-                            group_switches.2.set_active(parsed.is_group_executable());
-                            other_switches.0.set_active(parsed.is_other_readable());
-                            other_switches.1.set_active(parsed.is_other_writable());
-                            other_switches.2.set_active(parsed.is_other_executable());
-                            if let Some((suid, sgid, sticky)) = &special_switches {
-                                suid.set_active(parsed.is_setuid());
-                                sgid.set_active(parsed.is_setgid());
-                                sticky.set_active(parsed.is_sticky());
-                            }
-                            on_changed();
-                        }
-                        Err(err) => {
-                            state.set(previous);
-                            mode_row.set_subtitle(&mode_subtitle(previous));
-                            entry.set_text(&previous.octal_string());
-                            show_chmod_error_simple(
-                                &dialog_for_result,
-                                t("properties.chmod_error_heading"),
-                                &err,
-                            );
-                        }
-                    },
-                );
+                let attempt: RetryAttempt = Rc::new(RefCell::new(None));
+                let attempt_impl: Rc<dyn Fn()> = {
+                    let attempt = attempt.clone();
+                    let path = path.clone();
+                    let state = state.clone();
+                    let mode_row = mode_row.clone();
+                    let on_changed = on_changed.clone();
+                    let dialog_for_result = dialog_for_entry.clone();
+                    let entry = entry.clone();
+                    let owner_switches = owner_switches.clone();
+                    let group_switches = group_switches.clone();
+                    let other_switches = other_switches.clone();
+                    let special_switches = special_switches.clone();
+                    Rc::new(move || {
+                        let path = path.clone();
+                        let state = state.clone();
+                        let mode_row = mode_row.clone();
+                        let on_changed = on_changed.clone();
+                        let dialog_for_result = dialog_for_result.clone();
+                        let entry = entry.clone();
+                        let owner_switches = owner_switches.clone();
+                        let group_switches = group_switches.clone();
+                        let other_switches = other_switches.clone();
+                        let special_switches = special_switches.clone();
+                        let attempt = attempt.clone();
+                        let path_for_result = path.clone();
+                        fs_async::run_blocking(
+                            move || veyra_filesystem::set_permissions(&path, parsed),
+                            move |result| match result {
+                                Ok(()) => {
+                                    owner_switches.0.set_active(parsed.is_owner_readable());
+                                    owner_switches.1.set_active(parsed.is_owner_writable());
+                                    owner_switches.2.set_active(parsed.is_owner_executable());
+                                    group_switches.0.set_active(parsed.is_group_readable());
+                                    group_switches.1.set_active(parsed.is_group_writable());
+                                    group_switches.2.set_active(parsed.is_group_executable());
+                                    other_switches.0.set_active(parsed.is_other_readable());
+                                    other_switches.1.set_active(parsed.is_other_writable());
+                                    other_switches.2.set_active(parsed.is_other_executable());
+                                    if let Some((suid, sgid, sticky)) = &special_switches {
+                                        suid.set_active(parsed.is_setuid());
+                                        sgid.set_active(parsed.is_setgid());
+                                        sticky.set_active(parsed.is_sticky());
+                                    }
+                                    on_changed();
+                                }
+                                Err(err) => {
+                                    state.set(previous);
+                                    mode_row.set_subtitle(&mode_subtitle(previous));
+                                    entry.set_text(&previous.octal_string());
+                                    let retry = attempt.borrow().clone().unwrap();
+                                    show_chmod_error_simple(
+                                        &dialog_for_result,
+                                        t("properties.chmod_error_heading"),
+                                        &path_for_result,
+                                        &err,
+                                        move || retry(),
+                                    );
+                                }
+                            },
+                        );
+                    })
+                };
+                *attempt.borrow_mut() = Some(attempt_impl.clone());
+                attempt_impl();
             } else {
                 mode_error_label.set_text(t("properties.invalid_mode"));
             }
@@ -986,63 +1016,91 @@ fn wire_switch(
             state.set(updated);
             mode_row.set_subtitle(&mode_subtitle(updated));
 
-            let switch = switch.clone();
-            let dialog = dialog.clone();
-            let path = path.clone();
-            let state = state.clone();
-            let mode_row = mode_row.clone();
-            let on_changed = on_changed.clone();
-            let handler_id = handler_id.clone();
-            fs_async::run_blocking(
-                move || veyra_filesystem::set_permissions(&path, updated),
-                move |result| match result {
-                    Ok(()) => on_changed(),
-                    Err(err) => {
-                        tracing::warn!(error = %err, "chmod failed");
-                        state.set(previous);
-                        mode_row.set_subtitle(&mode_subtitle(previous));
-                        if let Some(id) = handler_id.borrow().as_ref() {
-                            switch.block_signal(id);
-                        }
-                        switch.set_active(!enabled);
-                        if let Some(id) = handler_id.borrow().as_ref() {
-                            switch.unblock_signal(id);
-                        }
-                        show_chmod_error(&dialog, &err);
-                    }
-                },
-            );
+            let attempt: RetryAttempt = Rc::new(RefCell::new(None));
+            let attempt_impl: Rc<dyn Fn()> = {
+                let attempt = attempt.clone();
+                let switch = switch.clone();
+                let dialog = dialog.clone();
+                let path = path.clone();
+                let state = state.clone();
+                let mode_row = mode_row.clone();
+                let on_changed = on_changed.clone();
+                let handler_id = handler_id.clone();
+                Rc::new(move || {
+                    let switch = switch.clone();
+                    let dialog = dialog.clone();
+                    let path = path.clone();
+                    let state = state.clone();
+                    let mode_row = mode_row.clone();
+                    let on_changed = on_changed.clone();
+                    let handler_id = handler_id.clone();
+                    let attempt = attempt.clone();
+                    let path_for_result = path.clone();
+                    fs_async::run_blocking(
+                        move || veyra_filesystem::set_permissions(&path, updated),
+                        move |result| match result {
+                            Ok(()) => on_changed(),
+                            Err(err) => {
+                                tracing::warn!(error = %err, "chmod failed");
+                                state.set(previous);
+                                mode_row.set_subtitle(&mode_subtitle(previous));
+                                if let Some(id) = handler_id.borrow().as_ref() {
+                                    switch.block_signal(id);
+                                }
+                                switch.set_active(!enabled);
+                                if let Some(id) = handler_id.borrow().as_ref() {
+                                    switch.unblock_signal(id);
+                                }
+                                let retry = attempt.borrow().clone().unwrap();
+                                show_chmod_error(&dialog, &path_for_result, &err, move || retry());
+                            }
+                        },
+                    );
+                })
+            };
+            *attempt.borrow_mut() = Some(attempt_impl.clone());
+            attempt_impl();
         })
     };
     *handler_id.borrow_mut() = Some(id);
 }
 
-/// Faz 28: Shows error dialog for chmod failures. Simple version without
-/// retry-as-admin to avoid complex closure issues.
+/// Faz 51: Shows the actionable error dialog for a chmod failure, with a
+/// `retry` callback wired to `RecoveryAction::TryAgain` (no destination to
+/// pick, so `ChooseAnotherLocation` never applies to permission changes).
 fn show_chmod_error_simple(
     parent: &impl IsA<gtk4::Widget>,
     heading: &str,
+    path: &VeyraPath,
     err: &veyra_filesystem::FsError,
+    retry: impl Fn() + 'static,
 ) {
-    let dialog = adw::AlertDialog::builder()
-        .heading(heading)
-        .body(err.to_string())
-        .build();
-    dialog.add_responses(&[("ok", t("properties.ok"))]);
-    dialog.set_default_response(Some("ok"));
-    dialog.set_close_response("ok");
-    dialog.present(Some(parent));
+    let ctx = error_ux::ErrorContext {
+        headline: heading.to_string(),
+        allow_choose_location: false,
+        allow_skip: false,
+    };
+    let actionable = error_ux::classify(&ctx, path, err);
+    error_dialog::show(parent, &actionable, move |action| {
+        if action == error_ux::RecoveryAction::TryAgain {
+            retry();
+        }
+    });
 }
 
-fn show_chmod_error(parent: &impl IsA<gtk4::Widget>, err: &veyra_filesystem::FsError) {
-    let dialog = adw::AlertDialog::builder()
-        .heading(t("properties.chmod_error_heading"))
-        .body(err.to_string())
-        .build();
-    dialog.add_responses(&[("ok", t("properties.ok"))]);
-    dialog.set_default_response(Some("ok"));
-    dialog.set_close_response("ok");
-    dialog.present(Some(parent));
+fn show_chmod_error(
+    parent: &impl IsA<gtk4::Widget>,
+    path: &VeyraPath,
+    err: &veyra_filesystem::FsError,
+    retry: impl Fn() + 'static,
+) {
+    show_chmod_error_simple(
+        parent,
+        t("properties.chmod_error_heading"),
+        path,
+        err,
+        retry,
+    );
 }
 
 /// Faz 28: Shows a recursive chmod operation dialog with progress/result feedback.
@@ -1095,7 +1153,11 @@ fn show_recursive_chmod_dialog(
                     }
                 }
                 Err(err) => {
-                    show_chmod_error(&parent, &err);
+                    let retry_parent = parent.clone();
+                    let retry_path = path_for_result.clone();
+                    show_chmod_error(&parent, &path_for_result, &err, move || {
+                        show_recursive_chmod_dialog(&retry_parent, &retry_path, mode);
+                    });
                 }
             }
         },

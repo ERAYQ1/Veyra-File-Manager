@@ -1,5 +1,24 @@
 # Changelog
 
+## Faz 51 — Error UX & Actionable Recovery
+
+Hiçbir dosya işleminin belirsiz `"Error: failed"` mesajıyla bitmemesi için: her `FsError`/`std::io::Error` türünü insan-dili bir başlığa, nedene ve eyleme dönüştürülebilir kurtarma seçeneklerine ([Tekrar Dene], [Farklı Konum Seç], [Atla], [İptal]) çeviren yeni bir hata sınıflandırma katmanı ve onu gösteren `AdwAlertDialog` tabanlı diyalog.
+
+### Eklenenler
+- **`crates/veyra-ui/src/error_ux.rs` (yeni):** `ActionableError` (başlık, hedef dosya adı, insan-dili neden, teknik detay, kurtarma eylemleri listesi) ve `RecoveryAction` (`TryAgain`/`ChooseAnotherLocation`/`Skip`/`Cancel`). `classify()`, her `FsError` varyantını ve (Copy/Move'un yerel `std::io::Error` yolundaki) her ilgili `std::io::ErrorKind`'ı (`PermissionDenied`, `ReadOnlyFilesystem`, `StorageFull`/`QuotaExceeded`/`FileTooLarge`, `ResourceBusy`, `NotFound`, `AlreadyExists`, `InvalidFilename`, ağ kopması türleri) doğru insan-dili nedene ve temel eylem kümesine eşliyor; `ErrorContext` çağrı sitesinin `ChooseAnotherLocation` (yalnızca Copy/Move) ve `Skip`'i (yalnızca toplu işlemler) açıp kapatmasını sağlıyor. 10 birim testi her eşlemeyi doğruluyor.
+- **`crates/veyra-ui/src/dialogs/error_dialog.rs` (yeni):** `dialog-error-symbolic` simgesi, kalın başlık + hedef dosya adı, neden metni ve genişletilebilir "Detayları Göster" (`AdwExpanderRow`, ham OS/GIO hatası + errno + tam yol, "Teknik Detayları Kopyala" panoya kopyalama butonu) içeren `AdwAlertDialog`. Butonlar `ActionableError.recovery_actions`'tan dinamik üretiliyor, `TryAgain` vurgulu (`Suggested`) görünüyor.
+- **Entegrasyon (`window.rs`):** Toplu Copy/Move/Trash/Delete hatalarında (`run_bulk_operation`), tümü yetki-hatası olmayan durumda artık `show_bulk_actionable_error` çalışıyor — Tekrar Dene yalnızca başarısız ögeleri yeniden dener, Farklı Konum Seç (Copy/Move) yeni bir klasör seçtirip aynı ögeleri oraya yeniden dener. Compress/Extract hatalarında (`run_archive_operation`) aynı desen: `respawn`/`pick_location` kapanışlarıyla Tekrar Dene ve Farklı Konum Seç (farklı çıktı dosyası/hedef klasör) baştan uçlanan bir kurtarma akışı sağlıyor.
+- **Entegrasyon (`dialogs/properties_dialog.rs`):** Tekli chmod (switch/oktal giriş) ve özyinelemeli chmod hataları artık aynı `error_dialog`'u kullanıyor; kendi kendine referans veren bir `RetryAttempt` (`Rc<RefCell<Option<Rc<dyn Fn()>>>>`) kapanış deseniyle Tekrar Dene, orijinal izin değişikliğini tekrar dener (izin değişikliğinde hedef klasör kavramı olmadığından Farklı Konum Seç sunulmuyor).
+- **i18n (`i18n.rs`, +40 EN/TR anahtar çifti):** `error.action.*`, `error.reason.*` (11 neden metni), `error.headline.*` (Copy/Move/Trash/Delete/Compress/Extract/Chmod), `error.show_details`, `error.copy_technical_details`.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 uyarı.
+- `cargo test --workspace`: tamamı geçti (`veyra-ui`: 274, `error_ux::tests` dahil 10 yeni test; `veyra-filesystem`'deki tek zamanlama-duyarlı benchmark testi izole çalıştırıldığında geçiyor — sistem gürültüsü, bu fazın değişikliğiyle ilgisiz).
+
+### Sıradaki Faz
+Faz 52 onay bekliyor.
+
 ## Faz 50 — Final UI/UX Polish & Production Quality Audit
 
 Boş durum ekranları, tam i18n taraması ve kısayol/buton doğrulaması içeren bir cila fazı. En büyük bulgu: `veyra-ui`'de hiçbir yerde `AdwStatusPage` tabanlı boş-durum ekranı yoktu (boş klasör/arama/çöp kutusu sessizce boş bir liste gösteriyordu) ve 130'dan fazla arayüz metni doğrudan İngilizce literal olarak kodlanmıştı — `i18n::t()`'nin hiç çağrılmadığı, `Properties` diyaloğu gibi tüm bir pencere dahil.

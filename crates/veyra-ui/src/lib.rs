@@ -18,6 +18,7 @@ mod dev_tools;
 mod devices;
 mod dialogs;
 mod dnd;
+mod error_ux;
 mod file_associations;
 mod fs_async;
 mod headerbar;

@@ -283,6 +283,72 @@ const EN: &[(&str, &str)] = &[
     ("status.error", "Error: {message}"),
     ("status.cancelled", "Cancelled"),
     ("status.archive_failed", "Archive failed"),
+    // --- Faz 51: Error UX & Actionable Recovery (error_ux.rs, dialogs/error_dialog.rs) ---
+    ("error.action.try_again", "Try Again"),
+    ("error.action.choose_location", "Choose Another Location"),
+    ("error.action.skip", "Skip"),
+    ("error.action.cancel", "Cancel"),
+    ("error.show_details", "Show Details"),
+    ("error.copy_technical_details", "Copy Technical Details"),
+    (
+        "error.reason.permission_denied",
+        "The destination is read-only or you don't have write permissions.",
+    ),
+    (
+        "error.reason.read_only",
+        "The destination filesystem is read-only.",
+    ),
+    (
+        "error.reason.disk_full",
+        "There is not enough free disk space on the destination drive.",
+    ),
+    (
+        "error.reason.busy",
+        "The file is currently in use by another application.",
+    ),
+    (
+        "error.reason.not_found",
+        "The source file was moved or deleted while the operation was running.",
+    ),
+    (
+        "error.reason.already_exists",
+        "An item with that name already exists at the destination.",
+    ),
+    (
+        "error.reason.not_a_directory",
+        "The destination is not a folder.",
+    ),
+    (
+        "error.reason.not_empty",
+        "The folder is not empty.",
+    ),
+    (
+        "error.reason.invalid_name",
+        "The file name exceeds the filesystem limit or contains invalid characters.",
+    ),
+    (
+        "error.reason.no_handler",
+        "No application is registered to open this file.",
+    ),
+    (
+        "error.reason.archive",
+        "The archive is corrupted or in an unsupported format.",
+    ),
+    (
+        "error.reason.network_lost",
+        "The connection to the remote server was lost.",
+    ),
+    (
+        "error.reason.generic",
+        "An unexpected error occurred.",
+    ),
+    ("error.headline.copy", "Couldn't Copy the File"),
+    ("error.headline.move", "Couldn't Move the File"),
+    ("error.headline.trash", "Couldn't Move the File to Trash"),
+    ("error.headline.delete", "Couldn't Delete the File"),
+    ("error.headline.compress", "Couldn't Create the Archive"),
+    ("error.headline.extract", "Couldn't Extract the Archive"),
+    ("error.headline.chmod", "Couldn't Change Permissions"),
     ("panel.files_page_title", "Files"),
     ("panel.sidebar_page_title", "Sidebar"),
     // --- Faz 50: Sidebar (sidebar.rs) ---
@@ -903,6 +969,72 @@ const TR: &[(&str, &str)] = &[
     ("status.error", "Hata: {message}"),
     ("status.cancelled", "İptal edildi"),
     ("status.archive_failed", "Arşivleme başarısız"),
+    // --- Faz 51: Error UX & Actionable Recovery (error_ux.rs, dialogs/error_dialog.rs) ---
+    ("error.action.try_again", "Tekrar Dene"),
+    ("error.action.choose_location", "Farklı Konum Seç"),
+    ("error.action.skip", "Atla"),
+    ("error.action.cancel", "İptal"),
+    ("error.show_details", "Detayları Göster"),
+    ("error.copy_technical_details", "Teknik Detayları Kopyala"),
+    (
+        "error.reason.permission_denied",
+        "Hedef salt okunur veya yazma izniniz yok.",
+    ),
+    (
+        "error.reason.read_only",
+        "Hedef dosya sistemi salt okunur.",
+    ),
+    (
+        "error.reason.disk_full",
+        "Hedef sürücüde yeterli boş disk alanı yok.",
+    ),
+    (
+        "error.reason.busy",
+        "Dosya şu anda başka bir uygulama tarafından kullanılıyor.",
+    ),
+    (
+        "error.reason.not_found",
+        "İşlem sürerken kaynak dosya taşındı veya silindi.",
+    ),
+    (
+        "error.reason.already_exists",
+        "Hedefte bu isimde bir öğe zaten var.",
+    ),
+    (
+        "error.reason.not_a_directory",
+        "Hedef bir klasör değil.",
+    ),
+    (
+        "error.reason.not_empty",
+        "Klasör boş değil.",
+    ),
+    (
+        "error.reason.invalid_name",
+        "Dosya adı dosya sistemi sınırını aşıyor veya geçersiz karakterler içeriyor.",
+    ),
+    (
+        "error.reason.no_handler",
+        "Bu dosyayı açacak kayıtlı bir uygulama yok.",
+    ),
+    (
+        "error.reason.archive",
+        "Arşiv bozuk veya desteklenmeyen bir biçimde.",
+    ),
+    (
+        "error.reason.network_lost",
+        "Uzak sunucuyla bağlantı koptu.",
+    ),
+    (
+        "error.reason.generic",
+        "Beklenmeyen bir hata oluştu.",
+    ),
+    ("error.headline.copy", "Dosya Kopyalanamadı"),
+    ("error.headline.move", "Dosya Taşınamadı"),
+    ("error.headline.trash", "Dosya Çöp Kutusuna Taşınamadı"),
+    ("error.headline.delete", "Dosya Silinemedi"),
+    ("error.headline.compress", "Arşiv Oluşturulamadı"),
+    ("error.headline.extract", "Arşiv Çıkarılamadı"),
+    ("error.headline.chmod", "İzinler Değiştirilemedi"),
     ("panel.files_page_title", "Dosyalar"),
     ("panel.sidebar_page_title", "Kenar Çubuğu"),
     // --- Faz 50: Kenar çubuğu (sidebar.rs) ---
