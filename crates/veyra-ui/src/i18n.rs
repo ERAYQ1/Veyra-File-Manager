@@ -534,6 +534,42 @@ const EN: &[(&str, &str)] = &[
     ("empty.search.description", "Try a different query or clear filters"),
     ("empty.trash.title", "Trash is Empty"),
     ("empty.trash.description", "Deleted files will appear here"),
+    // --- Faz 52: rich context-aware empty states (window.rs) ---
+    ("empty.downloads.title", "Downloads"),
+    (
+        "empty.downloads.description",
+        "Nothing here yet. Files you download will appear here.",
+    ),
+    ("empty.documents.title", "Documents"),
+    (
+        "empty.documents.description",
+        "Nothing here yet. Text files, spreadsheets and notes will appear here.",
+    ),
+    ("empty.pictures.title", "Pictures"),
+    (
+        "empty.pictures.description",
+        "Nothing here yet. Photos, images and screenshots will appear here.",
+    ),
+    ("empty.music.title", "Music"),
+    (
+        "empty.music.description",
+        "Nothing here yet. Audio tracks and albums will appear here.",
+    ),
+    ("empty.videos.title", "Videos"),
+    (
+        "empty.videos.description",
+        "Nothing here yet. Clips, recordings and movies will appear here.",
+    ),
+    ("empty.recent.title", "No Recent Files"),
+    (
+        "empty.recent.description",
+        "Files you open, create or edit will appear here.",
+    ),
+    ("empty.network.title", "No Network Locations Found"),
+    (
+        "empty.network.description",
+        "Connect to a server or ensure network discovery is enabled.",
+    ),
     // --- Faz 50: Preview sidebar (preview.rs) ---
     ("preview.empty.title", "No Selection"),
     ("preview.empty.description", "Select a file to preview"),
@@ -1217,6 +1253,42 @@ const TR: &[(&str, &str)] = &[
     ("empty.search.description", "Farklı bir sorgu deneyin veya filtreleri temizleyin"),
     ("empty.trash.title", "Çöp Kutusu Boş"),
     ("empty.trash.description", "Silinen dosyalar burada görünecek"),
+    // --- Faz 52: konuma özel zengin boş durumlar (window.rs) ---
+    ("empty.downloads.title", "İndirilenler"),
+    (
+        "empty.downloads.description",
+        "Henüz burada bir şey yok. İndirdiğiniz dosyalar burada görünecektir.",
+    ),
+    ("empty.documents.title", "Belgeler"),
+    (
+        "empty.documents.description",
+        "Henüz burada bir şey yok. Metin dosyaları, belgeler ve notlar burada görünecektir.",
+    ),
+    ("empty.pictures.title", "Resimler"),
+    (
+        "empty.pictures.description",
+        "Henüz burada bir şey yok. Fotoğraflar, görseller ve ekran görüntüleri burada görünecektir.",
+    ),
+    ("empty.music.title", "Müzik"),
+    (
+        "empty.music.description",
+        "Henüz burada bir şey yok. Şarkılar, albümler ve ses dosyaları burada görünecektir.",
+    ),
+    ("empty.videos.title", "Videolar"),
+    (
+        "empty.videos.description",
+        "Henüz burada bir şey yok. Klipler, kayıtlar ve filmler burada görünecektir.",
+    ),
+    ("empty.recent.title", "Son Dosya Yok"),
+    (
+        "empty.recent.description",
+        "Açtığınız, oluşturduğunuz veya düzenlediğiniz dosyalar burada görünecektir.",
+    ),
+    ("empty.network.title", "Ağ Konumu Bulunamadı"),
+    (
+        "empty.network.description",
+        "Bir sunucuya bağlanın veya ağ keşfinin açık olduğundan emin olun.",
+    ),
     // --- Faz 50: Önizleme kenar çubuğu (preview.rs) ---
     ("preview.empty.title", "Seçim Yok"),
     ("preview.empty.description", "Önizlemek için bir dosya seçin"),

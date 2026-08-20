@@ -23,8 +23,8 @@ use crate::undo::{SharedUndoStack, UndoStack, UndoableAction};
 use crate::views::ViewMode;
 use crate::widgets::progress_toast::ProgressToastHandles;
 use crate::{
-    archive_ops, breadcrumbs, dialogs, error_ux, fs_async, headerbar, open_with, operations,
-    recent, shortcuts, sidebar, system_integration, terminal, trash, undo, widgets,
+    archive_ops, breadcrumbs, dialogs, error_ux, fs_async, headerbar, network, open_with,
+    operations, recent, shortcuts, sidebar, system_integration, terminal, trash, undo, widgets,
 };
 
 /// A single Copy/Cut clipboard slot, shared across both panels and all their
@@ -4239,24 +4239,100 @@ pub(crate) fn update_empty_state(state: &SharedState) {
         return;
     }
     let is_trash = trash::is_trash_location(&state_ref.current_dir);
+    let is_recent = recent::is_recent_location(&state_ref.current_dir);
+    let is_network = state_ref.current_dir == VeyraPath::from_uri(network::NETWORK_URI);
     let query_active = !state_ref.search_query.borrow().is_empty();
-    let (icon, title, description) = empty_state_content(is_trash, query_active);
+    let (icon, title, description) = empty_state_content(
+        &state_ref.current_dir,
+        is_trash,
+        is_recent,
+        is_network,
+        query_active,
+    );
     state_ref.empty_page.set_icon_name(Some(icon));
     state_ref.empty_page.set_title(title);
     state_ref.empty_page.set_description(Some(description));
     state_ref.empty_page.set_visible(true);
 }
 
+/// Faz 52: the five `~/Downloads`-style locations that get their own rich
+/// empty state instead of the generic "Folder is Empty" message, matched
+/// against `current_dir` the same way the sidebar's Places section matches
+/// them (Faz 21's `places_entries`) — via `glib::user_special_dir`, since
+/// that's the one source of truth for where XDG has these pointed (they're
+/// user-configurable, not always `~/Downloads` etc).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpecialFolder {
+    Downloads,
+    Documents,
+    Pictures,
+    Music,
+    Videos,
+}
+
+impl SpecialFolder {
+    const ALL: [(SpecialFolder, glib::UserDirectory); 5] = [
+        (SpecialFolder::Downloads, glib::UserDirectory::Downloads),
+        (SpecialFolder::Documents, glib::UserDirectory::Documents),
+        (SpecialFolder::Pictures, glib::UserDirectory::Pictures),
+        (SpecialFolder::Music, glib::UserDirectory::Music),
+        (SpecialFolder::Videos, glib::UserDirectory::Videos),
+    ];
+
+    fn detect(current_dir: &VeyraPath) -> Option<SpecialFolder> {
+        let local = current_dir.as_local_path()?;
+        Self::ALL.iter().find_map(|(kind, dir)| {
+            let special = glib::user_special_dir(*dir)?;
+            (special == local).then_some(*kind)
+        })
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            SpecialFolder::Downloads => "folder-download-symbolic",
+            SpecialFolder::Documents => "folder-documents-symbolic",
+            SpecialFolder::Pictures => "folder-pictures-symbolic",
+            SpecialFolder::Music => "folder-music-symbolic",
+            SpecialFolder::Videos => "folder-videos-symbolic",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            SpecialFolder::Downloads => t("empty.downloads.title"),
+            SpecialFolder::Documents => t("empty.documents.title"),
+            SpecialFolder::Pictures => t("empty.pictures.title"),
+            SpecialFolder::Music => t("empty.music.title"),
+            SpecialFolder::Videos => t("empty.videos.title"),
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            SpecialFolder::Downloads => t("empty.downloads.description"),
+            SpecialFolder::Documents => t("empty.documents.description"),
+            SpecialFolder::Pictures => t("empty.pictures.description"),
+            SpecialFolder::Music => t("empty.music.description"),
+            SpecialFolder::Videos => t("empty.videos.description"),
+        }
+    }
+}
+
 /// The icon name, title, and description `update_empty_state` shows for a
-/// zero-item listing, picked by context: Trash takes priority over an
-/// active search query (an empty Trash while also searching still reads as
-/// "Trash is Empty", not "No Results Found"), which in turn takes priority
-/// over the plain empty-folder message. Factored out as a pure function
-/// (no `AppState`/GTK types) so it's unit-testable without `gtk4::init()` —
-/// `libadwaita` widgets are main-thread-locked at construction, which
-/// conflicts with `cargo test`'s per-test threads.
+/// zero-item listing, picked by context and priority: Trash first (an empty
+/// Trash while also searching still reads as "Trash is Empty", not "No
+/// Results Found"), then an active search query (a fruitless search inside
+/// Downloads still reads as "No Results Found", not "Downloads is empty"),
+/// then Recent/Network's own empty states, then a `SpecialFolder` match,
+/// and finally the generic empty-folder message. Factored out as a pure
+/// function (no `AppState`/GTK types) so it's unit-testable without
+/// `gtk4::init()` — `libadwaita` widgets are main-thread-locked at
+/// construction, which conflicts with `cargo test`'s per-test threads.
 fn empty_state_content(
+    current_dir: &VeyraPath,
     is_trash: bool,
+    is_recent: bool,
+    is_network: bool,
     query_active: bool,
 ) -> (&'static str, &'static str, &'static str) {
     if is_trash {
@@ -4271,6 +4347,20 @@ fn empty_state_content(
             t("empty.search.title"),
             t("empty.search.description"),
         )
+    } else if is_recent {
+        (
+            "document-open-recent-symbolic",
+            t("empty.recent.title"),
+            t("empty.recent.description"),
+        )
+    } else if is_network {
+        (
+            "network-workgroup-symbolic",
+            t("empty.network.title"),
+            t("empty.network.description"),
+        )
+    } else if let Some(folder) = SpecialFolder::detect(current_dir) {
+        (folder.icon(), folder.title(), folder.description())
     } else {
         (
             "folder-open-symbolic",
@@ -4335,25 +4425,97 @@ fn add_dev_icon_search_path(window: &adw::ApplicationWindow) {
 mod tests {
     use super::*;
 
+    fn no_special_dir() -> VeyraPath {
+        VeyraPath::from_local(std::path::PathBuf::from(
+            "/nonexistent-empty-state-test-dir",
+        ))
+    }
+
     #[test]
     fn empty_state_content_prioritizes_trash_over_an_active_search_query() {
-        let (icon, title, _) = empty_state_content(true, true);
+        let (icon, title, _) = empty_state_content(&no_special_dir(), true, true, false, true);
         assert_eq!(icon, "user-trash-symbolic");
         assert_eq!(title, t("empty.trash.title"));
     }
 
     #[test]
     fn empty_state_content_shows_search_message_when_query_is_active_and_not_trash() {
-        let (icon, title, _) = empty_state_content(false, true);
+        let (icon, title, _) = empty_state_content(&no_special_dir(), false, false, false, true);
         assert_eq!(icon, "system-search-symbolic");
         assert_eq!(title, t("empty.search.title"));
     }
 
     #[test]
+    fn empty_state_content_prioritizes_search_over_recent_and_network() {
+        let (icon, title, _) = empty_state_content(&no_special_dir(), false, true, true, true);
+        assert_eq!(icon, "system-search-symbolic");
+        assert_eq!(title, t("empty.search.title"));
+    }
+
+    #[test]
+    fn empty_state_content_shows_recent_message() {
+        let (icon, title, _) = empty_state_content(&no_special_dir(), false, true, false, false);
+        assert_eq!(icon, "document-open-recent-symbolic");
+        assert_eq!(title, t("empty.recent.title"));
+    }
+
+    #[test]
+    fn empty_state_content_shows_network_message() {
+        let (icon, title, _) = empty_state_content(&no_special_dir(), false, false, true, false);
+        assert_eq!(icon, "network-workgroup-symbolic");
+        assert_eq!(title, t("empty.network.title"));
+    }
+
+    #[test]
     fn empty_state_content_shows_folder_message_when_no_query_and_not_trash() {
-        let (icon, title, _) = empty_state_content(false, false);
+        let (icon, title, _) = empty_state_content(&no_special_dir(), false, false, false, false);
         assert_eq!(icon, "folder-open-symbolic");
         assert_eq!(title, t("empty.folder.title"));
+    }
+
+    /// Faz 52: each `SpecialFolder` match only asserted when the platform
+    /// actually has that XDG user dir configured (CI sandboxes often don't
+    /// set `XDG_DOWNLOAD_DIR` etc.) — `SpecialFolder::detect` itself is
+    /// exercised regardless since `no_special_dir` above already covers the
+    /// "no match" path for every other test.
+    #[test]
+    fn empty_state_content_shows_special_folder_messages_when_configured() {
+        let cases: [(glib::UserDirectory, &str, &str); 5] = [
+            (
+                glib::UserDirectory::Downloads,
+                "folder-download-symbolic",
+                "empty.downloads.title",
+            ),
+            (
+                glib::UserDirectory::Documents,
+                "folder-documents-symbolic",
+                "empty.documents.title",
+            ),
+            (
+                glib::UserDirectory::Pictures,
+                "folder-pictures-symbolic",
+                "empty.pictures.title",
+            ),
+            (
+                glib::UserDirectory::Music,
+                "folder-music-symbolic",
+                "empty.music.title",
+            ),
+            (
+                glib::UserDirectory::Videos,
+                "folder-videos-symbolic",
+                "empty.videos.title",
+            ),
+        ];
+        for (dir, expected_icon, expected_title_key) in cases {
+            let Some(path) = glib::user_special_dir(dir) else {
+                continue;
+            };
+            let current_dir = VeyraPath::from_local(path);
+            let (icon, title, _) = empty_state_content(&current_dir, false, false, false, false);
+            assert_eq!(icon, expected_icon);
+            assert_eq!(title, t(expected_title_key));
+        }
     }
 
     #[test]

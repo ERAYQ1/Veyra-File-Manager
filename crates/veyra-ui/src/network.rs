@@ -24,6 +24,9 @@ use veyra_filesystem::VeyraPath;
 
 use crate::devices::DeviceEntry;
 
+/// The virtual location the sidebar's "Network" entry navigates to.
+pub(crate) const NETWORK_URI: &str = "network:///";
+
 /// The remote filesystem families the "Connect to Server" dialog offers a
 /// quick shortcut for. `Sftp` also matches the `ssh://` alias GVfs accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

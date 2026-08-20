@@ -1,5 +1,21 @@
 # Changelog
 
+## Faz 52 — Rich Context-Aware Empty States
+
+Boş klasör/sonuçsuz görünüm mesajı artık her yerde aynı jenerik metin değil — konuma özel (Downloads, Documents, Pictures, Music, Videos, Recent, Network, Trash, Search, genel) simge/başlık/açıklama üçlüsü gösteriyor.
+
+### Eklenenler
+- **`SpecialFolder` (`window.rs`, yeni):** `~/Downloads`/`~/Documents`/`~/Pictures`/`~/Music`/`~/Videos` konumlarını, sidebar'ın Places bölümünün (Faz 21) kullandığı aynı `glib::user_special_dir` kaynağına karşı eşleyen bir enum — bu dizinler kullanıcı tarafından yeniden yapılandırılabilir olduğundan (`XDG_DOWNLOAD_DIR` vb.), ham `~/Downloads` yol karşılaştırması yerine bu kaynak tek doğru referans.
+- **`empty_state_content` genişletildi:** İmza artık `(current_dir, is_trash, is_recent, is_network, query_active)` alıyor; öncelik sırası Çöp Kutusu > etkin arama sorgusu > Son Dosyalar > Ağ > `SpecialFolder` eşleşmesi > genel "Klasör Boş". Saf fonksiyon olarak kalmaya devam ediyor (GTK/`libadwaita` bağımsız, `cargo test`'te doğrudan çağrılabiliyor).
+- **`network::NETWORK_URI` (yeni sabit):** `"network:///"` dizesi artık `sidebar.rs`'teki hard-code yerine tek yerden paylaşılıyor; `update_empty_state` Ağ konumunu bu sabitle tespit ediyor.
+- **i18n (`i18n.rs`, +14 EN/TR anahtar çifti):** `empty.downloads.*`, `empty.documents.*`, `empty.pictures.*`, `empty.music.*`, `empty.videos.*`, `empty.recent.*`, `empty.network.*`.
+- **Birim testleri (`window.rs`):** Trash/arama/Recent/Ağ/genel önceliğini doğrulayan testlere ek olarak, çalıştığı platformda gerçekten yapılandırılmış her `SpecialFolder`'ı (`glib::user_special_dir` `Some` döndürdüğünde) doğrulayan bir test — CI sandbox'ında XDG dizini tanımsızsa o bağlam sessizce atlanıyor.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 uyarı.
+- `cargo test --workspace`: tamamı geçti.
+
 ## Faz 51 — Error UX & Actionable Recovery
 
 Hiçbir dosya işleminin belirsiz `"Error: failed"` mesajıyla bitmemesi için: her `FsError`/`std::io::Error` türünü insan-dili bir başlığa, nedene ve eyleme dönüştürülebilir kurtarma seçeneklerine ([Tekrar Dene], [Farklı Konum Seç], [Atla], [İptal]) çeviren yeni bir hata sınıflandırma katmanı ve onu gösteren `AdwAlertDialog` tabanlı diyalog.

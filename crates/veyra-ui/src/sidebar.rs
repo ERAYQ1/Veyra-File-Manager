@@ -172,7 +172,7 @@ pub(crate) fn build(
     root.append(&row(
         t("sidebar.network"),
         "network-workgroup-symbolic",
-        VeyraPath::from_uri("network:///"),
+        VeyraPath::from_uri(crate::network::NETWORK_URI),
         t("sidebar.network_location"),
         &navigate,
     ));
