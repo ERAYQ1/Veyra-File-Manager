@@ -19,7 +19,8 @@ all: build
 build:
 	cargo build $(CARGO_FLAGS) --workspace
 
-install: build
+install:
+	@test -f target/$(BUILD_MODE)/$(BINARY) || $(MAKE) build
 	install -Dm755 target/$(BUILD_MODE)/$(BINARY) $(BINDIR)/$(BINARY)
 	install -Dm644 data/$(APP_ID).desktop $(APPDIR)/$(APP_ID).desktop
 	install -Dm644 data/$(APP_ID).metainfo.xml $(METAINFODIR)/$(APP_ID).metainfo.xml
