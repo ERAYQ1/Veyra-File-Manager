@@ -1,5 +1,63 @@
 # Changelog
 
+## Faz 55 — Comprehensive Documentation Suite
+
+Açık kaynak topluluk standartlarını (GitHub Community Standards) karşılayan
+tam dokümantasyon paketi: kök dizine katkı/güvenlik/davranış kuralları
+belgeleri ve `docs/` altına 6 yeni teknik geliştirici dokümanı eklendi.
+Kod değişikliği yok — bu faz salt dokümantasyon.
+
+### Eklenenler
+- **`CONTRIBUTING.md` (yeni):** Geliştirme ortamı kurulumu, PR öncesi
+  zorunlu kontroller (`cargo fmt`/`clippy`/`test`), Conventional Commits
+  standardı ve PR süreci.
+- **`SECURITY.md` (yeni):** Güvenlik açığı bildirme süreci (GitHub Security
+  Advisories üzerinden özel bildirim), desteklenen sürümler ve tehdit
+  modeli özeti.
+- **`CODE_OF_CONDUCT.md` (yeni):** Contributor Covenant v2.1, standart
+  metin, uygulama kanalı bu projenin GitHub Security Advisories akışına
+  bağlandı.
+- **`docs/building.md` (yeni):** Sistem bağımlılıkları (Arch/Fedora/Debian/
+  openSUSE), debug/release derleme, `make install`, workspace crate
+  düzeni, sık karşılaşılan derleme sorunları.
+- **`docs/testing.md` (yeni):** 592 testin (ölçülen gerçek sayı,
+  `cargo test --workspace` ile doğrulandı) yapısı — birim/entegrasyon test
+  konumları, adversarial/Unicode/izin/büyük dizin test kapsamı, `tempfile`
+  temizlik güvencesi, GTK'ya bağımlı kodun test edilme deseni.
+- **`docs/plugin_development.md` (yeni):** Bugün var olan entegrasyon
+  noktaları (`.desktop` MIME ilişkilendirmesi, `xdg-terminal-exec`
+  terminal entegrasyonu) ve henüz uygulanmamış Faz 38 Eklenti Sistemi'nin
+  planlanan tasarım yönü — var olmayan bir özelliği var gibi
+  belgelememek için açıkça durum belirtiliyor.
+- **`docs/translation.md` (yeni):** `i18n.rs`'nin bağımsız, `gettext`
+  kullanmayan katalog motoru — anahtar yapısı, `t`/`t_fmt`/`t_plural`,
+  çoğullaştırma kuralları, yeni dize/yeni dil ekleme adımları.
+- **`docs/security.md` (yeni):** Kök yetkisiz çalışma prensibi
+  (`root_guard`), Polkit/`pkexec` ayrıcalıklı işlem akışı, log/çökme raporu
+  kimlik bilgisi maskeleme katmanları, sıfır telemetri garantisi, Flatpak
+  sandbox sınırı ve geçici dosya güvenliği.
+- **`docs/performance.md` (yeni):** `docs/benchmarks.md`'deki ölçülmüş
+  sayıların geliştirici odaklı özeti (dizin tarama, gecikmeli metadata,
+  sınırlı bellek, FTS5 arama gecikmesi, thumbnail önbelleği, kopyalama/
+  taşıma verimi) ve arka plan görev önceliklendirmesinin gerçek kapsamı
+  (yalnızca arama indeksleyicisi `nice(19)` uyguluyor; thumbnail/checksum
+  için henüz uygulanmadı — abartılı iddia yerine gerçek durum belgelendi).
+- **`README.md` (genişletildi):** Rozetler (lisans, Rust, GTK4, Libadwaita,
+  592 geçen test), öne çıkan özellikler listesi genişletildi, Flatpak/Arch/
+  Fedora/Makefile hızlı kurulum blokları ve temel kısayollar tablosu
+  eklendi; dokümantasyon bağlantıları 15 dosyaya güncellendi.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 uyarı.
+- `cargo test --workspace`: 592/592 geçti — bu faz kod değiştirmediğinden
+  test sayısı önceki fazla aynı.
+- Yeni belgelerdeki her teknik iddia (dosya yolları, fonksiyon isimleri,
+  `nice(19)`/`XDG_RUNTIME_DIR` gibi somut davranışlar) kaynak koddan grep
+  ile doğrulandı; henüz uygulanmamış özellikler (Faz 38 Eklenti Sistemi,
+  Faz 56 CI, thumbnail/checksum önceliklendirmesi) tamamlanmış gibi değil,
+  açıkça "planlanan" olarak işaretlendi.
+
 ## Faz 54 — Structured Logging & Privacy-Hardened Tracing
 
 Günlükleme artık derleme moduna göre otomatik seviye seçiyor (Development'ta `DEBUG`, Production'da `INFO`, `RUST_LOG` her zaman ezer) ve dosyaya yazılan her satır — çağrı sitesinin hatırlayıp hatırlamadığına bakılmaksızın — URI şifreleri, token'lar ve ev dizini için katı bir maskeleme katmanından geçiyor (Kural #23).
