@@ -6,9 +6,9 @@
 [![Libadwaita](https://img.shields.io/badge/Libadwaita-1-purple.svg)](https://gnome.pages.gitlab.gnome.org/libadwaita/)
 [![Tests](https://img.shields.io/badge/tests-616%20passing-brightgreen.svg)](docs/testing.md)
 
-Veyra, Linux için **Dolphin** seviyesinde zengin özellikler sunan, **Rust**,
-**GTK4** ve **Libadwaita** ile geliştirilmiş; modern, son derece akıcı,
-güvenli ve geliştirici dostu bir dosya yöneticisidir.
+Veyra, Linux için profesyonel seviyede zengin özellikler sunan, **Rust**,
+**GTK4** ve **Libadwaita** ile geliştirilmiş; bağımsız, özgün, modern, son
+derece akıcı, güvenli ve geliştirici dostu bir dosya yöneticisidir.
 
 ---
 
@@ -80,6 +80,18 @@ Gereksinimler: **Rust 1.85+**, **GTK4**/**Libadwaita** geliştirme
 kütüphaneleri (`libgtk-4-dev`, `libadwaita-1-dev` veya dağıtımınızın
 eşdeğer paketleri). Ayrıntılı derleme adımları ve sorun giderme için
 [docs/building.md](docs/building.md).
+
+### Tek komutla kurulum (install.sh)
+
+```bash
+git clone https://github.com/ERAYQ1/Veyra-File-Manager.git
+cd Veyra-File-Manager
+./install.sh
+```
+
+Dağıtımınızı algılar, derleme bağımlılıklarını kurar (`--no-deps` ile
+atlanabilir), derler ve `make install` ile sisteme kurar. Kaldırmak için
+`./install.sh --uninstall`.
 
 ### Makefile ile kurulum
 

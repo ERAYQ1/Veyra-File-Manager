@@ -24,7 +24,7 @@ Recommends:     xdg-terminal-exec
 
 %description
 Veyra is a modern, fast and secure file manager for the Linux desktop,
-built in Rust with GTK4 and Libadwaita. It targets Dolphin-level
+built in Rust with GTK4 and Libadwaita. It targets professional-grade
 functionality with a keyboard-first, accessible and responsive
 interface, without compromising on memory safety or performance under
 very large directories.

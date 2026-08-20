@@ -760,7 +760,7 @@ fn wire_panel(
 }
 
 /// Click-anywhere-in-a-panel focus tracking, matching the classic dual-pane
-/// file manager convention (Dolphin/Krusader/Total Commander). Uses the
+/// file manager convention (Krusader/Total Commander). Uses the
 /// capture phase so it never claims the event — child widgets (the file
 /// views, buttons, entries) still get the click normally.
 fn attach_focus_gesture(
@@ -2360,8 +2360,8 @@ fn setup_storage_dashboard_action(
 
 /// Registers the Faz 23 `win.open-terminal-here-selected` (context menu
 /// entry for a selected item) and `win.open-terminal-here-current` (context
-/// menu on empty space, plus `F4` and `Ctrl+Alt+T`, both the Dolphin/GNOME
-/// standard shortcuts) actions. Both resolve the focused panel's terminal
+/// menu on empty space, plus `F4` and `Ctrl+Alt+T`, both common Linux
+/// file-manager standard shortcuts) actions. Both resolve the focused panel's terminal
 /// via `terminal::open_terminal`, which never runs a shell string (Rule
 /// #19) and never hardcodes a single emulator (Rule #25).
 fn setup_terminal_actions(

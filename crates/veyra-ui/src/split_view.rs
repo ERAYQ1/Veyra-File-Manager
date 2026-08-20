@@ -2,7 +2,7 @@
 //! `GtkPaned`. Each panel owns a complete Faz 3-7 navigation chrome (back/
 //! forward/up/home/refresh, breadcrumbs, status bar) plus its own
 //! `AdwTabView` — so the two panels are fully independent: separate
-//! location, history, tabs, and view state, mirroring Dolphin/Krusader-style
+//! location, history, tabs, and view state, mirroring Krusader-style
 //! dual-pane file managers. Only the window-level search entry and
 //! view-mode switcher (in the header bar) act on whichever panel currently
 //! has focus — see `window::focus_panel`.

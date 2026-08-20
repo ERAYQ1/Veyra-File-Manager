@@ -1,7 +1,7 @@
 # Veyra — Performance Budget & Benchmarks
 
 **Document Status:** Approved Architecture  
-**Target:** Dolphin-Level Performance & Instant UI Responsiveness
+**Target:** Professional-Grade Performance & Instant UI Responsiveness
 
 ---
 

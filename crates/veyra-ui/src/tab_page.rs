@@ -3,8 +3,8 @@
 //!
 //! Each open tab owns its own `AppState` (location, history stack, item
 //! model), its own Icon/Compact/Details view stack, its own per-view
-//! selections, and its own search query/filter — matching Dolphin-level tab
-//! isolation. The window-level chrome (header bar buttons, breadcrumbs,
+//! selections, and its own search query/filter — matching professional-grade
+//! per-tab isolation. The window-level chrome (header bar buttons, breadcrumbs,
 //! status bar, clipboard) stays shared and simply reflects whichever tab is
 //! currently selected in the `AdwTabView`.
 //!

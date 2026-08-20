@@ -1,6 +1,6 @@
 # 🦀 Veyra — Master Development Roadmap (Phases 0 - 60)
 
-**Goal:** Dolphin-level, ultra-modern, smooth, secure, fast, developer-friendly Linux file manager in Rust + GTK4 + Libadwaita.
+**Goal:** Professional-grade, ultra-modern, smooth, secure, fast, developer-friendly Linux file manager in Rust + GTK4 + Libadwaita.
 
 ---
 
@@ -151,5 +151,5 @@ Every phase follows a strict 15-step execution protocol:
 - **FAZ 56 — CI/CD Pipeline (GitHub Actions fmt, clippy, test, multi-distro build matrix)**
 - **FAZ 57 — Release Management (SemVer tagging, automated release notes generation)**
 - **FAZ 58 — Final Comprehensive Audit (Architecture, Security, Perf, UI 0-100 scoring)**
-- **FAZ 59 — Dolphin Feature Parity & Superiority Matrix (Dolphin vs Veyra comparison)**
+- **FAZ 59 — Competitive Feature Parity & Superiority Matrix (Veyra vs mainstream Linux file managers)**
 - **FAZ 60 — Veyra 1.0 Release (Final production readiness certification)**

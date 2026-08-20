@@ -35,7 +35,7 @@ MimeType=text/x-log;
 Then `update-desktop-database ~/.local/share/applications` (or just wait
 for the next GIO cache refresh) makes it appear in Veyra's Open With
 submenu and dialog immediately, alongside every other file manager on the
-system (Nautilus, Dolphin, etc.) that reads the same association database.
+system (Nautilus, etc.) that reads the same association database.
 
 ### 2. Terminal integration
 

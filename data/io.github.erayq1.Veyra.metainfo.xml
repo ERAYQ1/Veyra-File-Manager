@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>io.github.erayq1.Veyra</id>
   <name>Veyra</name>
-  <summary>Dolphin-level modern Linux file manager</summary>
+  <summary>Modern, professional-grade Linux file manager</summary>
 
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
@@ -14,7 +14,7 @@
   <description>
     <p>
       Veyra is a modern, fast and secure file manager for the Linux desktop,
-      built in Rust with GTK4 and Libadwaita. It targets Dolphin-level
+      built in Rust with GTK4 and Libadwaita. It targets professional-grade
       functionality with a keyboard-first, accessible and responsive
       interface, without compromising on memory safety or performance under
       very large directories.
