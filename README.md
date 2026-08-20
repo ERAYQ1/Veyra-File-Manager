@@ -10,38 +10,44 @@ Veyra, Linux için profesyonel seviyede zengin özellikler sunan, **Rust**,
 **GTK4** ve **Libadwaita** ile geliştirilmiş; bağımsız, özgün, modern, son
 derece akıcı, güvenli ve geliştirici dostu bir dosya yöneticisidir.
 
+<p align="center">
+  <img src="docs/assets/screenshot.png" alt="Veyra File Manager — Çift Panel ve Akıllı Depolama görünümü" width="900">
+</p>
+
+<p align="center"><i>Çift Panel Split View ve Akıllı Depolama Paneli — ekran görüntüsü yakında.</i></p>
+
 ---
 
 ## 🌟 Öne Çıkan Özellikler
 
-- **Çift Panel Split View** (`F3`) — yan yana iki panel, karşı panele
-  doğrudan kopyala/taşı kısayolları.
+- **Non-Blocking UI** — Tüm dosya, indeksleme, thumbnail, arşiv ve ağ
+  işlemleri arka plan işçileriyle (worker pool) asenkron çalışır; arayüz
+  **asla** donmaz.
 - **Akışlı Dizin Tarama** — 100.000+ dosyalı klasörlerde bile 500'lük
   parçalar halinde akan, UI'ı asla bloklamayan asenkron listeleme
-  (`read_dir_chunked`, ölçülen hız: 180.000+ dosya/sn, bkz.
+  (`read_dir_chunked`, ölçülen hız: **180.000+ dosya/sn**, bkz.
   [docs/performance.md](docs/performance.md)).
 - **FTS5 Tam Metin Arama** — SQLite + FTS5 tabanlı, düşük öncelikli arka
   plan indeksleyici ile anlık dosya araması.
-- **3 Aşamalı "Open With" Dosya Bulucu** — MIME ilişkilendirmeli önerilen
-  uygulamalar, tam uygulama listesi ve özel komut girişi.
+- **Çift Panel Split View** (`F3`) — yan yana iki panel, karşı panele
+  doğrudan kopyala/taşı kısayolları.
 - **Akıllı Depolama Paneli** — disk kullanım analizi, en büyük dosya/klasör
   keşfi, depolama içgörüleri.
-- **Zengin Boş Durumlar** — Downloads/Documents/Pictures/Music/Videos,
-  Recent, Network, Trash ve arama sonucu için konuma özel boş durum
-  ekranları.
+- **3 Aşamalı "Open With" Dosya Bulucu** — MIME ilişkilendirmeli önerilen
+  uygulamalar, tam uygulama listesi ve özel komut girişi.
+- **Güvenlik Odaklı** — Path traversal engelleme, symlink/TOCTOU koruması,
+  root çalıştırma yasağı ve izolasyonlu Polkit/D-Bus ayrıcalıklı işlem
+  modeli.
 - **Gizlilik Dostu Loglama & Çökme Teşhisi** — sıfır telemetri; loglar ve
   çökme raporları yalnızca yerelde, kimlik bilgisi/ev dizini maskelemesiyle
   saklanır (bkz. [docs/security.md](docs/security.md)).
-- **Non-Blocking UI**: Tüm dosya, indeksleme, thumbnail, arşiv ve ağ
-  işlemleri arka plan işçileriyle (worker pool) asenkron çalışır, arayüz
-  asla donmaz.
-- **Çoklu Görünüm Desteği**: Icon View, Compact View ve Details View
+- **Çoklu Görünüm Desteği** — Icon View, Compact View ve Details View
   (Column View).
-- **Gelişmiş Navigasyon**: Tıklanabilir breadcrumbs, adres satırı modu
+- **Gelişmiş Navigasyon** — Tıklanabilir breadcrumbs, adres satırı modu
   (`Ctrl+L`), çoklu sekmeler (`Ctrl+T`), dinamik sağ tık context menu.
-- **Güvenlik Odaklı**: Path traversal engelleme, symlink/TOCTOU koruması,
-  root çalıştırma yasağı ve izolasyonlu Polkit/D-Bus ayrıcalıklı işlem
-  modeli.
+- **Zengin Boş Durumlar** — Downloads/Documents/Pictures/Music/Videos,
+  Recent, Network, Trash ve arama sonucu için konuma özel boş durum
+  ekranları.
 
 > Command Palette (`Ctrl+K`) FAZ 24'te planlanıyor, henüz uygulanmadı — bkz.
 > [docs/roadmap.md](docs/roadmap.md).
@@ -178,6 +184,20 @@ Teknik geliştirici dokümanları `docs/` altında:
 
 Yapay zeka asistanlarının uyması gereken geliştirme protokolü:
 [AGENTS.md](AGENTS.md).
+
+---
+
+## 💬 Topluluk & İletişim
+
+Sorularınız, öneriniz veya geri bildiriminiz mi var? Bize ulaşın:
+
+- 💡 **GitHub Discussions:** [github.com/ERAYQ1/Veyra-File-Manager/discussions](https://github.com/ERAYQ1/Veyra-File-Manager/discussions) — fikir, soru ve genel sohbet için.
+- 🐛 **Hata bildirimi:** [GitHub Issues](https://github.com/ERAYQ1/Veyra-File-Manager/issues) üzerinden.
+- 💬 **Matrix:** `#veyra:matrix.org` *(yakında)*
+- 🎮 **Discord:** *(yakında — davet bağlantısı eklenecek)*
+
+Katkı sağlamadan önce lütfen [CONTRIBUTING.md](CONTRIBUTING.md) ve
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) dosyalarını inceleyin.
 
 ---
 
