@@ -17,7 +17,7 @@ use crate::config::{
     SharedSettings, MAX_PREVIEW_SIZE_CHOICES_KB, STREAM_CHUNK_SIZE_CHOICES,
     THUMBNAIL_CACHE_CAPACITY_CHOICES,
 };
-use crate::i18n::{t, t_plural};
+use crate::i18n::{t, t_fmt, t_plural};
 use crate::network;
 use crate::recent;
 use crate::thumbnails::ThumbnailService;
@@ -52,7 +52,7 @@ pub(crate) fn show(
     dialog.add(&preview_page(&settings, &preview_widget));
     dialog.add(&performance_page(&settings, &thumbnails, &refresh_all_tabs));
     dialog.add(&shortcuts_page(window));
-    dialog.add(&privacy_page(&settings));
+    dialog.add(&privacy_page(&settings, &thumbnails));
     dialog.add(&advanced_page(
         &dialog,
         &settings,
@@ -647,12 +647,41 @@ fn shortcuts_page(window: &adw::ApplicationWindow) -> adw::PreferencesPage {
     page
 }
 
-fn privacy_page(settings: &SharedSettings) -> adw::PreferencesPage {
+fn privacy_page(
+    settings: &SharedSettings,
+    thumbnails: &Rc<ThumbnailService>,
+) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
         .title(t("prefs.page.privacy"))
         .icon_name("security-high-symbolic")
         .name("privacy")
         .build();
+
+    let thumbnail_group = group(t("prefs.privacy.group.thumbnail_cache"));
+    let (clear_thumbnails_row, clear_thumbnails_button) = action_row_button(
+        t("prefs.privacy.clear_thumbnails.title"),
+        &t_fmt(
+            "prefs.privacy.clear_thumbnails.subtitle",
+            &[(
+                "size",
+                &veyra_filesystem::format_size(thumbnails.l2_cache_size_bytes()),
+            )],
+        ),
+        t("prefs.privacy.clear.button"),
+    );
+    {
+        let thumbnails = thumbnails.clone();
+        let clear_thumbnails_row = clear_thumbnails_row.clone();
+        clear_thumbnails_button.connect_clicked(move |_| {
+            thumbnails.clear_l2_cache();
+            clear_thumbnails_row.set_subtitle(&t_fmt(
+                "prefs.privacy.clear_thumbnails.subtitle",
+                &[("size", &veyra_filesystem::format_size(0))],
+            ));
+        });
+    }
+    thumbnail_group.add(&clear_thumbnails_row);
+    page.add(&thumbnail_group);
 
     let history_group = group(t("prefs.privacy.group.history"));
     let (clear_files_row, clear_files_button) = action_row_button(

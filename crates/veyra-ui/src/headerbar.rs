@@ -173,6 +173,7 @@ fn view_switcher(
 ) -> Vec<(ViewMode, gtk4::ToggleButton)> {
     let box_ = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     box_.add_css_class("linked");
+    box_.add_css_class("veyra-view-switcher");
 
     let modes = [
         (ViewMode::Icon, "view-grid-symbolic", t("view.icon")),

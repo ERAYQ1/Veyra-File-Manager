@@ -173,6 +173,39 @@ impl ThumbnailService {
             .resize(NonZeroUsize::new(capacity.max(1)).expect("capacity clamped to at least 1"));
     }
 
+    /// Faz 59: total on-disk size of the L2 thumbnail cache
+    /// (`<cache_dir>/normal/*.png`), for the Preferences ➔ Privacy /
+    /// Performance "Thumbnail Cache Size" row. Best-effort — an unreadable
+    /// entry (e.g. removed mid-scan) is skipped rather than failing the
+    /// whole tally (Rule #15).
+    pub(crate) fn l2_cache_size_bytes(&self) -> u64 {
+        l2_dir_size(&self.cache_dir.join("normal"))
+    }
+
+    /// Faz 59: deletes every cached L2 thumbnail PNG, backing the
+    /// Preferences ➔ Privacy / Performance "Clear Cache" button. Leaves the
+    /// `normal/` directory itself in place (so a subsequent thumbnail write
+    /// doesn't need to recreate it) and never touches L1 — a still-open
+    /// tab's already-decoded in-memory thumbnails keep painting until they'd
+    /// naturally be evicted or invalidated, exactly like today's mtime-based
+    /// L2 invalidation already tolerates. Best-effort per file (Rule #15): a
+    /// file that fails to delete (e.g. permissions) is skipped rather than
+    /// aborting the rest of the sweep.
+    pub(crate) fn clear_l2_cache(&self) {
+        let normal_dir = self.cache_dir.join("normal");
+        let Ok(entries) = std::fs::read_dir(&normal_dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("png") {
+                if let Err(err) = std::fs::remove_file(&path) {
+                    tracing::debug!(error = %err, "failed to remove cached thumbnail");
+                }
+            }
+        }
+    }
+
     /// Binds `icon` for `item`: an L1 hit paints immediately and
     /// synchronously; otherwise `icon` keeps whatever fallback the caller
     /// already set and a background request is enqueued (unless one for the
@@ -359,6 +392,22 @@ fn is_cache_fresh(cache_file: &Path, source_mtime: i64) -> bool {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     cache_mtime >= source_mtime
+}
+
+/// Sums the byte size of every `*.png` file directly under `dir` (the L2
+/// cache is a flat directory, no subdirectories to recurse into). Returns 0
+/// for a missing/unreadable directory rather than erroring — the cache may
+/// not have been created yet (Rule #15).
+fn l2_dir_size(dir: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("png"))
+        .filter_map(|entry| entry.metadata().ok())
+        .map(|meta| meta.len())
+        .sum()
 }
 
 fn l2_cache_path(cache_dir: &Path, uri: &str) -> Option<PathBuf> {
@@ -589,6 +638,44 @@ mod tests {
         );
         let empty = "";
         assert!(empty.strip_prefix(WIDGET_NAME_GUARD_PREFIX).is_none());
+    }
+
+    #[test]
+    fn l2_dir_size_sums_only_png_files() {
+        let dir =
+            std::env::temp_dir().join(format!("veyra-thumb-size-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.png"), vec![0u8; 100]).unwrap();
+        std::fs::write(dir.join("b.png"), vec![0u8; 250]).unwrap();
+        std::fs::write(dir.join("not-a-thumbnail.txt"), vec![0u8; 999]).unwrap();
+
+        assert_eq!(l2_dir_size(&dir), 350);
+        assert_eq!(l2_dir_size(&dir.join("missing")), 0);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn clear_l2_cache_removes_pngs_but_keeps_the_directory() {
+        let cache_dir =
+            std::env::temp_dir().join(format!("veyra-thumb-clear-test-{}", std::process::id()));
+        let normal_dir = cache_dir.join("normal");
+        std::fs::create_dir_all(&normal_dir).unwrap();
+        std::fs::write(normal_dir.join("a.png"), b"stub").unwrap();
+        std::fs::write(normal_dir.join("b.png"), b"stub").unwrap();
+
+        let service = ThumbnailService::new(cache_dir.clone(), 10);
+        assert!(service.l2_cache_size_bytes() > 0);
+
+        service.clear_l2_cache();
+
+        assert_eq!(service.l2_cache_size_bytes(), 0);
+        assert!(
+            normal_dir.is_dir(),
+            "clearing must not remove the directory itself"
+        );
+
+        std::fs::remove_dir_all(&cache_dir).ok();
     }
 
     #[test]

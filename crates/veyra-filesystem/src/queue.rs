@@ -37,10 +37,29 @@ pub struct OperationRequest {
 /// thread) and the worker thread actually running the operation. Cloning is
 /// cheap (`Arc`'d atomics), so both sides hold an independent handle onto
 /// the same underlying state.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct OperationControl {
     cancelled: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
+    /// Faz 59: a `GCancellable` mirroring `cancelled`, so an in-progress
+    /// `gio::File::copy()` call (which blocks the worker thread until its
+    /// own IO chunk completes, checking this between chunks) drops out
+    /// immediately on cancel instead of only being noticed after the
+    /// *current* file finishes — fine-grained mid-file cancellation for a
+    /// large single-file copy, not just between-files. `GCancellable::cancel`
+    /// is documented thread-safe, so calling it from `cancel()` here (the UI
+    /// thread) while a worker thread holds the same handle is sound.
+    gio_cancellable: gio::Cancellable,
+}
+
+impl Default for OperationControl {
+    fn default() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            paused: Arc::new(AtomicBool::new(false)),
+            gio_cancellable: gio::Cancellable::new(),
+        }
+    }
 }
 
 impl OperationControl {
@@ -50,6 +69,13 @@ impl OperationControl {
 
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
+        self.gio_cancellable.cancel();
+    }
+
+    /// The `GCancellable` this control drives — passed to `gio::File::copy`
+    /// so a mid-file copy can be interrupted immediately (Rule #13).
+    pub fn gio_cancellable(&self) -> &gio::Cancellable {
+        &self.gio_cancellable
     }
 
     pub fn pause(&self) {
@@ -320,7 +346,7 @@ fn run_copy_move(
                     source.to_gio_file().copy(
                         &dest.to_gio_file(),
                         gio::FileCopyFlags::OVERWRITE,
-                        gio::Cancellable::NONE,
+                        Some(control.gio_cancellable()),
                         Some(&mut report),
                     )
                 };
@@ -330,6 +356,10 @@ fn run_copy_move(
                     Ok(()) => {
                         bytes_done = base + size;
                         outcome.completed.push(source);
+                    }
+                    Err(err) if err.matches(gio::IOErrorEnum::Cancelled) => {
+                        outcome.cancelled = true;
+                        return outcome;
                     }
                     Err(err) => outcome
                         .errors
@@ -683,6 +713,61 @@ mod tests {
         control.resume();
         let outcome = handle.join().unwrap();
         assert_eq!(outcome.completed.len(), 2);
+    }
+
+    #[test]
+    fn cancel_also_cancels_the_gio_cancellable() {
+        // Faz 59: `copy()` is now driven by `OperationControl`'s own
+        // `GCancellable` instead of `gio::Cancellable::NONE`, so a mid-file
+        // cancel actually interrupts the in-flight `copy()` call rather than
+        // only being noticed between files. This pins the wiring: cancelling
+        // the control must cancel the same `GCancellable` a worker thread
+        // would be passing into `copy()`.
+        let control = OperationControl::new();
+        assert!(!control.gio_cancellable().is_cancelled());
+        control.cancel();
+        assert!(control.gio_cancellable().is_cancelled());
+        assert!(control.is_cancelled());
+    }
+
+    #[test]
+    fn cancelling_mid_copy_is_reported_as_cancelled_not_an_error() {
+        // Note: whether the destination ends up with a partial or a
+        // complete write depends on the filesystem's copy path (e.g. a COW
+        // reflink clone on btrfs completes the data instantly regardless of
+        // when the cancellable fires, before a later metadata step reports
+        // Cancelled) — not something a portable unit test can pin down. What
+        // *is* portable, and what this pins, is that a copy interrupted by
+        // `OperationControl::cancel()` mid-run is surfaced as
+        // `outcome.cancelled`, never folded into `outcome.errors`.
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("big.bin");
+        fs::write(&src, vec![0u8; 64 * 1024 * 1024]).unwrap();
+        let dest_dir = dir.path().join("out");
+        fs::create_dir(&dest_dir).unwrap();
+
+        let request = OperationRequest {
+            kind: OperationKind::Copy,
+            sources: vec![local(&src)],
+            destination: Some(local(&dest_dir)),
+        };
+        let control = OperationControl::new();
+        let control_for_progress = control.clone();
+        let cancelled_once = std::cell::Cell::new(false);
+        let outcome = run_operation(
+            request,
+            &control,
+            move |_| {
+                if !cancelled_once.get() {
+                    cancelled_once.set(true);
+                    control_for_progress.cancel();
+                }
+            },
+            no_conflict,
+        );
+
+        assert!(outcome.cancelled);
+        assert!(outcome.errors.is_empty());
     }
 
     #[test]

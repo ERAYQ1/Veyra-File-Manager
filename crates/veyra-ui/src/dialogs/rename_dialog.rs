@@ -29,7 +29,30 @@ pub(crate) fn show(
         Some(byte_index) => current_name[..byte_index].chars().count(),
     };
     entry.select_region(0, stem_chars as i32);
-    dialog.set_extra_child(Some(&entry));
+
+    // Faz 59: Unicode bidi-override spoofing guard (Rule #21/#23-adjacent
+    // security hardening) — a name containing e.g. U+202E (RIGHT-TO-LEFT
+    // OVERRIDE) can visually reverse its own extension (`"evil\u{202E}gpj.exe"`
+    // renders as if it ends in `.exe.jpg`... reversed the other way). This is
+    // advisory in `veyra_core::security::has_bidi_override` itself (some RTL
+    // filenames legitimately use nearby codepoints), so the UI surfaces a
+    // visible warning and blocks confirmation rather than silently stripping
+    // anything — the user can still see exactly what they typed.
+    let warning_label = gtk4::Label::new(None);
+    warning_label.set_wrap(true);
+    warning_label.set_xalign(0.0);
+    warning_label.add_css_class("error");
+    warning_label.add_css_class("caption");
+    warning_label.set_visible(false);
+    warning_label.set_label(
+        "This name contains invisible text-direction characters, which can be \
+         used to disguise a file's real extension. Remove them to continue.",
+    );
+
+    let extra = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    extra.append(&entry);
+    extra.append(&warning_label);
+    dialog.set_extra_child(Some(&extra));
 
     dialog.add_responses(&[("cancel", "Cancel"), ("rename", "Rename")]);
     dialog.set_default_response(Some("rename"));
@@ -38,8 +61,12 @@ pub(crate) fn show(
 
     {
         let dialog = dialog.clone();
+        let warning_label = warning_label.clone();
         entry.connect_changed(move |entry| {
-            dialog.set_response_enabled("rename", !entry.text().trim().is_empty());
+            let text = entry.text();
+            let has_bidi = veyra_core::security::has_bidi_override(&text);
+            warning_label.set_visible(has_bidi);
+            dialog.set_response_enabled("rename", !text.trim().is_empty() && !has_bidi);
         });
     }
 

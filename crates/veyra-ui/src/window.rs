@@ -49,8 +49,25 @@ pub(crate) fn build_window(
     // record an opened file into the XDG recent-files registry).
     let privacy_mode: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
 
-    let left = split_view::build_panel(PanelId::Left, privacy_mode.clone(), settings.clone());
-    let right = split_view::build_panel(PanelId::Right, privacy_mode.clone(), settings.clone());
+    // Faz 59: one window-level `AdwToastOverlay`, built ahead of both panels
+    // and handed to each so every call site that already holds a `Chrome`
+    // can surface a toast (Copy to clipboard, Move to Trash w/ Undo, Undo
+    // itself) without a new parameter threaded through every intermediate
+    // function — see `Chrome::toast_overlay`'s doc comment.
+    let toast_overlay = adw::ToastOverlay::new();
+
+    let left = split_view::build_panel(
+        PanelId::Left,
+        privacy_mode.clone(),
+        settings.clone(),
+        toast_overlay.clone(),
+    );
+    let right = split_view::build_panel(
+        PanelId::Right,
+        privacy_mode.clone(),
+        settings.clone(),
+        toast_overlay.clone(),
+    );
     right.frame.set_visible(false);
     let panels = Panels { left, right };
 
@@ -318,7 +335,8 @@ pub(crate) fn build_window(
     toolbar_view.add_top_bar(&header.widget);
     toolbar_view.add_bottom_bar(&progress.widget);
     toolbar_view.set_content(Some(&sidebar_split));
-    window.set_content(Some(&toolbar_view));
+    toast_overlay.set_child(Some(&toolbar_view));
+    window.set_content(Some(&toast_overlay));
 
     add_dev_icon_search_path(&window);
     if let Some(app_id) = app.application_id() {
@@ -1324,7 +1342,15 @@ fn setup_operation_actions(
                 .map(|item| item.path)
                 .collect();
             if !paths.is_empty() {
+                let count = paths.len();
                 *clipboard.borrow_mut() = Some(ClipboardEntry { paths, cut: false });
+                show_toast(
+                    &panel.chrome,
+                    &t_fmt(
+                        "toast.copied_to_clipboard",
+                        &[("count", &count.to_string())],
+                    ),
+                );
             }
         });
     }
@@ -2815,12 +2841,36 @@ fn report_and_refresh(panels: &Panels, message: String) {
     for (state, chrome) in all_tab_refresh_targets(panels) {
         refresh(&state, &chrome);
     }
+    show_toast(&panels.left.chrome, &message);
     let panels = panels.clone();
     glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
         for panel in [&panels.left, &panels.right] {
             panel.chrome.status_left.set_label(&message);
         }
     });
+}
+
+/// Faz 59: shows a short-lived `AdwToast` on `chrome`'s (window-level,
+/// shared by both panels — see `Chrome::toast_overlay`) overlay. Additive to
+/// the existing status-bar label feedback, never a replacement for it — the
+/// status bar is the durable record, the toast is the momentary one.
+fn show_toast(chrome: &Chrome, title: &str) {
+    chrome.toast_overlay.add_toast(adw::Toast::new(title));
+}
+
+/// Like [`show_toast`], with an "Undo" action button that activates
+/// `win.undo` — used for the one bulk operation whose immediate reversal is
+/// both common and cheap to offer inline (Move to Trash).
+fn show_toast_with_undo(window: &adw::ApplicationWindow, chrome: &Chrome, title: &str) {
+    let toast = adw::Toast::builder()
+        .title(title)
+        .button_label(t("toast.undo"))
+        .build();
+    let window = window.clone();
+    toast.connect_button_clicked(move |_| {
+        gio::prelude::ActionGroupExt::activate_action(&window, "undo", None);
+    });
+    chrome.toast_overlay.add_toast(toast);
 }
 
 /// Reloads every panel whose focused tab is currently showing `trash:///`,
@@ -3282,6 +3332,16 @@ fn run_bulk_operation(
                             undo_stack
                                 .borrow_mut()
                                 .record(UndoableAction::Trash(outcome.trashed.clone()));
+                            if let Some((_, chrome)) = refresh_targets.first() {
+                                show_toast_with_undo(
+                                    &window,
+                                    chrome,
+                                    &t_fmt(
+                                        "toast.moved_to_trash",
+                                        &[("count", &outcome.trashed.len().to_string())],
+                                    ),
+                                );
+                            }
                         }
                         OperationKind::Delete if !outcome.completed.is_empty() => {
                             undo_stack.borrow_mut().purge(&outcome.completed);

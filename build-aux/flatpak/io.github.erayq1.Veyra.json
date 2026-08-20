@@ -40,7 +40,8 @@
                 "install -Dm755 target/release/veyra /app/bin/veyra",
                 "install -Dm644 data/io.github.erayq1.Veyra.desktop /app/share/applications/io.github.erayq1.Veyra.desktop",
                 "install -Dm644 data/io.github.erayq1.Veyra.metainfo.xml /app/share/metainfo/io.github.erayq1.Veyra.metainfo.xml",
-                "install -Dm644 data/icons/hicolor/scalable/apps/io.github.erayq1.Veyra.svg /app/share/icons/hicolor/scalable/apps/io.github.erayq1.Veyra.svg"
+                "install -Dm644 data/icons/hicolor/scalable/apps/io.github.erayq1.Veyra.svg /app/share/icons/hicolor/scalable/apps/io.github.erayq1.Veyra.svg",
+                "install -Dm644 data/icons/hicolor/symbolic/apps/io.github.erayq1.Veyra-symbolic.svg /app/share/icons/hicolor/symbolic/apps/io.github.erayq1.Veyra-symbolic.svg"
             ],
             "sources": [
                 {

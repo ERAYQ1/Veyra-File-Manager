@@ -1,33 +1,65 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Veyra app icon (Faz 59): a sade/geometric Rust crab on a soft navy
+     backdrop, replacing the earlier folder-and-document glyph. Built to the
+     GNOME HIG 128x128 grid — the backdrop fills the full canvas, the crab
+     glyph is centered within a 96x96 safe area (16px margin each side). -->
 <svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="veyra-folder" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#62a0ea"/>
-      <stop offset="1" stop-color="#1c71d8"/>
+    <linearGradient id="veyra-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2f4a"/>
+      <stop offset="1" stop-color="#141726"/>
     </linearGradient>
-    <linearGradient id="veyra-tab" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#99c1f1"/>
-      <stop offset="1" stop-color="#62a0ea"/>
+    <linearGradient id="veyra-shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff9a5a"/>
+      <stop offset="1" stop-color="#e8580c"/>
     </linearGradient>
-    <linearGradient id="veyra-doc" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#f6f5f4"/>
+    <linearGradient id="veyra-claw" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb37a"/>
+      <stop offset="1" stop-color="#f06a1c"/>
     </linearGradient>
+    <radialGradient id="veyra-glow" cx="0.5" cy="0.32" r="0.62">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
   </defs>
 
-  <path d="M20 40c0-4.4 3.6-8 8-8h20l8 10h44c4.4 0 8 3.6 8 8v46c0 4.4-3.6 8-8 8H28c-4.4 0-8-3.6-8-8Z"
-        fill="url(#veyra-tab)"/>
+  <!-- Backdrop: soft rounded-square, GNOME app-icon convention. -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#veyra-bg)"/>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#veyra-glow)"/>
 
-  <rect x="18" y="34" width="26" height="16" rx="6" fill="url(#veyra-tab)"/>
+  <!-- Legs: three per side, simple rounded strokes for a minimal silhouette. -->
+  <g stroke="#c94a0a" stroke-width="4.5" stroke-linecap="round" fill="none">
+    <path d="M38 78 L20 86"/>
+    <path d="M40 86 L24 96"/>
+    <path d="M44 93 L30 104"/>
+    <path d="M90 78 L108 86"/>
+    <path d="M88 86 L104 96"/>
+    <path d="M84 93 L98 104"/>
+  </g>
 
-  <path d="M18 46c0-4.4 3.6-8 8-8h72c4.4 0 8 3.6 8 8v46c0 4.4-3.6 8-8 8H26c-4.4 0-8-3.6-8-8Z"
-        fill="url(#veyra-folder)"/>
+  <!-- Claws: rounded geometric pincers, held up and out. -->
+  <g fill="url(#veyra-claw)">
+    <path d="M40 60 C26 56 18 44 22 32 C24 26 30 24 33 29 C30 30 28 34 30 39
+             C32 45 38 48 44 47 C48 53 46 59 40 60 Z"/>
+    <path d="M88 60 C102 56 110 44 106 32 C104 26 98 24 95 29 C98 30 100 34 98 39
+             C96 45 90 48 84 47 C80 53 82 59 88 60 Z"/>
+  </g>
+  <g stroke="#c94a0a" stroke-width="4" stroke-linecap="round" fill="none">
+    <path d="M40 60 C34 63 30 68 30 74"/>
+    <path d="M88 60 C94 63 98 68 98 74"/>
+  </g>
 
-  <rect x="46" y="52" width="34" height="42" rx="4"
-        fill="url(#veyra-doc)" stroke="#1a5fb4" stroke-width="1.5"/>
-  <line x1="52" y1="62" x2="74" y2="62" stroke="#77767b" stroke-width="2.4" stroke-linecap="round"/>
-  <line x1="52" y1="70" x2="74" y2="70" stroke="#77767b" stroke-width="2.4" stroke-linecap="round"/>
-  <line x1="52" y1="78" x2="66" y2="78" stroke="#77767b" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- Shell / body: single rounded oval, deliberately plain. -->
+  <ellipse cx="64" cy="76" rx="32" ry="24" fill="url(#veyra-shell)"/>
+  <ellipse cx="64" cy="68" rx="32" ry="17" fill="#ffffff" opacity="0.10"/>
 
-  <path d="M18 46c0-4.4 3.6-8 8-8h72c4.4 0 8 3.6 8 8v6H18Z" fill="#ffffff" opacity="0.16"/>
+  <!-- Eye stalks + eyes. -->
+  <g stroke="#e8580c" stroke-width="4" stroke-linecap="round">
+    <path d="M52 56 L48 42"/>
+    <path d="M76 56 L80 42"/>
+  </g>
+  <circle cx="48" cy="38" r="6" fill="#141726"/>
+  <circle cx="80" cy="38" r="6" fill="#141726"/>
+  <circle cx="46.3" cy="36.3" r="1.8" fill="#ffffff"/>
+  <circle cx="78.3" cy="36.3" r="1.8" fill="#ffffff"/>
 </svg>

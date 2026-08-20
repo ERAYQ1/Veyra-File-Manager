@@ -67,6 +67,7 @@ fn build_local(
         if is_last {
             let current = gtk4::Label::new(Some(&label));
             current.add_css_class("heading");
+            current.add_css_class("veyra-crumb-current");
             container.append(&current);
         } else {
             append_segment(
@@ -89,7 +90,7 @@ fn append_segment(
 ) {
     let button = gtk4::Button::builder()
         .label(label)
-        .css_classes(["flat"])
+        .css_classes(["flat", "veyra-crumb"])
         .build();
     button.set_tooltip_text(Some(&target.to_string()));
     button.update_property(&[gtk4::accessible::Property::Label(&format!(

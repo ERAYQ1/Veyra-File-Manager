@@ -8,9 +8,19 @@
 use gtk4::glib;
 use gtk4::prelude::*;
 
+use crate::i18n::t;
+
 /// One entry in the palette: a single `win.*` action a user can search for
 /// and trigger, exactly as if they'd clicked its menu item or pressed its
 /// shortcut.
+///
+/// Faz 59: `title`/`category` hold i18n *keys* (`crate::i18n::t()` input),
+/// not display text directly — [`display_title`]/[`display_category`]
+/// resolve them in the current locale. Kept as raw keys on the struct
+/// (rather than pre-resolving into owned `String`s at `all_commands()` time)
+/// so a live language switch while the palette happens to be closed doesn't
+/// need any cache invalidation: the next `all_commands()` call just resolves
+/// fresh.
 #[derive(Clone)]
 pub(crate) struct CommandItem {
     pub id: &'static str,
@@ -24,6 +34,18 @@ pub(crate) struct CommandItem {
     pub action_target: Option<glib::Variant>,
 }
 
+impl CommandItem {
+    /// This command's title, translated into the current locale.
+    pub(crate) fn display_title(&self) -> &'static str {
+        t(self.title)
+    }
+
+    /// This command's category label, translated into the current locale.
+    pub(crate) fn display_category(&self) -> &'static str {
+        t(self.category)
+    }
+}
+
 /// Every command the palette can list, grouped by `category` in the order
 /// they should appear when the search query is empty.
 pub(crate) fn all_commands() -> Vec<CommandItem> {
@@ -31,72 +53,72 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
         // --- File Operations ---
         CommandItem {
             id: "new-folder",
-            title: "New Folder",
-            category: "File Operations",
+            title: "palette.cmd.new_folder",
+            category: "palette.cat.file_ops",
             icon_name: "folder-new-symbolic",
             action_name: "win.create-folder",
             action_target: None,
         },
         CommandItem {
             id: "new-document",
-            title: "New Document",
-            category: "File Operations",
+            title: "palette.cmd.new_document",
+            category: "palette.cat.file_ops",
             icon_name: "document-new-symbolic",
             action_name: "win.create-document",
             action_target: None,
         },
         CommandItem {
             id: "compress-selection",
-            title: "Compress Selection…",
-            category: "File Operations",
+            title: "palette.cmd.compress_selection",
+            category: "palette.cat.file_ops",
             icon_name: "package-x-generic-symbolic",
             action_name: "win.compress-selected",
             action_target: None,
         },
         CommandItem {
             id: "extract-archive",
-            title: "Extract Archive…",
-            category: "File Operations",
+            title: "palette.cmd.extract_archive",
+            category: "palette.cat.file_ops",
             icon_name: "archive-extract-symbolic",
             action_name: "win.extract-here-selected",
             action_target: None,
         },
         CommandItem {
             id: "empty-trash",
-            title: "Empty Trash",
-            category: "File Operations",
+            title: "palette.cmd.empty_trash",
+            category: "palette.cat.file_ops",
             icon_name: "user-trash-symbolic",
             action_name: "win.empty-trash",
             action_target: None,
         },
         CommandItem {
             id: "copy-path",
-            title: "Copy Path",
-            category: "File Operations",
+            title: "palette.cmd.copy_path",
+            category: "palette.cat.file_ops",
             icon_name: "edit-copy-symbolic",
             action_name: "win.copy-path-selected",
             action_target: None,
         },
         CommandItem {
             id: "copy-location",
-            title: "Copy Location",
-            category: "File Operations",
+            title: "palette.cmd.copy_location",
+            category: "palette.cat.file_ops",
             icon_name: "edit-copy-symbolic",
             action_name: "win.copy-location-selected",
             action_target: None,
         },
         CommandItem {
             id: "undo",
-            title: "Undo",
-            category: "File Operations",
+            title: "palette.cmd.undo",
+            category: "palette.cat.file_ops",
             icon_name: "edit-undo-symbolic",
             action_name: "win.undo",
             action_target: None,
         },
         CommandItem {
             id: "redo",
-            title: "Redo",
-            category: "File Operations",
+            title: "palette.cmd.redo",
+            category: "palette.cat.file_ops",
             icon_name: "edit-redo-symbolic",
             action_name: "win.redo",
             action_target: None,
@@ -104,56 +126,56 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
         // --- Navigation & Tabs ---
         CommandItem {
             id: "new-tab",
-            title: "New Tab",
-            category: "Navigation",
+            title: "palette.cmd.new_tab",
+            category: "palette.cat.navigation",
             icon_name: "tab-new-symbolic",
             action_name: "win.new-tab",
             action_target: None,
         },
         CommandItem {
             id: "close-tab",
-            title: "Close Tab",
-            category: "Navigation",
+            title: "palette.cmd.close_tab",
+            category: "palette.cat.navigation",
             icon_name: "window-close-symbolic",
             action_name: "win.close-tab",
             action_target: None,
         },
         CommandItem {
             id: "open-new-window",
-            title: "Open in New Window",
-            category: "Navigation",
+            title: "palette.cmd.open_new_window",
+            category: "palette.cat.navigation",
             icon_name: "window-new-symbolic",
             action_name: "win.open-in-new-window-selected",
             action_target: None,
         },
         CommandItem {
             id: "toggle-split-view",
-            title: "Toggle Dual Pane / Split View",
-            category: "Navigation",
+            title: "palette.cmd.toggle_split_view",
+            category: "palette.cat.navigation",
             icon_name: "sidebar-show-right-symbolic",
             action_name: "win.toggle-split-view",
             action_target: None,
         },
         CommandItem {
             id: "open-terminal",
-            title: "Open Terminal Here",
-            category: "Navigation",
+            title: "palette.cmd.open_terminal",
+            category: "palette.cat.navigation",
             icon_name: "utilities-terminal-symbolic",
             action_name: "win.open-terminal-here-current",
             action_target: None,
         },
         CommandItem {
             id: "go-to-location",
-            title: "Go to Location",
-            category: "Navigation",
+            title: "palette.cmd.go_to_location",
+            category: "palette.cat.navigation",
             icon_name: "folder-symbolic",
             action_name: "win.focus-address",
             action_target: None,
         },
         CommandItem {
             id: "select-all",
-            title: "Select All",
-            category: "Navigation",
+            title: "palette.cmd.select_all",
+            category: "palette.cat.navigation",
             icon_name: "edit-select-all-symbolic",
             action_name: "win.select-all",
             action_target: None,
@@ -161,40 +183,40 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
         // --- View & Toggle ---
         CommandItem {
             id: "toggle-hidden",
-            title: "Toggle Hidden Files",
-            category: "View",
+            title: "palette.cmd.toggle_hidden",
+            category: "palette.cat.view",
             icon_name: "view-reveal-symbolic",
             action_name: "win.toggle-hidden-files",
             action_target: None,
         },
         CommandItem {
             id: "toggle-preview",
-            title: "Toggle File Preview",
-            category: "View",
+            title: "palette.cmd.toggle_preview",
+            category: "palette.cat.view",
             icon_name: "view-preview-symbolic",
             action_name: "win.toggle-preview",
             action_target: None,
         },
         CommandItem {
             id: "view-icon",
-            title: "Icon View",
-            category: "View",
+            title: "palette.cmd.view_icon",
+            category: "palette.cat.view",
             icon_name: "view-grid-symbolic",
             action_name: "win.set-view-mode",
             action_target: Some("icon".to_variant()),
         },
         CommandItem {
             id: "view-compact",
-            title: "Compact View",
-            category: "View",
+            title: "palette.cmd.view_compact",
+            category: "palette.cat.view",
             icon_name: "view-continuous-symbolic",
             action_name: "win.set-view-mode",
             action_target: Some("compact".to_variant()),
         },
         CommandItem {
             id: "view-details",
-            title: "Details View",
-            category: "View",
+            title: "palette.cmd.view_details",
+            category: "palette.cat.view",
             icon_name: "view-list-symbolic",
             action_name: "win.set-view-mode",
             action_target: Some("details".to_variant()),
@@ -202,72 +224,72 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
         // --- Tools ---
         CommandItem {
             id: "analyze-disk",
-            title: "Analyze Disk Usage…",
-            category: "Tools",
+            title: "palette.cmd.analyze_disk",
+            category: "palette.cat.tools",
             icon_name: "drive-harddisk-symbolic",
             action_name: "win.analyze-disk-current",
             action_target: None,
         },
         CommandItem {
             id: "storage-dashboard",
-            title: "Smart Storage Dashboard…",
-            category: "Tools",
+            title: "palette.cmd.storage_dashboard",
+            category: "palette.cat.tools",
             icon_name: "drive-harddisk-symbolic",
             action_name: "win.show-storage-dashboard",
             action_target: None,
         },
         CommandItem {
             id: "connect-server",
-            title: "Connect to Server…",
-            category: "Tools",
+            title: "palette.cmd.connect_server",
+            category: "palette.cat.tools",
             icon_name: "network-server-symbolic",
             action_name: "win.connect-to-server",
             action_target: None,
         },
         CommandItem {
             id: "properties",
-            title: "Open Properties",
-            category: "Tools",
+            title: "palette.cmd.properties",
+            category: "palette.cat.tools",
             icon_name: "document-properties-symbolic",
             action_name: "win.properties-selected",
             action_target: None,
         },
         CommandItem {
             id: "search-files",
-            title: "Search Files",
-            category: "Tools",
+            title: "palette.cmd.search_files",
+            category: "palette.cat.tools",
             icon_name: "system-search-symbolic",
             action_name: "win.toggle-search",
             action_target: None,
         },
         CommandItem {
             id: "manage-file-associations",
-            title: "Manage File Associations…",
-            category: "Tools",
+            title: "palette.cmd.manage_file_associations",
+            category: "palette.cat.tools",
             icon_name: "preferences-desktop-default-applications-symbolic",
             action_name: "win.manage-file-associations",
             action_target: None,
         },
         CommandItem {
             id: "preferences",
-            title: "Preferences",
-            category: "Tools",
+            title: "palette.cmd.preferences",
+            category: "palette.cat.tools",
             icon_name: "preferences-system-symbolic",
             action_name: "win.show-preferences",
             action_target: None,
         },
         CommandItem {
             id: "keyboard-shortcuts",
-            title: "Keyboard Shortcuts",
-            category: "Tools",
+            title: "palette.cmd.keyboard_shortcuts",
+            category: "palette.cat.tools",
             icon_name: "input-keyboard-symbolic",
             action_name: "win.show-shortcuts-help",
             action_target: None,
         },
         CommandItem {
             id: "reset-shortcuts",
-            title: "Reset Shortcuts to Default",
-            category: "Tools",
+            title: "palette.cmd.reset_shortcuts",
+            category: "palette.cat.tools",
             icon_name: "edit-undo-symbolic",
             action_name: "win.reset-shortcuts",
             action_target: None,
@@ -275,40 +297,40 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
         // --- Tools: Developer Mode (Faz 39) ---
         CommandItem {
             id: "toggle-developer-mode",
-            title: "Toggle Developer Mode",
-            category: "Tools",
+            title: "palette.cmd.toggle_developer_mode",
+            category: "palette.cat.tools",
             icon_name: "applications-engineering-symbolic",
             action_name: "win.toggle-developer-mode",
             action_target: None,
         },
         CommandItem {
             id: "copy-absolute-path",
-            title: "Copy Absolute Path",
-            category: "Tools",
+            title: "palette.cmd.copy_absolute_path",
+            category: "palette.cat.tools",
             icon_name: "edit-copy-symbolic",
             action_name: "win.copy-absolute-path-selected",
             action_target: None,
         },
         CommandItem {
             id: "copy-file-uri",
-            title: "Copy File URI",
-            category: "Tools",
+            title: "palette.cmd.copy_file_uri",
+            category: "palette.cat.tools",
             icon_name: "edit-copy-symbolic",
             action_name: "win.copy-uri-selected",
             action_target: None,
         },
         CommandItem {
             id: "calculate-checksums",
-            title: "Calculate Checksums (SHA-256 / MD5)",
-            category: "Tools",
+            title: "palette.cmd.calculate_checksums",
+            category: "palette.cat.tools",
             icon_name: "document-properties-symbolic",
             action_name: "win.calculate-checksums-selected",
             action_target: None,
         },
         CommandItem {
             id: "open-in-editor",
-            title: "Open in Default Code Editor",
-            category: "Tools",
+            title: "palette.cmd.open_in_editor",
+            category: "palette.cat.tools",
             icon_name: "text-editor-symbolic",
             action_name: "win.open-in-editor-selected",
             action_target: None,
@@ -316,32 +338,32 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
         // --- Sort & Filter ---
         CommandItem {
             id: "sort-name",
-            title: "Sort by Name",
-            category: "Sort & Filter",
+            title: "palette.cmd.sort_name",
+            category: "palette.cat.sort_filter",
             icon_name: "view-sort-ascending-symbolic",
             action_name: "win.sort-by",
             action_target: Some("name".to_variant()),
         },
         CommandItem {
             id: "sort-size",
-            title: "Sort by Size",
-            category: "Sort & Filter",
+            title: "palette.cmd.sort_size",
+            category: "palette.cat.sort_filter",
             icon_name: "view-sort-ascending-symbolic",
             action_name: "win.sort-by",
             action_target: Some("size".to_variant()),
         },
         CommandItem {
             id: "sort-modified",
-            title: "Sort by Modified",
-            category: "Sort & Filter",
+            title: "palette.cmd.sort_modified",
+            category: "palette.cat.sort_filter",
             icon_name: "view-sort-ascending-symbolic",
             action_name: "win.sort-by",
             action_target: Some("modified".to_variant()),
         },
         CommandItem {
             id: "sort-type",
-            title: "Sort by Type",
-            category: "Sort & Filter",
+            title: "palette.cmd.sort_type",
+            category: "palette.cat.sort_filter",
             icon_name: "view-sort-ascending-symbolic",
             action_name: "win.sort-by",
             action_target: Some("type".to_variant()),
@@ -433,7 +455,9 @@ pub(crate) fn filter_commands<'a>(
 
     let mut scored: Vec<(i32, &CommandItem)> = commands
         .iter()
-        .filter_map(|command| fuzzy_score(query, command.title).map(|score| (score, command)))
+        .filter_map(|command| {
+            fuzzy_score(query, command.display_title()).map(|score| (score, command))
+        })
         .collect();
     scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
     scored.into_iter().map(|(_, command)| command).collect()

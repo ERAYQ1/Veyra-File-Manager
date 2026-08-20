@@ -49,7 +49,12 @@ appstream-util validate-relax --nonet %{buildroot}%{_datadir}/metainfo/io.github
 %{_datadir}/applications/io.github.erayq1.Veyra.desktop
 %{_datadir}/metainfo/io.github.erayq1.Veyra.metainfo.xml
 %{_datadir}/icons/hicolor/scalable/apps/io.github.erayq1.Veyra.svg
+%{_datadir}/icons/hicolor/symbolic/apps/io.github.erayq1.Veyra-symbolic.svg
 
 %changelog
+* Thu Aug 20 2026 Veyra Contributors <okuslug33@gmail.com> - 0.1.0-1
+- Faz 59: new geometric Rust crab app icon plus a monochrome symbolic
+  variant, packaged alongside the existing hicolor SVG.
+
 * Wed Aug 19 2026 Veyra Contributors <okuslug33@gmail.com> - 0.1.0-1
 - Initial native RPM packaging (Faz 46).

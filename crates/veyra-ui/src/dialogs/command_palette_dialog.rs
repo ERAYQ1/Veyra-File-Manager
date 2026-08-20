@@ -89,7 +89,11 @@ pub(crate) fn show(window: &adw::ApplicationWindow) {
                 || items
                     .get(index as usize - 1)
                     .is_none_or(|previous| previous.category != item.category);
-            row.set_header(is_new_group.then(|| category_label(item.category)).as_ref());
+            row.set_header(
+                is_new_group
+                    .then(|| category_label(item.display_category()))
+                    .as_ref(),
+            );
         });
     }
 
@@ -246,7 +250,9 @@ fn category_label(category: &str) -> gtk4::Label {
 /// baked into `CommandItem`, so a customized or reset shortcut is reflected
 /// here immediately.
 fn build_row(item: &CommandItem, app: Option<&gtk4::Application>) -> adw::ActionRow {
-    let row = adw::ActionRow::builder().title(item.title).build();
+    let row = adw::ActionRow::builder()
+        .title(item.display_title())
+        .build();
     row.set_use_markup(false);
     row.set_activatable(true);
     row.set_widget_name(item.id);

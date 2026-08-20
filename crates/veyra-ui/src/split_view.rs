@@ -72,6 +72,13 @@ pub(crate) struct Chrome {
     /// every tab's views (icon size, click policy, per-tab defaults) — same
     /// sharing pattern as `privacy_mode` above.
     pub settings: SharedSettings,
+    /// Faz 59: the single window-level `AdwToastOverlay`, shared by both
+    /// panels (constructed once in `window::build_window`, before either
+    /// panel exists, and threaded in here the same way `settings` already
+    /// is) — lets any call site that already holds a `Chrome` (bulk-op
+    /// completion, undo/redo, clipboard copy) surface a toast without a new
+    /// parameter threaded through every intermediate function.
+    pub toast_overlay: adw::ToastOverlay,
 }
 
 /// One independent panel: its own navigation chrome, its own `AdwTabView`
@@ -130,6 +137,7 @@ pub(crate) fn build_panel(
     id: PanelId,
     privacy_mode: Rc<RefCell<bool>>,
     settings: SharedSettings,
+    toast_overlay: adw::ToastOverlay,
 ) -> Panel {
     let back_button = nav_button("go-previous-symbolic", t("nav.back"), t("nav.back.tooltip"));
     let forward_button = nav_button(
@@ -265,6 +273,7 @@ pub(crate) fn build_panel(
         privacy_mode,
         trash_banner,
         settings,
+        toast_overlay,
     };
 
     Panel {
@@ -311,7 +320,31 @@ pub(crate) fn install_panel_css(display: &gtk4::gdk::Display) {
          .veyra-git-badge.veyra-git-ignored { color: alpha(currentColor, 0.45); }\n\
          .veyra-git-badge.veyra-git-conflicted { color: #e01b24; }\n\
          .veyra-git-badge.veyra-git-deleted { color: #c64600; }\n\
-         *:focus-visible { outline: 2px solid @accent_color; outline-offset: 2px; }",
+         *:focus-visible { outline: 2px solid @accent_color; outline-offset: 2px; }\n\
+         /* Faz 59: modern pill breadcrumbs — soft hover wash, accent-tinted\n\
+            capsule fill on the active (final) segment. */\n\
+         .veyra-crumb { border-radius: 999px; padding-left: 10px; padding-right: 10px; \
+           transition: background-color 150ms ease; }\n\
+         .veyra-crumb:hover { background-color: alpha(@accent_bg_color, 0.14); }\n\
+         .veyra-crumb-current { border-radius: 999px; padding: 2px 10px; \
+           background-color: alpha(@accent_bg_color, 0.16); color: @accent_color; }\n\
+         /* Faz 59: view-mode switcher (Icon/Compact/Details) — rounded\n\
+            capsule group with an accent-tinted checked state. */\n\
+         .veyra-view-switcher togglebutton { border-radius: 8px; transition: background-color 150ms ease; }\n\
+         .veyra-view-switcher togglebutton:checked { \
+           background-color: alpha(@accent_bg_color, 0.22); color: @accent_color; }\n\
+         /* Faz 59: sidebar active-location indicator — a soft capsule fill\n\
+            plus a 3px accent bar flush against the row's leading edge. */\n\
+         .veyra-sidebar-active { \
+           background-color: alpha(@accent_bg_color, 0.14); \
+           border-radius: 8px; \
+           box-shadow: inset 3px 0 0 0 @accent_color; }\n\
+         /* Faz 59: elevated depth for empty-state and storage-panel cards,\n\
+            matching modern Libadwaita's soft-shadow card language. */\n\
+         .veyra-elevated-card { \
+           border-radius: 12px; \
+           border: 1px solid alpha(currentColor, 0.08); \
+           box-shadow: 0 1px 3px alpha(black, 0.12); }",
     );
     gtk4::style_context_add_provider_for_display(
         display,

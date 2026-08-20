@@ -4,7 +4,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![GTK4](https://img.shields.io/badge/GTK-4-4A86CF.svg)](https://www.gtk.org)
 [![Libadwaita](https://img.shields.io/badge/Libadwaita-1-purple.svg)](https://gnome.pages.gitlab.gnome.org/libadwaita/)
-[![Tests](https://img.shields.io/badge/tests-592%20passing-brightgreen.svg)](docs/testing.md)
+[![Tests](https://img.shields.io/badge/tests-616%20passing-brightgreen.svg)](docs/testing.md)
 
 Veyra, Linux için **Dolphin** seviyesinde zengin özellikler sunan, **Rust**,
 **GTK4** ve **Libadwaita** ile geliştirilmiş; modern, son derece akıcı,
