@@ -1,5 +1,41 @@
 # Changelog
 
+## Faz 57 — Release System & Automated Release Notes
+
+Semantic Versioning'e (`MAJOR.MINOR.PATCH`) göre tüm paketleme dosyalarını
+atomik olarak güncelleyen bir sürüm artırma aracı ve Conventional
+Commits'ten kategorize edilmiş GitHub Release notu üreten bir betik
+eklendi. `release.yml` artık her `v*` etiketinde bu notları otomatik
+üretip Release gövdesine yazıyor.
+
+### Eklenenler
+- **`scripts/generate_release_notes.py` (yeni):** İki git etiketi arasındaki
+  (veya `--commits-file` ile verilen) commit'leri Conventional Commits
+  tipine göre kategorize eder: 🚀 `feat`, ⚡ `perf`, 🛡️ `sec`/`security`/
+  `privacy`, 📦 `pkg`/`packaging`, 🧪 `test`, 🐛 `fix`, 🔧 diğer. SHA-256
+  checksum tablosu ve hızlı kurulum komutlarıyla birlikte GitHub Release
+  için hazır Markdown üretir.
+- **`scripts/bump_version.sh` (yeni):** SemVer (`MAJOR.MINOR.PATCH`)
+  doğrulaması yapar; `Cargo.toml`, `metainfo.xml`, `PKGBUILD`, Fedora/
+  openSUSE `.spec` ve Debian `changelog` dosyalarını atomik olarak
+  günceller. `--dry-run` ile önizleme, `--tag` ile onaylı
+  `git tag -a vX.Y.Z` etiketleme destekler.
+- **`.github/workflows/release.yml` (güncellendi):** Tag push'unda önceki
+  etiketten bu yana olan commit'leri `generate_release_notes.py` ile
+  kategorize edip Release gövdesine (`body_path`) aktarır; checksum'ı
+  otomatik notlara ekler.
+- **`crates/veyra-app/tests/release_system.rs` (yeni, 7 test):** SemVer
+  ayrıştırma doğrulaması, `bump_version.sh`'ın geçersiz sürümü reddettiği
+  ve `--dry-run`'ın dosyaları değiştirmediği, `generate_release_notes.py`
+  kategorizasyonu ve tüm paketleme dosyalarındaki sürüm numaralarının
+  (`metainfo.xml` dahil) workspace ile senkronize olduğu testleri.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: temiz.
+- `cargo test --workspace`: 612 test, 0 başarısız (605 önceki + yeni 7
+  `release_system` testi).
+
 ## Faz 56 — CI/CD Pipeline & Multi-Distro GitHub Actions
 
 Her `push`/`pull_request`'te otomatik format/lint denetimi, Ubuntu/Fedora/
