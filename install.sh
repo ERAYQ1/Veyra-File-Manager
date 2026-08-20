@@ -122,4 +122,8 @@ else
     sudo make PREFIX="$PREFIX" install
 fi
 
+echo "==> Updating icon cache and desktop database"
+gtk-update-icon-cache -f -t "$PREFIX/share/icons/hicolor" 2>/dev/null || true
+update-desktop-database "$PREFIX/share/applications" 2>/dev/null || true
+
 echo "==> Done. Launch with: veyra"
