@@ -354,6 +354,12 @@ pub(crate) struct VeyraSettings {
     pub sanitize_log_paths: bool,
     #[serde(default = "default_true")]
     pub store_recent_files: bool,
+    /// Faz 53: whether a panic writes a local, redacted crash report to
+    /// `$XDG_STATE_HOME/veyra/crashes/`. Never controls network
+    /// transmission — Veyra has none (Kural #24) — only whether the report
+    /// is captured at all.
+    #[serde(default = "default_true")]
+    pub save_crash_reports: bool,
 
     // --- Advanced ---
     /// Faz 39: reveals the right-click "Developer" submenu (path/URI
@@ -407,6 +413,7 @@ impl Default for VeyraSettings {
             thumbnail_cache_capacity: default_thumbnail_cache_capacity(),
             sanitize_log_paths: false,
             store_recent_files: true,
+            save_crash_reports: true,
             developer_mode: false,
         }
     }

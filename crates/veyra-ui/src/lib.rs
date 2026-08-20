@@ -66,6 +66,27 @@ use veyra_filesystem::VeyraPath;
 /// as default" by looking up `"{APP_ID}.desktop"`.
 pub const APP_ID: &str = "io.github.erayq1.Veyra";
 
+/// The linked GTK4 and Libadwaita library versions, as `"major.minor.micro"`
+/// strings. Faz 53's crash reporter (`veyra-app`'s `panic_hook`) calls this
+/// to record what Veyra crashed against without pulling `gtk4`/`libadwaita`
+/// in as its own direct dependency — these are plain version accessors, safe
+/// to call at any time, including before `run()`'s `Application` exists.
+pub fn runtime_library_versions() -> (String, String) {
+    let gtk = format!(
+        "{}.{}.{}",
+        gtk4::major_version(),
+        gtk4::minor_version(),
+        gtk4::micro_version()
+    );
+    let adwaita = format!(
+        "{}.{}.{}",
+        libadwaita::major_version(),
+        libadwaita::minor_version(),
+        libadwaita::micro_version()
+    );
+    (gtk, adwaita)
+}
+
 /// Builds and runs the Veyra GTK application. Every open/activate/CLI
 /// argument for the process's entire lifetime (including re-invocations of
 /// `veyra ...` from a second terminal, which GIO transparently forwards to
@@ -75,11 +96,14 @@ pub const APP_ID: &str = "io.github.erayq1.Veyra";
 /// window, forces a new window, or opens Preferences.
 ///
 /// `cache_dir` is where the Faz 9 search index database lives
-/// (`<cache_dir>/search_index.db`).
+/// (`<cache_dir>/search_index.db`). `state_dir` is where Faz 53's crash
+/// reports live (`<state_dir>/crashes/`) — the very first window built in
+/// this process checks it once for a report left by a previous session's
+/// panic and, if one exists, shows the crash dialog over that window.
 ///
 /// Blocks the calling thread until the GTK main loop exits. Must be called on
 /// the same thread the process started on (GTK main thread requirement).
-pub fn run(app_id: &str, cache_dir: &Path) -> glib::ExitCode {
+pub fn run(app_id: &str, cache_dir: &Path, state_dir: &Path) -> glib::ExitCode {
     // Faz 45: diagnostic only — see `system_integration::is_flatpak_sandbox`'s
     // doc comment for why nothing below branches on this.
     tracing::info!(
@@ -94,6 +118,7 @@ pub fn run(app_id: &str, cache_dir: &Path) -> glib::ExitCode {
 
     let default_icon_name = app_id.to_string();
     let cache_dir = cache_dir.to_path_buf();
+    let state_dir = state_dir.to_path_buf();
     // Faz 44: every window built in this process shares one `settings`
     // (loaded once, on the first window) rather than each window re-reading
     // `settings.json` independently — a second window opened via
@@ -112,8 +137,9 @@ pub fn run(app_id: &str, cache_dir: &Path) -> glib::ExitCode {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
         let parsed = system_integration::parse_args(&args);
+        let is_first_window = windows.borrow().is_empty();
 
-        if parsed.new_window || windows.borrow().is_empty() {
+        if parsed.new_window || is_first_window {
             let start_dir = parsed
                 .paths
                 .first()
@@ -157,10 +183,33 @@ pub fn run(app_id: &str, cache_dir: &Path) -> glib::ExitCode {
         }
 
         target.present();
+        if is_first_window {
+            check_crash_report(&target, &state_dir);
+        }
         0
     });
 
     app.run()
+}
+
+/// Faz 53: checks `state_dir/crashes/` once, on the very first window this
+/// process ever builds, for a report a previous session's panic left
+/// behind — and if one exists, shows the crash dialog over `window`.
+/// Silently does nothing if the directory doesn't exist (no prior crash)
+/// or the newest report can't be read back (already deleted, permissions
+/// changed underneath us, etc.) — never blocks startup on this.
+fn check_crash_report(window: &libadwaita::ApplicationWindow, state_dir: &Path) {
+    let crashes_dir = state_dir.join("crashes");
+    match veyra_core::crash_report::latest_report(&crashes_dir) {
+        Ok(Some(path)) => match std::fs::read_to_string(&path) {
+            Ok(text) => dialogs::crash_dialog::show(window, text, path),
+            Err(err) => {
+                tracing::warn!(error = %err, path = %path.display(), "failed to read crash report")
+            }
+        },
+        Ok(None) => {}
+        Err(err) => tracing::warn!(error = %err, "failed to check for a crash report"),
+    }
 }
 
 /// Builds one new top-level window: on its very first call, loads and
@@ -189,6 +238,7 @@ fn build_window(
             // `VeyraSettings::default()`.
             let loaded = config::VeyraSettings::load();
             veyra_core::security::set_sanitize_log_paths(loaded.sanitize_log_paths);
+            veyra_core::crash_report::set_crash_reports_enabled(loaded.save_crash_reports);
             i18n::set_locale(loaded.language.resolve());
             libadwaita::StyleManager::default().set_color_scheme(loaded.color_scheme.to_adw());
             config::apply_accent_color(loaded.accent_color);

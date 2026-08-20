@@ -712,6 +712,42 @@ fn privacy_page(settings: &SharedSettings) -> adw::PreferencesPage {
     logging_group.add(&sanitize_row);
     page.add(&logging_group);
 
+    let crash_group = group(t("prefs.privacy.group.crash_reports"));
+    let save_crash_reports_row = switch_row(
+        t("prefs.privacy.save_crash_reports.title"),
+        t("prefs.privacy.save_crash_reports.subtitle"),
+        settings.borrow().save_crash_reports,
+    );
+    {
+        let settings = settings.clone();
+        save_crash_reports_row.connect_active_notify(move |row| {
+            let enabled = row.is_active();
+            settings.borrow_mut().save_crash_reports = enabled;
+            persist(&settings);
+            veyra_core::crash_report::set_crash_reports_enabled(enabled);
+        });
+    }
+    crash_group.add(&save_crash_reports_row);
+
+    let (clear_crash_reports_row, clear_crash_reports_button) = action_row_button(
+        t("prefs.privacy.clear_crash_reports.title"),
+        t("prefs.privacy.clear_crash_reports.subtitle"),
+        t("prefs.privacy.clear.button"),
+    );
+    clear_crash_reports_button.connect_clicked(|_| {
+        let Some(state_dir) = veyra_core::XdgDirs::resolve("veyra")
+            .ok()
+            .map(|dirs| dirs.crashes_dir())
+        else {
+            return;
+        };
+        if let Err(err) = veyra_core::crash_report::clear_all(&state_dir) {
+            tracing::warn!(error = %err, "failed to clear crash reports");
+        }
+    });
+    crash_group.add(&clear_crash_reports_row);
+    page.add(&crash_group);
+
     let telemetry_group = group(t("prefs.privacy.group.telemetry"));
     let telemetry_row = adw::ActionRow::builder()
         .title(t("prefs.privacy.telemetry.title"))
@@ -798,6 +834,7 @@ fn advanced_page(
                 thumbnails.resize_l1(defaults.thumbnail_cache_capacity);
                 preview_widget.set_visible(defaults.enable_preview_panel);
                 veyra_core::security::set_sanitize_log_paths(defaults.sanitize_log_paths);
+                veyra_core::crash_report::set_crash_reports_enabled(defaults.save_crash_reports);
                 refresh_all_tabs();
                 // Simplest correct way to reflect every reset value across
                 // every page's widgets is to close and let the next

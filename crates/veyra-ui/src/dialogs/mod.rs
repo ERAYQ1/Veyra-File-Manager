@@ -4,6 +4,7 @@ pub(crate) mod command_palette_dialog;
 pub(crate) mod compress_dialog;
 pub(crate) mod conflict_dialog;
 pub(crate) mod connect_server_dialog;
+pub(crate) mod crash_dialog;
 pub(crate) mod delete_confirm;
 pub(crate) mod dev_metadata_dialog;
 pub(crate) mod disk_analyzer_dialog;

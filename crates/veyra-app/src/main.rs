@@ -40,7 +40,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    panic_hook::install();
+    panic_hook::install(xdg_dirs.state_dir.clone());
 
     tracing::info!(
         app_id = APP_ID,
@@ -55,7 +55,7 @@ fn main() -> ExitCode {
     // `command-line` handler, which also transparently receives argv from
     // any later `veyra ...` invocation GIO forwards to this already-running
     // primary instance — not just this process's own argv.
-    let exit_code = veyra_ui::run(APP_ID, &xdg_dirs.cache_dir);
+    let exit_code = veyra_ui::run(APP_ID, &xdg_dirs.cache_dir, &xdg_dirs.state_dir);
 
     tracing::info!(code = exit_code.value(), "Veyra shut down");
 

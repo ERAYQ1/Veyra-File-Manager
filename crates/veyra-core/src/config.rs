@@ -62,6 +62,11 @@ impl XdgDirs {
     pub fn log_file(&self) -> PathBuf {
         self.state_dir.join("veyra.log")
     }
+
+    /// Directory Faz 53's crash reports are written to and read back from.
+    pub fn crashes_dir(&self) -> PathBuf {
+        self.state_dir.join("crashes")
+    }
 }
 
 /// Resolves a single XDG directory: `$ENV_VALUE/app_name` if the env var is set and
@@ -114,5 +119,16 @@ mod tests {
             data_dir: PathBuf::from("/x/data"),
         };
         assert_eq!(dirs.log_file(), PathBuf::from("/x/state/veyra.log"));
+    }
+
+    #[test]
+    fn crashes_dir_lives_under_state_dir() {
+        let dirs = XdgDirs {
+            config_dir: PathBuf::from("/x/config"),
+            cache_dir: PathBuf::from("/x/cache"),
+            state_dir: PathBuf::from("/x/state"),
+            data_dir: PathBuf::from("/x/data"),
+        };
+        assert_eq!(dirs.crashes_dir(), PathBuf::from("/x/state/crashes"));
     }
 }

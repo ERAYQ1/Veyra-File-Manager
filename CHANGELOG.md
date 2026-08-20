@@ -1,5 +1,23 @@
 # Changelog
 
+## Faz 53 — Privacy-Friendly Crash Reporting & Panic Diagnostics
+
+Veyra artık panik yaşadığında sessizce çöküp bir sonraki oturuma hiçbir iz bırakmıyor: yerel, maskelenmiş bir çökme raporu `$XDG_STATE_HOME/veyra/crashes/`'e yazılıyor ve bir sonraki açılışta kullanıcıya ne olduğunu gösteren bir diyalog sunuluyor — hiçbir veri hiçbir zaman internete gönderilmiyor (Kural #24).
+
+### Eklenenler
+- **`crates/veyra-core/src/crash_report.rs` (yeni):** `CrashReport` modeli (sürüm, OS/çekirdek, GTK4/Libadwaita sürümü, panik mesajı, konum, temizlenmiş backtrace, filtrelenmiş ortam değişkenleri, zaman damgası) ve saf maskeleme fonksiyonları: `redact_home_path` (`/home/kullanici/...` → `~/[REDACTED]/...`, yolun geri kalanını korur) ve `filter_env_vars`/`is_sensitive_env_key` (`TOKEN`/`KEY`/`SECRET`/`AUTH`/`PASS` içeren her anahtarı büyük/küçük harf duyarsız ayıklar). `CrashReport::capture()` her iki maskelemeyi de otomatik uyguladığından çağıranın ayrıca hatırlaması gerekmiyor. `write()` raporu `security::write_atomic_private` ile (0600 izinli) yazıyor ve ardından `rotate()` diskte en fazla `MAX_RETAINED_REPORTS` (5) rapor kalacak şekilde eskileri siliyor; `latest_report`/`clear_all` sırasıyla başlangıç algılaması ve Ayarlar'daki "Temizle" butonunu besliyor. `set_crash_reports_enabled`/`crash_reports_enabled`, `security::SANITIZE_LOG_PATHS` ile aynı `AtomicBool` desenini izleyerek panik kancasının `Rc<RefCell<Settings>>`'a ihtiyaç duymadan ayarı okumasını sağlıyor. 24 birim testi maskeleme, filtreleme, serileştirme ve rotasyonu doğruluyor.
+- **`crates/veyra-app/src/panic_hook.rs` (genişletildi):** `install()` artık `state_dir` alıyor; panik anında `std::backtrace::Backtrace::force_capture()` ile backtrace, `/etc/os-release`'den `PRETTY_NAME`, `uname(2)`'den çekirdek sürümü ve `veyra_ui::runtime_library_versions()`'tan GTK/Libadwaita sürümünü toplayıp `CrashReport::capture` + `write` üzerinden `crashes/` dizinine yazıyor — `save_crash_reports` ayarı kapalıysa hiçbir şey yazılmıyor.
+- **`crates/veyra-ui/src/dialogs/crash_dialog.rs` (yeni):** Önceki oturumdan kalan bir rapor tespit edildiğinde (`lib.rs::check_crash_report`, her süreçte yalnızca ilk pencerede bir kez çalışır) gösterilen `AdwAlertDialog`: genişletilebilir "Raporu Göster" bölümü tam rapor metnini gösteriyor, `[Raporu Kopyala ve GitHub Sorunları Aç]` panoya kopyalayıp `gtk4::UriLauncher` ile yeni-sorun sayfasını açıyor, `[Dosyaya Kaydet]` bir `GtkFileDialog` ile `.txt` kaydediyor, `[Kapat ve Sil]` (Escape de aynı davranıyor) raporu diskten siliyor — diğer iki eylem raporu silmiyor, böylece yanlışlıkla kapatma veri kaybına yol açmıyor.
+- **`crates/veyra-ui/src/lib.rs`:** `run()` artık `state_dir` parametresi alıyor; `runtime_library_versions()` GTK4/Libadwaita sürümlerini `gtk4`/`libadwaita`'yı doğrudan bağımlılık olarak eklemeden `veyra-app`'e sunuyor.
+- **Ayarlar entegrasyonu (`config.rs`, `dialogs/preferences_dialog.rs`):** Yeni `save_crash_reports: bool` alanı (varsayılan `true`); Privacy sayfasına "Çökme Raporları" grubu — "Yerel Çökme Raporlarını Kaydet" anahtarı ve "Kayıtlı Raporları Temizle" butonu — eklendi; "Sıfır Telemetri" satırının açıklaması artık spesifikasyonun bilgilendirme notunu birebir yansıtıyor: *"Veyra values your privacy and never transmits telemetry or crash dumps."*
+- **i18n (`i18n.rs`, +20 EN/TR anahtar çifti):** `crash.*` (diyalog başlığı/açıklaması/eylemleri) ve `prefs.privacy.{save_crash_reports,clear_crash_reports,group.crash_reports}.*`.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 uyarı.
+- `cargo test --workspace`: tamamı geçti (`veyra-core`: 28, `veyra-app`: 3 dahil).
+- Gerçek bir panikten sonraki uçtan uca akış (diyalog gösterimi, dosyaya kaydetme, GitHub'ı açma) yalnızca kod incelemesiyle doğrulandı — bu bir GUI etkileşimi gerektirdiğinden otomatik testle kapsanmıyor; saf maskeleme/rotasyon/model mantığının tamamı birim testli.
+
 ## Faz 52 — Rich Context-Aware Empty States
 
 Boş klasör/sonuçsuz görünüm mesajı artık her yerde aynı jenerik metin değil — konuma özel (Downloads, Documents, Pictures, Music, Videos, Recent, Network, Trash, Search, genel) simge/başlık/açıklama üçlüsü gösteriyor.

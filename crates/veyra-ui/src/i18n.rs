@@ -777,12 +777,39 @@ const EN: &[(&str, &str)] = &[
         "prefs.privacy.sanitize_logs.subtitle",
         "Log only file names instead of full paths",
     ),
+    ("prefs.privacy.group.crash_reports", "Crash Reports"),
+    (
+        "prefs.privacy.save_crash_reports.title",
+        "Save Crash Reports Locally",
+    ),
+    (
+        "prefs.privacy.save_crash_reports.subtitle",
+        "Redacted, local-only reports — never sent anywhere",
+    ),
+    (
+        "prefs.privacy.clear_crash_reports.title",
+        "Clear Saved Crash Reports",
+    ),
+    (
+        "prefs.privacy.clear_crash_reports.subtitle",
+        "Deletes every crash report kept under the state directory",
+    ),
     ("prefs.privacy.group.telemetry", "Telemetry"),
     ("prefs.privacy.telemetry.title", "Zero Telemetry"),
     (
         "prefs.privacy.telemetry.subtitle",
-        "Veyra never sends usage data or file contents anywhere (Kural #24)",
+        "Veyra values your privacy and never transmits telemetry or crash dumps",
     ),
+    // --- Faz 53: crash dialog (dialogs/crash_dialog.rs) ---
+    ("crash.title", "Veyra Closed Unexpectedly"),
+    (
+        "crash.description",
+        "A crash report has been generated locally. No information has been sent anywhere.",
+    ),
+    ("crash.show_report", "Show Report"),
+    ("crash.action.dismiss", "Dismiss & Delete"),
+    ("crash.action.save", "Save to File"),
+    ("crash.action.copy_and_report", "Copy Report & Open GitHub Issues"),
     // --- Preferences: Advanced ---
     ("prefs.advanced.group.reset", "Reset"),
     (
@@ -1430,12 +1457,33 @@ const TR: &[(&str, &str)] = &[
         "prefs.privacy.sanitize_logs.subtitle",
         "Tam yol yerine yalnızca dosya adını günlükle",
     ),
+    ("prefs.privacy.group.crash_reports", "Çökme Raporları"),
+    ("prefs.privacy.save_crash_reports.title", "Yerel Çökme Raporlarını Kaydet"),
+    (
+        "prefs.privacy.save_crash_reports.subtitle",
+        "Maskelenmiş, yalnızca yerel raporlar — hiçbir zaman gönderilmez",
+    ),
+    ("prefs.privacy.clear_crash_reports.title", "Kayıtlı Raporları Temizle"),
+    (
+        "prefs.privacy.clear_crash_reports.subtitle",
+        "Durum dizininde tutulan tüm çökme raporlarını siler",
+    ),
     ("prefs.privacy.group.telemetry", "Telemetri"),
     ("prefs.privacy.telemetry.title", "Sıfır Telemetri"),
     (
         "prefs.privacy.telemetry.subtitle",
-        "Veyra hiçbir zaman kullanım verisi veya dosya içeriği göndermez (Kural #24)",
+        "Veyra gizliliğinize değer verir ve asla telemetri veya çökme dökümü göndermez",
     ),
+    // --- Faz 53: çökme diyaloğu (dialogs/crash_dialog.rs) ---
+    ("crash.title", "Veyra Beklenmedik Şekilde Kapandı"),
+    (
+        "crash.description",
+        "Yerel bir çökme raporu oluşturuldu. Hiçbir veri internete gönderilmedi.",
+    ),
+    ("crash.show_report", "Raporu Göster"),
+    ("crash.action.dismiss", "Kapat ve Sil"),
+    ("crash.action.save", "Dosyaya Kaydet"),
+    ("crash.action.copy_and_report", "Raporu Kopyala ve GitHub Sorunları Aç"),
     // --- Preferences: Advanced ---
     ("prefs.advanced.group.reset", "Sıfırla"),
     ("prefs.advanced.reset_all.title", "Tüm Ayarları Varsayılana Sıfırla"),
