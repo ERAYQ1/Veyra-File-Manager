@@ -652,12 +652,15 @@ fn device_row(
     button.insert_action_group("device", Some(&actions));
 
     let menu = gio::Menu::new();
-    menu.append(Some("Open in New Tab"), Some("device.open-tab"));
-    menu.append(Some("Mount"), Some("device.mount"));
-    menu.append(Some("Unmount"), Some("device.unmount"));
-    menu.append(Some("Safe Removal / Eject"), Some("device.eject"));
-    menu.append(Some("Analyze Disk…"), Some("device.analyze"));
-    menu.append(Some("Properties"), Some("device.properties"));
+    menu.append(Some(t("sidebar.device.open_tab")), Some("device.open-tab"));
+    menu.append(Some(t("sidebar.device.mount")), Some("device.mount"));
+    menu.append(Some(t("sidebar.device.unmount")), Some("device.unmount"));
+    menu.append(Some(t("sidebar.device.eject")), Some("device.eject"));
+    menu.append(Some(t("sidebar.device.analyze")), Some("device.analyze"));
+    menu.append(
+        Some(t("sidebar.device.properties")),
+        Some("device.properties"),
+    );
 
     let popover = gtk4::PopoverMenu::from_model(Some(&menu));
     popover.set_parent(&button);
@@ -1029,9 +1032,12 @@ fn bookmark_row(
     button.insert_action_group("bookmark", Some(&actions));
 
     let menu = gio::Menu::new();
-    menu.append(Some("Open in New Tab"), Some("bookmark.open-tab"));
-    menu.append(Some("Rename Bookmark…"), Some("bookmark.rename"));
-    menu.append(Some("Remove from Bookmarks"), Some("bookmark.remove"));
+    menu.append(
+        Some(t("sidebar.bookmark.open_tab")),
+        Some("bookmark.open-tab"),
+    );
+    menu.append(Some(t("sidebar.bookmark.rename")), Some("bookmark.rename"));
+    menu.append(Some(t("sidebar.bookmark.remove")), Some("bookmark.remove"));
 
     let popover = gtk4::PopoverMenu::from_model(Some(&menu));
     popover.set_parent(&button);

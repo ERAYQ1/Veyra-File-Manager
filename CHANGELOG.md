@@ -1,5 +1,29 @@
 # Changelog
 
+## Sağ Tık Yerelleştirme ve Çift Panel Simge Düzeltmesi
+
+### Düzeltildi
+- **Kenar çubuğu sağ-tık menüleri çevrilmedi:** Aygıtlar menüsündeki
+  (`sidebar.rs`) "Open in New Tab"/"Mount"/"Unmount"/"Safe Removal /
+  Eject"/"Analyze Disk…"/"Properties" ve Yer İmleri menüsündeki "Open in
+  New Tab"/"Rename Bookmark…"/"Remove from Bookmarks" girdileri sabit
+  İngilizce string'ti; artık `t()` üzerinden `sidebar.device.*` /
+  `sidebar.bookmark.*` anahtarlarıyla çevriliyor (EN/TR ikisine de
+  eklendi, parite testi geçiyor).
+- **Çift Panel butonu kırık simge gösteriyordu:** `headerbar.rs`'deki
+  `sidebar-show-right-symbolic` GNOME'da eksik olduğundan kırık ikon
+  görünüyordu; standart `view-split-left-right-symbolic` ile değiştirildi
+  (aynı ikon adı Command Palette'teki "Toggle Split View" komutunda da
+  güncellendi). Buton artık başlığın solunda tek başına değil, sağdaki
+  görünüm/önizleme düğmeleriyle aynı grupta (`pack_end`). Tooltip
+  `headerbar.split.tooltip` "Çift Panel Görünümü (F3)" olarak netleştirildi.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 uyarı.
+- `cargo test --workspace`: 280 test, 0 başarısız (i18n parite testi
+  `every_tr_key_exists_in_en` dahil).
+
 ## Faz 58 — Nihai Kapsamlı Denetim (Final Comprehensive Audit)
 
 Tüm workspace, 12 kategoride (mimari, güvenlik, performans, bellek,

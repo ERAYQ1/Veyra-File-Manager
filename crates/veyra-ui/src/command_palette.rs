@@ -152,7 +152,7 @@ pub(crate) fn all_commands() -> Vec<CommandItem> {
             id: "toggle-split-view",
             title: "palette.cmd.toggle_split_view",
             category: "palette.cat.navigation",
-            icon_name: "sidebar-show-right-symbolic",
+            icon_name: "view-split-left-right-symbolic",
             action_name: "win.toggle-split-view",
             action_target: None,
         },

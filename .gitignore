@@ -8,14 +8,31 @@
 cargo-timing.html
 *.rs.bk
 
-# --- SQLite & Search Index Temporary Files ---
-*.db
-*.sqlite
-*.sqlite-wal
-*.sqlite-shm
-*.db-journal
+# --- Sensitive Data, Keys & Authentication ---
+*.pem
+*.key
+*.p12
+*.pfx
+*.gpg
+*.asc
+id_rsa*
+id_ed25519*
+id_ecdsa*
+*.token
+*.secret
+credentials.json
+secrets.*
+.env
+.env.*
+!.env.example
 
-# --- IDEs & Editors ---
+# --- AI Assistants & IDE / Editor Artifacts ---
+.claude/
+.gemini/
+.agents/
+.cursor/
+.windsurf/
+.zed/
 .idea/
 .vscode/
 *.swp
@@ -28,24 +45,48 @@ cargo-timing.html
 *.sublime-workspace
 *.sublime-project
 
-# --- Linux Desktop & OS Generated Artifacts ---
+# --- Crash Reports, Logs & Diagnostic Data ---
+logs/
+crashes/
+*.log
+*.dump
+*.crash
+*.backtrace
+core
+core.*
+vgcore.*
+*.profraw
+*.profdata
+
+# --- Database & Search Index Files ---
+*.db
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db-journal
+
+# --- Packaging & Temporary Build Artifacts ---
+*.tar.gz
+*.tar.xz
+*.rpm
+*.deb
+*.pkg.tar.zst
+staging/
+build-dir/
+_build/
+/build/
+/dist/
+.flatpak-builder/
+
+# --- OS & Desktop Metadata Files ---
 .DS_Store
 Thumbs.db
 .directory
 .fuse_hidden*
 .Trash-*
+.thumbnails/
 
-# --- Temporary Files, Logs & Scratch Artifacts ---
-*.log
+# --- Temporary Files & Scratch Artifacts ---
 /scratch/
 /tmp/
 /temp/
-.env
-.env.*
-!.env.example
-
-# --- Flatpak & Build Tooling ---
-.flatpak-builder/
-_build/
-/build/
-/dist/

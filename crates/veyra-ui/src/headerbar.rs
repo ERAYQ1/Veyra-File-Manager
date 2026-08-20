@@ -124,14 +124,17 @@ pub(crate) fn build(
     let sort_filter_button = build_sort_filter_button(panels, focused);
     widget.pack_end(&sort_filter_button);
 
+    // Grouped with the preview/view-mode toggles on the header bar's trailing
+    // edge (rather than packed alone on the leading edge) so all three
+    // view-affecting toggles read as one control cluster.
     let split_toggle_button = gtk4::ToggleButton::new();
-    split_toggle_button.set_icon_name("sidebar-show-right-symbolic");
+    split_toggle_button.set_icon_name("view-split-left-right-symbolic");
     split_toggle_button.set_tooltip_text(Some(t("headerbar.split.tooltip")));
     split_toggle_button.update_property(&[gtk4::accessible::Property::Label(t(
         "headerbar.split.accessible_label",
     ))]);
     split_toggle_button.set_action_name(Some("win.toggle-split-view"));
-    widget.pack_start(&split_toggle_button);
+    widget.pack_end(&split_toggle_button);
 
     let preview_toggle_button = gtk4::ToggleButton::new();
     preview_toggle_button.set_icon_name("view-preview-symbolic");
