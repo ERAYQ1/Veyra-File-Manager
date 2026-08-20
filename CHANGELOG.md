@@ -1,5 +1,23 @@
 # Changelog
 
+## Proje Temizliği ve .gitignore Güçlendirmesi
+
+### Değişti
+- Boş, izlenmeyen `.claude/` dizini kaldırıldı.
+- `.gitignore` yeniden kategorize edildi: hassas bilgiler/anahtarlar
+  (`*.pem`, `*.key`, `id_rsa*`, `*.token`, `secrets.*` vb.), yapay zeka
+  asistanı kalıntıları (`.claude/`, `.gemini/`, `.cursor/`, `.windsurf/`,
+  `.zed/` vb.), çökme raporları/loglar (`crashes/`, `*.dump`, `*.crash`,
+  `core.*`, `vgcore.*`, `*.profraw`), ve paketleme kalıntıları
+  (`*.rpm`, `*.deb`, `*.pkg.tar.zst`, `staging/`, `build-dir/`) için ayrı
+  başlıklar eklendi.
+
+### Doğrulama
+- `git status`: sadece beklenen değişiklikler, temiz.
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 uyarı.
+- `cargo test --workspace`: 280 test, 0 başarısız.
+
 ## Sağ Tık Yerelleştirme ve Çift Panel Simge Düzeltmesi
 
 ### Düzeltildi
