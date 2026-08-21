@@ -1,5 +1,5 @@
 Name:           veyra
-Version:        1.0.0
+Version:        1.1.0
 Release:        0
 Summary:        Modern, high-performance Linux file manager built with Rust, GTK4 and Libadwaita
 License:        GPL-3.0-or-later
