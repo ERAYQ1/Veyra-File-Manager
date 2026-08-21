@@ -533,6 +533,7 @@ fn setup_preferences_actions(
                     Rc::new(move || refresh_all_tabs(&panels))
                 },
                 preview_widget.clone(),
+                panels.left.chrome.tags.clone(),
             );
         });
     }

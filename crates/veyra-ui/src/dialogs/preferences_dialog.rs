@@ -37,6 +37,7 @@ pub(crate) fn show(
     rebuild_search_index: Rc<dyn Fn()>,
     refresh_all_tabs: Rc<dyn Fn()>,
     preview_widget: gtk4::Widget,
+    tags: crate::tags::SharedTags,
 ) {
     let dialog = adw::PreferencesDialog::builder()
         .title(t("prefs.dialog.title"))
@@ -51,6 +52,7 @@ pub(crate) fn show(
     dialog.add(&search_page(&settings, &rebuild_search_index));
     dialog.add(&preview_page(&settings, &preview_widget));
     dialog.add(&performance_page(&settings, &thumbnails, &refresh_all_tabs));
+    dialog.add(&tags_page(&tags, &refresh_all_tabs));
     dialog.add(&shortcuts_page(window));
     dialog.add(&privacy_page(&settings, &thumbnails));
     dialog.add(&advanced_page(
@@ -602,6 +604,128 @@ fn performance_page(
     g.add(&cache_row);
 
     page.add(&g);
+    page
+}
+
+/// Faz 63: the "Tags" Preferences page — one `AdwEntryRow` per standard
+/// color to rename it (empty entry = "use the default localized name"),
+/// plus a "Tag Maintenance" group for resetting names or wiping every tag
+/// assignment. Every write goes straight to `veyra_filesystem::tags`
+/// (there's no separate settings object for this — see `tags.rs`'s module
+/// doc comment for why names/assignments are independent maps in the same
+/// file) and `refresh_all_tabs` is called afterwards so already-open tabs'
+/// row tooltips pick up the new name immediately; the sidebar's Tags
+/// section refreshes on its own via `crate::tags::watch`, and the context
+/// menu is naturally live since it's rebuilt from scratch on every
+/// right-click.
+fn tags_page(
+    tags: &crate::tags::SharedTags,
+    refresh_all_tabs: &Rc<dyn Fn()>,
+) -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::builder()
+        .title(t("prefs.page.tags"))
+        .icon_name("tag-symbolic")
+        .name("tags")
+        .build();
+
+    let names_group = adw::PreferencesGroup::builder()
+        .title(t("prefs.tags.custom_names_group"))
+        .description(t("prefs.tags.custom_names_subtitle"))
+        .build();
+
+    let entry_rows: Rc<Vec<adw::EntryRow>> = Rc::new(
+        veyra_filesystem::TagColor::ALL
+            .iter()
+            .map(|&color| {
+                let entry = adw::EntryRow::builder()
+                    .title(crate::tags::default_label(color))
+                    .show_apply_button(true)
+                    .build();
+                if let Some(custom) = veyra_filesystem::get_custom_tag_name(color) {
+                    entry.set_text(&custom);
+                }
+                let dot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+                dot.add_css_class("veyra-tag-dot");
+                dot.add_css_class(&crate::tags::css_class(color));
+                dot.set_valign(gtk4::Align::Center);
+                entry.add_prefix(&dot);
+                {
+                    let refresh_all_tabs = refresh_all_tabs.clone();
+                    entry.connect_apply(move |row| {
+                        if let Err(err) = veyra_filesystem::set_custom_tag_name(color, &row.text())
+                        {
+                            tracing::warn!(error = %err, "failed to save custom tag name");
+                        }
+                        refresh_all_tabs();
+                    });
+                }
+                names_group.add(&entry);
+                entry
+            })
+            .collect(),
+    );
+    page.add(&names_group);
+
+    let maintenance_group = group(t("prefs.tags.maintenance_group"));
+
+    let (reset_row, reset_button) = action_row_button(
+        t("prefs.tags.reset_names"),
+        t("prefs.tags.reset_names_subtitle"),
+        t("prefs.tags.reset_names_button"),
+    );
+    {
+        let entry_rows = entry_rows.clone();
+        let refresh_all_tabs = refresh_all_tabs.clone();
+        reset_button.connect_clicked(move |_| {
+            if let Err(err) = veyra_filesystem::reset_custom_tag_names() {
+                tracing::warn!(error = %err, "failed to reset custom tag names");
+            }
+            for row in entry_rows.iter() {
+                row.set_text("");
+            }
+            refresh_all_tabs();
+        });
+    }
+    maintenance_group.add(&reset_row);
+
+    let (clear_all_row, clear_all_button) = action_row_button(
+        t("prefs.tags.clear_all"),
+        t("prefs.tags.clear_all_subtitle"),
+        t("prefs.privacy.clear.button"),
+    );
+    clear_all_button.add_css_class("destructive-action");
+    {
+        let tags = tags.clone();
+        let refresh_all_tabs = refresh_all_tabs.clone();
+        clear_all_button.connect_clicked(move |button| {
+            let tags = tags.clone();
+            let refresh_all_tabs = refresh_all_tabs.clone();
+            let confirm = adw::AlertDialog::builder()
+                .heading(t("prefs.tags.clear_all_confirm_heading"))
+                .body(t("prefs.tags.clear_all_confirm_body"))
+                .build();
+            confirm.add_responses(&[
+                ("cancel", t("prefs.tags.clear_all_cancel")),
+                ("clear", t("prefs.privacy.clear.button")),
+            ]);
+            confirm.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
+            confirm.set_default_response(Some("cancel"));
+            confirm.set_close_response("cancel");
+            confirm.choose(button, gtk4::gio::Cancellable::NONE, move |response| {
+                if response != "clear" {
+                    return;
+                }
+                if let Err(err) = veyra_filesystem::clear_all_tags() {
+                    tracing::warn!(error = %err, "failed to clear all tags");
+                }
+                crate::tags::reload(&tags);
+                refresh_all_tabs();
+            });
+        });
+    }
+    maintenance_group.add(&clear_all_row);
+    page.add(&maintenance_group);
+
     page
 }
 

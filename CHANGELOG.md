@@ -1,5 +1,47 @@
 # Changelog
 
+## Faz 63 — Özelleştirilebilir Etiket İsimleri ve Profesyonel Tercihler Paneli
+
+Faz 62'nin 6 sabit renk etiketine kullanıcı tanımlı isim verme desteği, artı
+Tercihler penceresine sayfa simgeleri ile görsel cila.
+
+### Eklendi
+- **`veyra-filesystem::tags`:** `TagsFile`'a `custom_names: HashMap<slug,
+  String>` alanı — `tags` (dosya atamaları) haritasından bağımsız, aynı
+  atomik `write_atomic_private` yazma yolunu paylaşan ikinci bir harita.
+  `set_custom_tag_name`/`get_custom_tag_name`/`reset_custom_tag_names`
+  fonksiyonları; boş/boşluk-only isim özel adı temizleyip varsayılan
+  yerelleştirilmiş renk adına geri düşürüyor (`bookmarks::rename_at` ile
+  aynı sözleşme). `clear_all_tags` özel isimlere dokunmuyor, `reset_
+  custom_tag_names` de etiket atamalarına — 10 yeni birim testi.
+- **`veyra-ui::tags::display_name`:** her canlı yüzeyin (kenar çubuğu satırı,
+  sağ tık renk menüsü, görünüm rozeti tooltip'i) çağırması gereken tek
+  fonksiyon — kullanıcının özel adı varsa onu, yoksa `default_label`'ın
+  yerelleştirilmiş varsayılanını döndürür.
+- **Kenar Çubuğu (`sidebar.rs`):** Etiketler bölümü artık `crate::tags::
+  watch` ile `tags.json`'u izleyen, değişince kendini yeniden çizen bir
+  kutu (`refresh_tags_box`) — Tercihler'den yapılan bir yeniden adlandırma
+  anında yansıyor, uygulamayı yeniden başlatmaya gerek yok.
+- **Tercihler penceresi — "Etiketler" sayfası
+  (`dialogs/preferences_dialog.rs`):** 6 renk için birer `AdwEntryRow`
+  (uygula düğmesiyle, boş bırakılırsa varsayılana döner) + "Etiket Bakımı"
+  grubu: "Varsayılan İsimlere Sıfırla" ve onay diyaloglu "Tüm Etiketleri
+  Temizle". Her ikisi de `refresh_all_tabs` çağırarak açık sekmelerin rozet
+  tooltip'lerini anında günceller.
+- **Tercihler cilası:** her sayfaya (appearance, navigation, files, search,
+  preview, performance, tags, shortcuts, privacy, advanced) uygun sembolik
+  `icon_name` atandı.
+- **i18n:** `prefs.page.tags`, `prefs.tags.{custom_names_group,
+  custom_names_subtitle, maintenance_group, reset_names, reset_names_
+  subtitle, reset_names_button, clear_all, clear_all_subtitle, clear_all_
+  confirm_heading, clear_all_confirm_body, clear_all_cancel}` — hem TR hem
+  EN, parite testiyle doğrulandı.
+
+### Doğrulama
+- `cargo fmt --all -- --check` — temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings` — 0 uyarı.
+- `cargo test --workspace` — 285 test geçti, 0 başarısız.
+
 ## Faz 62 — Akıllı Renk Etiketleri (Color Tags & Pill Badges)
 
 macOS Finder tarzı 6 renkli dosya/klasör etiketleri: sağ tık menüsünden

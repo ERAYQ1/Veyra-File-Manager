@@ -485,7 +485,7 @@ pub(crate) fn apply_tag_pill(pill: &gtk4::Box, color: Option<veyra_filesystem::T
     match color {
         Some(color) => {
             pill.add_css_class(&crate::tags::css_class(color));
-            pill.set_tooltip_text(Some(crate::tags::label(color)));
+            pill.set_tooltip_text(Some(&crate::tags::display_name(color)));
             pill.set_visible(true);
         }
         None => {

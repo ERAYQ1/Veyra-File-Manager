@@ -51,5 +51,6 @@ pub use queue::{
     run_operation, OperationControl, OperationKind, OperationOutcome, OperationRequest,
 };
 pub use tags::{
-    get_paths_by_tag, get_tag, list_all_tagged, remove_tag, set_tag, tags_path, TagColor,
+    clear_all_tags, get_custom_tag_name, get_paths_by_tag, get_tag, list_all_tagged, remove_tag,
+    reset_custom_tag_names, set_custom_tag_name, set_tag, tags_path, TagColor,
 };

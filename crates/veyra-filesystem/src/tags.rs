@@ -1,13 +1,20 @@
-//! Faz 62: Smart Color Tags — assigning one of six standard colors to any
-//! file or folder, macOS-Finder-style. Persisted as `~/.config/veyra/
-//! tags.json`, a flat URI → color map, written atomically (`.tmp` + rename,
-//! `veyra_core::security::write_atomic_private`) so a crash mid-save never
-//! corrupts the file (Rule #16/#17) — same pattern as `bookmarks.rs`/
-//! `config.rs`/`shortcuts.rs` in `veyra-ui`.
+//! Faz 62/63: Smart Color Tags — assigning one of six standard colors to any
+//! file or folder, macOS-Finder-style, plus (Faz 63) letting the user
+//! rename each color to whatever it means to them ("Red" -> "Urgent").
+//! Persisted as `~/.config/veyra/tags.json`, written atomically (`.tmp` +
+//! rename, `veyra_core::security::write_atomic_private`) so a crash
+//! mid-save never corrupts the file (Rule #16/#17) — same pattern as
+//! `bookmarks.rs`/`config.rs`/`shortcuts.rs` in `veyra-ui`.
 //!
-//! Keyed by URI (`VeyraPath::to_gio_file().uri()`) rather than a local path
-//! so a tag survives round-tripping through any GVfs-backed location the
-//! same way bookmarks do, not just plain local files.
+//! `TagsFile` holds two independent maps in the one file: `tags` (path
+//! assignments, keyed by URI so a tag survives round-tripping through any
+//! GVfs-backed location, not just plain local files) and `custom_names`
+//! (per-color display-name overrides, keyed by `TagColor::slug()` rather
+//! than relying on serde's enum-as-map-key support, so the on-disk shape
+//! stays a plain, predictable `{slug: name}` object). They're independent
+//! on purpose: clearing every tag assignment (`clear_all_tags`) must not
+//! also discard a user's custom color names, and resetting names
+//! (`reset_custom_tag_names`) must not touch which files are tagged.
 //!
 //! Every mutating function takes an explicit file path (`*_at`) with a
 //! public wrapper defaulting to the real XDG-style config location — lets
@@ -82,49 +89,60 @@ pub fn tags_path() -> PathBuf {
     glib::user_config_dir().join("veyra").join("tags.json")
 }
 
-/// Loads every tag from `path` as a URI → color map. A missing or corrupt
-/// file is treated as an empty store, never an error (Rule #4/#48 — a bad
-/// or not-yet-created tags file must never crash the app).
-fn load_from(path: &Path) -> HashMap<String, TagColor> {
+/// The on-disk shape of `tags.json` — see the module doc comment for why
+/// `tags` and `custom_names` are independent maps.
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+struct TagsFile {
+    #[serde(default)]
+    tags: HashMap<String, TagColor>,
+    #[serde(default)]
+    custom_names: HashMap<String, String>,
+}
+
+/// Loads `path`'s tags file. A missing or corrupt file is treated as an
+/// empty store, never an error (Rule #4/#48 — a bad or not-yet-created
+/// tags file must never crash the app).
+fn load_from(path: &Path) -> TagsFile {
     let Ok(content) = std::fs::read_to_string(path) else {
-        return HashMap::new();
+        return TagsFile::default();
     };
     serde_json::from_str(&content).unwrap_or_default()
 }
 
-/// Writes `tags` to `path` atomically.
-fn save_to(path: &Path, tags: &HashMap<String, TagColor>) -> io::Result<()> {
+/// Writes `file` to `path` atomically.
+fn save_to(path: &Path, file: &TagsFile) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let json = serde_json::to_string_pretty(tags).unwrap_or_else(|_| "{}".to_string());
+    let json = serde_json::to_string_pretty(file).unwrap_or_else(|_| "{}".to_string());
     let tmp_path = path.with_extension("tmp");
     veyra_core::security::write_atomic_private(&tmp_path, path, json.as_bytes())
 }
 
 fn set_tag_at(path: &Path, target: &VeyraPath, color: TagColor) -> io::Result<()> {
     let uri = target.to_gio_file().uri().to_string();
-    let mut tags = load_from(path);
-    tags.insert(uri, color);
-    save_to(path, &tags)
+    let mut file = load_from(path);
+    file.tags.insert(uri, color);
+    save_to(path, &file)
 }
 
 fn remove_tag_at(path: &Path, target: &VeyraPath) -> io::Result<()> {
     let uri = target.to_gio_file().uri().to_string();
-    let mut tags = load_from(path);
-    if tags.remove(&uri).is_none() {
+    let mut file = load_from(path);
+    if file.tags.remove(&uri).is_none() {
         return Ok(());
     }
-    save_to(path, &tags)
+    save_to(path, &file)
 }
 
 fn get_tag_at(path: &Path, target: &VeyraPath) -> Option<TagColor> {
     let uri = target.to_gio_file().uri().to_string();
-    load_from(path).get(&uri).copied()
+    load_from(path).tags.get(&uri).copied()
 }
 
 fn get_paths_by_tag_at(path: &Path, color: TagColor) -> Vec<VeyraPath> {
     load_from(path)
+        .tags
         .into_iter()
         .filter(|(_, c)| *c == color)
         .map(|(uri, _)| VeyraPath::from_uri(uri))
@@ -133,9 +151,50 @@ fn get_paths_by_tag_at(path: &Path, color: TagColor) -> Vec<VeyraPath> {
 
 fn list_all_tagged_at(path: &Path) -> Vec<(VeyraPath, TagColor)> {
     load_from(path)
+        .tags
         .into_iter()
         .map(|(uri, color)| (VeyraPath::from_uri(uri), color))
         .collect()
+}
+
+fn clear_all_tags_at(path: &Path) -> io::Result<()> {
+    let mut file = load_from(path);
+    if file.tags.is_empty() {
+        return Ok(());
+    }
+    file.tags.clear();
+    save_to(path, &file)
+}
+
+/// Sets `color`'s custom display name to `name`. A blank/whitespace-only
+/// `name` clears the override instead of storing an empty string, falling
+/// back to the default localized color name — same "blank clears the
+/// custom value" contract `bookmarks::rename_at` uses for bookmark labels.
+fn set_custom_tag_name_at(path: &Path, color: TagColor, name: &str) -> io::Result<()> {
+    let trimmed = name.trim();
+    let mut file = load_from(path);
+    if trimmed.is_empty() {
+        if file.custom_names.remove(color.slug()).is_none() {
+            return Ok(());
+        }
+    } else {
+        file.custom_names
+            .insert(color.slug().to_string(), trimmed.to_string());
+    }
+    save_to(path, &file)
+}
+
+fn get_custom_tag_name_at(path: &Path, color: TagColor) -> Option<String> {
+    load_from(path).custom_names.get(color.slug()).cloned()
+}
+
+fn reset_custom_tag_names_at(path: &Path) -> io::Result<()> {
+    let mut file = load_from(path);
+    if file.custom_names.is_empty() {
+        return Ok(());
+    }
+    file.custom_names.clear();
+    save_to(path, &file)
 }
 
 /// Assigns `color` to `target` in the real tags file, overwriting any
@@ -163,6 +222,31 @@ pub fn get_paths_by_tag(color: TagColor) -> Vec<VeyraPath> {
 /// Every tagged path in the real tags file, paired with its color.
 pub fn list_all_tagged() -> Vec<(VeyraPath, TagColor)> {
     list_all_tagged_at(&tags_path())
+}
+
+/// Removes every path's tag assignment in the real tags file — the
+/// "Tüm Etiketleri Temizle" (Clear All Tags) Preferences button — leaving
+/// custom color names untouched.
+pub fn clear_all_tags() -> io::Result<()> {
+    clear_all_tags_at(&tags_path())
+}
+
+/// Sets `color`'s custom display name in the real tags file (Faz 63). A
+/// blank/whitespace-only `name` clears the override.
+pub fn set_custom_tag_name(color: TagColor, name: &str) -> io::Result<()> {
+    set_custom_tag_name_at(&tags_path(), color, name)
+}
+
+/// `color`'s custom display name in the real tags file, if the user has set
+/// one.
+pub fn get_custom_tag_name(color: TagColor) -> Option<String> {
+    get_custom_tag_name_at(&tags_path(), color)
+}
+
+/// Clears every color's custom display name in the real tags file, back to
+/// the default localized color names.
+pub fn reset_custom_tag_names() -> io::Result<()> {
+    reset_custom_tag_names_at(&tags_path())
 }
 
 #[cfg(test)]
@@ -284,7 +368,9 @@ mod tests {
     fn load_from_missing_file_is_empty() {
         let path = temp_tags_path("load_from_missing_file_is_empty");
         std::fs::remove_file(&path).ok();
-        assert!(load_from(&path).is_empty());
+        let file = load_from(&path);
+        assert!(file.tags.is_empty());
+        assert!(file.custom_names.is_empty());
     }
 
     #[test]
@@ -292,9 +378,114 @@ mod tests {
         let path = temp_tags_path("load_from_corrupt_json_falls_back_to_empty");
         std::fs::write(&path, b"{ not valid json").unwrap();
 
-        assert!(load_from(&path).is_empty());
+        let file = load_from(&path);
+        assert!(file.tags.is_empty());
+        assert!(file.custom_names.is_empty());
 
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn set_custom_tag_name_then_get_round_trips() {
+        let path = temp_tags_path("set_custom_tag_name_then_get_round_trips");
+        std::fs::remove_file(&path).ok();
+
+        set_custom_tag_name_at(&path, TagColor::Red, "Urgent").unwrap();
+
+        assert_eq!(
+            get_custom_tag_name_at(&path, TagColor::Red),
+            Some("Urgent".to_string())
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn set_custom_tag_name_trims_whitespace() {
+        let path = temp_tags_path("set_custom_tag_name_trims_whitespace");
+        std::fs::remove_file(&path).ok();
+
+        set_custom_tag_name_at(&path, TagColor::Blue, "  Work  ").unwrap();
+
+        assert_eq!(
+            get_custom_tag_name_at(&path, TagColor::Blue),
+            Some("Work".to_string())
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn set_custom_tag_name_blank_clears_the_override() {
+        let path = temp_tags_path("set_custom_tag_name_blank_clears_the_override");
+        std::fs::remove_file(&path).ok();
+
+        set_custom_tag_name_at(&path, TagColor::Green, "Done").unwrap();
+        set_custom_tag_name_at(&path, TagColor::Green, "   ").unwrap();
+
+        assert_eq!(get_custom_tag_name_at(&path, TagColor::Green), None);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn get_custom_tag_name_on_missing_file_is_none() {
+        let path = temp_tags_path("get_custom_tag_name_on_missing_file_is_none");
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(get_custom_tag_name_at(&path, TagColor::Purple), None);
+    }
+
+    #[test]
+    fn reset_custom_tag_names_clears_every_override_but_keeps_tag_assignments() {
+        let path = temp_tags_path(
+            "reset_custom_tag_names_clears_every_override_but_keeps_tag_assignments",
+        );
+        std::fs::remove_file(&path).ok();
+
+        set_custom_tag_name_at(&path, TagColor::Red, "Urgent").unwrap();
+        set_custom_tag_name_at(&path, TagColor::Blue, "Work").unwrap();
+        let tagged_path = VeyraPath::from_local("/home/user/A");
+        set_tag_at(&path, &tagged_path, TagColor::Red).unwrap();
+
+        reset_custom_tag_names_at(&path).unwrap();
+
+        assert_eq!(get_custom_tag_name_at(&path, TagColor::Red), None);
+        assert_eq!(get_custom_tag_name_at(&path, TagColor::Blue), None);
+        assert_eq!(get_tag_at(&path, &tagged_path), Some(TagColor::Red));
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn clear_all_tags_empties_assignments_but_keeps_custom_names() {
+        let path = temp_tags_path("clear_all_tags_empties_assignments_but_keeps_custom_names");
+        std::fs::remove_file(&path).ok();
+
+        set_custom_tag_name_at(&path, TagColor::Red, "Urgent").unwrap();
+        set_tag_at(&path, &VeyraPath::from_local("/home/user/A"), TagColor::Red).unwrap();
+        set_tag_at(
+            &path,
+            &VeyraPath::from_local("/home/user/B"),
+            TagColor::Blue,
+        )
+        .unwrap();
+
+        clear_all_tags_at(&path).unwrap();
+
+        assert!(list_all_tagged_at(&path).is_empty());
+        assert_eq!(
+            get_custom_tag_name_at(&path, TagColor::Red),
+            Some("Urgent".to_string())
+        );
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn clear_all_tags_on_empty_store_is_a_no_op() {
+        let path = temp_tags_path("clear_all_tags_on_empty_store_is_a_no_op");
+        std::fs::remove_file(&path).ok();
+
+        assert!(clear_all_tags_at(&path).is_ok());
+        assert!(list_all_tagged_at(&path).is_empty());
     }
 
     #[test]

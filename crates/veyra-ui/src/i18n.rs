@@ -397,6 +397,33 @@ const EN: &[(&str, &str)] = &[
     ("tags.blue", "Blue"),
     ("tags.purple", "Purple"),
     ("tags.clear", "Remove Tag"),
+    // --- Custom Tag Names (Faz 63) ---
+    ("prefs.tags.custom_names_group", "Custom Tag Names"),
+    (
+        "prefs.tags.custom_names_subtitle",
+        "Rename each color to whatever it means to you",
+    ),
+    ("prefs.tags.maintenance_group", "Tag Maintenance"),
+    ("prefs.tags.reset_names", "Reset to Default Names"),
+    (
+        "prefs.tags.reset_names_subtitle",
+        "Clears every custom tag name",
+    ),
+    ("prefs.tags.reset_names_button", "Reset"),
+    ("prefs.tags.clear_all", "Clear All Tags"),
+    (
+        "prefs.tags.clear_all_subtitle",
+        "Removes every color tag from every file and folder",
+    ),
+    (
+        "prefs.tags.clear_all_confirm_heading",
+        "Clear all tags?",
+    ),
+    (
+        "prefs.tags.clear_all_confirm_body",
+        "Every file and folder's color tag will be removed. This cannot be undone.",
+    ),
+    ("prefs.tags.clear_all_cancel", "Cancel"),
     ("recent.privacy_mode", "Privacy Mode"),
     (
         "recent.privacy_mode_tooltip",
@@ -690,6 +717,7 @@ const EN: &[(&str, &str)] = &[
     ("prefs.page.search", "Search"),
     ("prefs.page.preview", "Preview"),
     ("prefs.page.performance", "Performance"),
+    ("prefs.page.tags", "Tags"),
     ("prefs.page.shortcuts", "Shortcuts"),
     ("prefs.page.privacy", "Privacy"),
     ("prefs.page.advanced", "Advanced"),
@@ -1243,6 +1271,33 @@ const TR: &[(&str, &str)] = &[
     ("tags.blue", "Mavi"),
     ("tags.purple", "Mor"),
     ("tags.clear", "Etiketi Kaldır"),
+    // --- Özel Etiket İsimleri (Faz 63) ---
+    ("prefs.tags.custom_names_group", "Özel Etiket İsimleri"),
+    (
+        "prefs.tags.custom_names_subtitle",
+        "Her rengi size ne ifade ettiğine göre yeniden adlandırın",
+    ),
+    ("prefs.tags.maintenance_group", "Etiket Bakımı"),
+    ("prefs.tags.reset_names", "Varsayılan İsimlere Sıfırla"),
+    (
+        "prefs.tags.reset_names_subtitle",
+        "Tüm özel etiket isimlerini temizler",
+    ),
+    ("prefs.tags.reset_names_button", "Sıfırla"),
+    ("prefs.tags.clear_all", "Tüm Etiketleri Temizle"),
+    (
+        "prefs.tags.clear_all_subtitle",
+        "Her dosya ve klasörden tüm renk etiketlerini kaldırır",
+    ),
+    (
+        "prefs.tags.clear_all_confirm_heading",
+        "Tüm etiketler temizlensin mi?",
+    ),
+    (
+        "prefs.tags.clear_all_confirm_body",
+        "Her dosya ve klasörün renk etiketi kaldırılacak. Bu işlem geri alınamaz.",
+    ),
+    ("prefs.tags.clear_all_cancel", "İptal"),
     ("recent.privacy_mode", "Gizlilik Modu"),
     (
         "recent.privacy_mode_tooltip",
@@ -1545,6 +1600,7 @@ const TR: &[(&str, &str)] = &[
     ("prefs.page.search", "Arama"),
     ("prefs.page.preview", "Önizleme"),
     ("prefs.page.performance", "Performans"),
+    ("prefs.page.tags", "Etiketler"),
     ("prefs.page.shortcuts", "Kısayollar"),
     ("prefs.page.privacy", "Gizlilik"),
     ("prefs.page.advanced", "Gelişmiş"),

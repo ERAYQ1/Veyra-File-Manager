@@ -46,15 +46,24 @@ pub(crate) fn build(
     }
     root.append(&storage_dashboard_row());
 
-    // Faz 62: Color Tags section — one row per standard color, each
+    // Faz 62/63: Color Tags section — one row per standard color, each
     // navigating to that color's `tag:///` virtual location (built by
     // `crate::tags::sidebar_row`, same click-to-navigate contract as the
-    // Places `row` above). Static list, no live refresh needed: the six
-    // colors never change, only which paths carry them.
+    // Places `row` above). The six colors never change, but their display
+    // names can (Faz 63's Preferences "Tags" page), so this is a
+    // `refresh_tags_box`-rebuilt container, live-synced via
+    // `crate::tags::watch` the same way the Bookmarks section below is kept
+    // in sync with `bookmarks.rs`'s own file — no direct callback needs
+    // threading from the Preferences dialog.
     root.append(&section_heading(t("sidebar.tags")));
-    for color in veyra_filesystem::TagColor::ALL {
-        root.append(&crate::tags::sidebar_row(color, &navigate));
-    }
+    let tags_box = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    root.append(&tags_box);
+    refresh_tags_box(&tags_box, &navigate);
+    let tags_monitor = crate::tags::watch({
+        let tags_box = tags_box.clone();
+        let navigate = navigate.clone();
+        move || refresh_tags_box(&tags_box, &navigate)
+    });
 
     let bookmarks_section = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     bookmarks_section.append(&section_heading(t("sidebar.bookmarks")));
@@ -281,6 +290,15 @@ pub(crate) fn build(
     outer.append(&scrolled);
     outer.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
     outer.append(&footer_box);
+
+    // Keeps `tags_monitor` alive for as long as the sidebar itself exists —
+    // a `gio::FileMonitor` stops watching once its last strong reference
+    // drops, same reasoning `bookmarks::watch`'s call site captures its own
+    // monitor for.
+    outer.connect_destroy(move |_| {
+        let _ = &tags_monitor;
+    });
+
     outer.upcast()
 }
 
@@ -1096,6 +1114,20 @@ fn bookmark_row(
     button.add_controller(gesture);
 
     button.upcast()
+}
+
+/// Rebuilds `container`'s children from the six standard tag colors, each
+/// row's display name freshly read via `crate::tags::sidebar_row`. Called
+/// once at sidebar build time and again every time `tags.json` changes
+/// (`crate::tags::watch`) — a custom-name edit, reset, or "Clear All Tags"
+/// from the Faz 63 Preferences "Tags" page.
+fn refresh_tags_box(container: &gtk4::Box, navigate: &Rc<dyn Fn(VeyraPath)>) {
+    while let Some(child) = container.first_child() {
+        container.remove(&child);
+    }
+    for color in veyra_filesystem::TagColor::ALL {
+        container.append(&crate::tags::sidebar_row(color, navigate));
+    }
 }
 
 fn section_heading(title: &str) -> gtk4::Label {

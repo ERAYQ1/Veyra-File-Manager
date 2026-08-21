@@ -388,7 +388,7 @@ fn build_tags_submenu() -> gio::Menu {
 
     let colors_section = gio::Menu::new();
     for color in veyra_filesystem::TagColor::ALL {
-        let menu_item = gio::MenuItem::new(Some(crate::tags::label(color)), None);
+        let menu_item = gio::MenuItem::new(Some(&crate::tags::display_name(color)), None);
         menu_item.set_action_and_target_value(
             Some("win.set-tag-selected"),
             Some(&color.slug().to_variant()),

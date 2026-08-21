@@ -89,9 +89,10 @@ pub(crate) fn all_css_classes() -> [String; 6] {
     TagColor::ALL.map(css_class)
 }
 
-/// The localized display name for `color`, e.g. "Red"/"Kırmızı" — shared by
-/// the sidebar rows and the context menu's color picker.
-pub(crate) fn label(color: TagColor) -> &'static str {
+/// The default (never user-overridden) localized name for `color`, e.g.
+/// "Red"/"Kırmızı" — the Preferences "Tags" page's `AdwEntryRow` placeholder
+/// text, and `display_name`'s fallback.
+pub(crate) fn default_label(color: TagColor) -> &'static str {
     match color {
         TagColor::Red => t("tags.red"),
         TagColor::Orange => t("tags.orange"),
@@ -102,13 +103,27 @@ pub(crate) fn label(color: TagColor) -> &'static str {
     }
 }
 
+/// Faz 63: `color`'s display name — the user's custom name if they've set
+/// one (`veyra_filesystem::get_custom_tag_name`), otherwise the default
+/// localized color name. This is the one every live-facing surface (sidebar
+/// rows, the context menu's color picker, view row tooltips) should call
+/// rather than `default_label` directly, so a renamed tag shows up
+/// everywhere at once. Reads straight from disk on every call rather than
+/// caching — `tags.json` is tiny and this is only ever called at
+/// render/bind time, never in a hot per-frame loop.
+pub(crate) fn display_name(color: TagColor) -> String {
+    veyra_filesystem::get_custom_tag_name(color).unwrap_or_else(|| default_label(color).to_string())
+}
+
 /// Builds one Tags sidebar row: a small colored dot plus the color's
-/// localized name, navigating to that color's `tag:///` results list on
-/// click — same click-to-navigate contract as `sidebar.rs`'s Places `row`.
+/// current display name, navigating to that color's `tag:///` results list
+/// on click — same click-to-navigate contract as `sidebar.rs`'s Places
+/// `row`.
 pub(crate) fn sidebar_row(color: TagColor, navigate: &Rc<dyn Fn(VeyraPath)>) -> gtk4::Widget {
+    let name = display_name(color);
     let button = gtk4::Button::builder().css_classes(["flat"]).build();
     button.set_accessible_role(gtk4::AccessibleRole::Button);
-    button.update_property(&[gtk4::accessible::Property::Label(label(color))]);
+    button.update_property(&[gtk4::accessible::Property::Label(&name)]);
 
     let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     let dot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
@@ -117,7 +132,7 @@ pub(crate) fn sidebar_row(color: TagColor, navigate: &Rc<dyn Fn(VeyraPath)>) -> 
     dot.set_valign(gtk4::Align::Center);
     content.append(&dot);
 
-    let text = gtk4::Label::new(Some(label(color)));
+    let text = gtk4::Label::new(Some(&name));
     text.set_xalign(0.0);
     text.set_hexpand(true);
     text.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -129,6 +144,31 @@ pub(crate) fn sidebar_row(color: TagColor, navigate: &Rc<dyn Fn(VeyraPath)>) -> 
     button.connect_clicked(move |_| navigate(target.clone()));
 
     button.upcast()
+}
+
+/// Watches the real tags file for changes (Faz 63: a renamed/reset/cleared
+/// tag from the Preferences "Tags" page) and invokes `on_change` whenever it
+/// does — same live-sync pattern `bookmarks::watch` uses for the Bookmarks
+/// section, letting `sidebar.rs` rebuild its Tags section's row labels
+/// without any direct callback wired from the Preferences dialog. Returns
+/// `None` (logging a warning) instead of panicking if the monitor can't be
+/// created (Rule #15/#18) — the sidebar still shows the names loaded at
+/// startup, it just won't live-refresh.
+pub(crate) fn watch(on_change: impl Fn() + 'static) -> Option<gtk4::gio::FileMonitor> {
+    let file = gtk4::gio::File::for_path(veyra_filesystem::tags_path());
+    match file.monitor_file(
+        gtk4::gio::FileMonitorFlags::NONE,
+        gtk4::gio::Cancellable::NONE,
+    ) {
+        Ok(monitor) => {
+            monitor.connect_changed(move |_, _, _, _event| on_change());
+            Some(monitor)
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to watch tags file for changes");
+            None
+        }
+    }
 }
 
 #[cfg(test)]
