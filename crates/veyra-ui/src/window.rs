@@ -197,6 +197,7 @@ pub(crate) fn build_window(
             );
         }
         panels.right.frame.set_visible(true);
+        split_view::set_split_active_class(&window, true);
     }
     if let Some(tab) = active_tab(&panels.left.tab_view, &panels.left.registry) {
         sync_view_switcher(&header.view_switcher_buttons, &tab);
@@ -1181,6 +1182,7 @@ fn setup_split_view_actions(
 ) {
     let action_toggle_split = gio::SimpleAction::new("toggle-split-view", None);
     {
+        let window = window.clone();
         let panels = panels.clone();
         let focused = focused.clone();
         let header = header.clone();
@@ -1208,6 +1210,7 @@ fn setup_split_view_actions(
                 );
             }
             panels.right.frame.set_visible(showing);
+            split_view::set_split_active_class(&window, showing);
             header.split_toggle_button.set_active(showing);
             if !showing {
                 *focused.borrow_mut() = PanelId::Left;

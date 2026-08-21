@@ -1,5 +1,27 @@
 # Changelog
 
+## Faz 61 — Tek Panel Mavi Çerçeve ve Odak Halkası Düzeltmesi
+
+Tek panel modunda `Ctrl+A` veya boş klasöre tıklamada tüm orta ekranın
+etrafında beliren yanlış 2px mavi çerçeve giderildi.
+
+### Düzeltildi
+- **`split_view.rs::install_panel_css`:** `.veyra-panel` artık kendi başına
+  hiçbir kenarlık çizmiyor; `.veyra-active-panel` kenarlığı yalnızca
+  `.veyra-split-active` sınıfı taşıyan bir ata altında (yani gerçekten çift
+  panel görünür durumdayken) uygulanıyor. Bu sınıf `set_split_active_class`
+  ile pencereye eklenip kaldırılıyor — sağ panelin görünürlüğü değiştiği her
+  yerde (`window.rs`: oturum geri yüklemesi ve `toggle-split-view` eylemi).
+- **`*:focus-visible` genel seçicisi kaldırıldı:** artık yalnızca etkileşimli
+  denetimler (`button`, `entry`, `listview > row`, `gridview > child`,
+  `.veyra-crumb`) odak halkası alıyor. Önceden bu joker seçici, bir
+  `GridView`/`ListView` satır seçmeden klavye odağını alması durumunda
+  (ör. boş klasörde `Ctrl+A` sonrası) tüm kaydırma alanının etrafına halka
+  çiziyordu; yapısal kutular/paneller/pencere artık hiçbir zaman odak halkası
+  almıyor.
+- Yüksek kontrast CSS katmanı (`watch_high_contrast`) aynı seçici
+  daraltmasıyla güncellendi.
+
 ## Faz 60 — Quick Look (Spacebar Canlı Önizleme Motoru)
 
 Herhangi bir dosyanın üzerindeyken `Space` tuşuna basıldığında açılan,

@@ -94,6 +94,18 @@ pub(crate) struct Panel {
     pub frame: gtk4::Box,
 }
 
+/// Toggles the `.veyra-split-active` class on `window` — the ancestor the
+/// `.veyra-split-active .veyra-panel.veyra-active-panel` CSS rule requires —
+/// so the active-panel border can only ever appear while the right panel is
+/// actually visible, never in single-panel mode.
+pub(crate) fn set_split_active_class(window: &impl gtk4::prelude::WidgetExt, active: bool) {
+    if active {
+        window.add_css_class("veyra-split-active");
+    } else {
+        window.remove_css_class("veyra-split-active");
+    }
+}
+
 impl Panel {
     pub fn set_highlighted(&self, active: bool) {
         if active {
@@ -293,25 +305,35 @@ fn nav_button(icon_name: &str, accessible_label: &str, tooltip: &str) -> gtk4::B
 }
 
 /// Loads the CSS that draws the active-panel highlight border and installs
-/// it for `display`. `.veyra-panel` always reserves the same 2px
-/// transparent border, so toggling `.veyra-active-panel` on/off never
-/// shifts layout.
+/// it for `display`. `.veyra-panel` never draws a border on its own — the
+/// highlight only exists to tell the two panels of a *split* view apart, so
+/// it is scoped under `.veyra-split-active` (toggled on the window by
+/// `set_split_active_class` whenever the right panel's visibility changes)
+/// and never appears in single-panel mode, even if `.veyra-active-panel`
+/// were ever left stuck on a frame.
 ///
 /// Also installs `.veyra-hidden-item` (Faz 14): dims and italicizes hidden
 /// files/directories in every view when the tab's Ctrl+H toggle is showing
 /// them, so they read as visually distinct from regular entries.
 ///
-/// Faz 36 (Kural #29 — keyboard-first): a `*:focus-visible` rule gives every
-/// keyboard-focused control (button, row, grid cell, entry) a solid 2px
-/// `@accent_color` outline with a 2px offset so it never gets lost inside a
-/// widget's own border/selection styling — mouse clicks don't trigger
-/// `:focus-visible`, so this never adds a ring around a merely-clicked
-/// control, only a `Tab`/arrow-key-focused one.
+/// Faz 36 (Kural #29 — keyboard-first): a `:focus-visible` rule gives every
+/// keyboard-focused *interactive* control (button, row, grid cell, entry,
+/// breadcrumb) a solid 2px `@accent_color` outline with a 2px offset so it
+/// never gets lost inside a widget's own border/selection styling — mouse
+/// clicks don't trigger `:focus-visible`, so this never adds a ring around a
+/// merely-clicked control, only a `Tab`/arrow-key-focused one. Scoped to
+/// specific interactive selectors rather than `*` so structural containers
+/// (boxes, panes, the window itself) never pick up a stray outline when
+/// keyboard focus lands on them instead of a specific control — e.g. a
+/// gridview/listview that gains focus without a row selected (as happens
+/// right after `Ctrl+A` on an empty folder) used to outline its whole
+/// scrolled area.
 pub(crate) fn install_panel_css(display: &gtk4::gdk::Display) {
     let provider = gtk4::CssProvider::new();
     provider.load_from_data(
-        ".veyra-panel { border: 2px solid transparent; }\n\
-         .veyra-panel.veyra-active-panel { border: 2px solid @accent_color; border-radius: 6px; }\n\
+        ".veyra-panel { border: none; }\n\
+         .veyra-split-active .veyra-panel.veyra-active-panel { \
+           border: 2px solid @accent_color; border-radius: 6px; }\n\
          .veyra-hidden-item { opacity: 0.55; font-style: italic; }\n\
          .veyra-git-badge { font-size: smaller; font-weight: bold; margin-left: 4px; }\n\
          .veyra-git-badge.veyra-git-modified { color: #e5a50a; }\n\
@@ -320,7 +342,9 @@ pub(crate) fn install_panel_css(display: &gtk4::gdk::Display) {
          .veyra-git-badge.veyra-git-ignored { color: alpha(currentColor, 0.45); }\n\
          .veyra-git-badge.veyra-git-conflicted { color: #e01b24; }\n\
          .veyra-git-badge.veyra-git-deleted { color: #c64600; }\n\
-         *:focus-visible { outline: 2px solid @accent_color; outline-offset: 2px; }\n\
+         button:focus-visible, entry:focus-visible, listview > row:focus-visible, \
+         gridview > child:focus-visible, .veyra-crumb:focus-visible { \
+           outline: 2px solid @accent_color; outline-offset: 2px; }\n\
          /* Faz 59: modern pill breadcrumbs — soft hover wash, accent-tinted\n\
             capsule fill on the active (final) segment. */\n\
          .veyra-crumb { border-radius: 999px; padding-left: 10px; padding-right: 10px; \
@@ -379,9 +403,10 @@ fn watch_high_contrast(display: &gtk4::gdk::Display) {
         }
         let provider = gtk4::CssProvider::new();
         provider.load_from_data(
-            ".veyra-panel.veyra-active-panel { border-width: 3px; }\n\
+            ".veyra-split-active .veyra-panel.veyra-active-panel { border-width: 3px; }\n\
              .veyra-hidden-item { opacity: 0.75; }\n\
-             *:focus-visible { outline-width: 3px; }",
+             button:focus-visible, entry:focus-visible, listview > row:focus-visible, \
+             gridview > child:focus-visible, .veyra-crumb:focus-visible { outline-width: 3px; }",
         );
         gtk4::style_context_add_provider_for_display(
             display,
