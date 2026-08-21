@@ -167,14 +167,14 @@ mod tests {
         let path = dir.path().join("session.json");
         let session = Session {
             left_tabs: vec![
-                "/home/eray/Masaüstü".to_string(),
-                "/home/eray/中文_测试".to_string(),
-                "/home/eray/😀_emoji_folder".to_string(),
-                "/home/eray/العربية_ملف".to_string(),
-                "/home/eray/türkçe_şçğüöı".to_string(),
+                "/home/user/Desktop".to_string(),
+                "/home/user/中文_测试".to_string(),
+                "/home/user/😀_emoji_folder".to_string(),
+                "/home/user/العربية_ملف".to_string(),
+                "/home/user/türkçe_şçğüöı".to_string(),
             ],
             right_tabs: vec![
-                "/home/eray/한국어_파일".to_string(),
+                "/home/user/한국어_파일".to_string(),
                 "sftp://host/עברית".to_string(),
             ],
         };
