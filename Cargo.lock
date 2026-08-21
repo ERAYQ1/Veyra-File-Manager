@@ -1599,6 +1599,7 @@ dependencies = [
  "gio",
  "glib",
  "mime_guess",
+ "rustix",
  "serde",
  "serde_json",
  "sevenz-rust",

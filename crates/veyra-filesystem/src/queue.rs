@@ -14,6 +14,7 @@ use crate::error::{map_gio_error, FsError};
 use crate::ops;
 use crate::path::VeyraPath;
 use crate::progress::Progress;
+use crate::reflink;
 
 /// The four bulk operations Faz 5 supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -333,6 +334,27 @@ fn run_copy_move(
             PlanItem::File { source, dest, size } => {
                 let base = bytes_done;
                 let display_name = source.file_name().unwrap_or_default();
+
+                // Faz 64: same-filesystem CoW clone (Btrfs/XFS/ZFS/bcachefs)
+                // skips the byte-copy loop below entirely — the kernel
+                // shares extents instead of copying data, so a 50GB file
+                // "completes" in about a millisecond. Report progress as
+                // already-done rather than waiting on the gio chunk
+                // callback, which never fires for a clone this fast.
+                if reflink::try_reflink_clone(&source, &dest) {
+                    file_index += 1;
+                    bytes_done = base + size;
+                    on_progress(Progress {
+                        current_file: display_name,
+                        file_index,
+                        file_count,
+                        bytes_done,
+                        bytes_total,
+                    });
+                    outcome.completed.push(source);
+                    continue;
+                }
+
                 let copy_result = {
                     let mut report = |current: i64, _total: i64| {
                         on_progress(Progress {

@@ -20,6 +20,7 @@ mod path;
 mod permissions;
 mod progress;
 mod queue;
+mod reflink;
 mod tags;
 
 pub use advanced::{stat_advanced, AdvancedInfo};

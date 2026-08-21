@@ -1,5 +1,32 @@
 # Changelog
 
+## Faz 64 — Btrfs / XFS / ZFS Reflink Anında Kopyalama (Zero-Time Copy)
+
+Aynı dosya sisteminde kopyalanan dosyalar için CoW (Copy-on-Write) destekli
+dosya sistemlerinde (Btrfs, XFS, ZFS, bcachefs) veri bayt bayt kopyalanmadan
+çekirdek düzeyinde extent paylaşımı ile anında klonlanıyor.
+
+### Eklendi
+- **`veyra-filesystem::reflink` (yeni modül):** `try_reflink_clone` — kaynak
+  ve hedef aynı yerel dosya sisteminde ise `FICLONE` ioctl'ini (`rustix::fs::
+  ioctl_ficlone`, `#![forbid(unsafe_code)]` kuralına uygun güvenli sarmalayıcı
+  üzerinden — `unsafe` blok yok) deneyip 50 GB'lık bir dosyayı ~1 milisaniyede
+  ve ~0 ek disk alanıyla klonluyor. Başarı durumunda izinler (`chmod`) ve
+  erişim/değişiklik zaman damgaları (`futimens`) kaynakla senkronize ediliyor.
+  Desteklenmeyen dosya sistemi/ioctl (`EOPNOTSUPP`, `ENOTTY`), farklı cihaz
+  (`EXDEV`) veya GVfs/uzak konum durumunda sessizce ve kesintisiz olarak
+  mevcut parçalı `gio::File::copy` akışına geri dönülüyor; yarım kalan boş
+  hedef dosya temizleniyor. 5 birim testi (başarı/dizin/uzak URI/eksik kaynak
+  senaryoları).
+- **`veyra-filesystem::queue`:** Copy/Move dosya kopyalama döngüsü artık her
+  dosya için önce `reflink::try_reflink_clone` deniyor; klon başarılı olursa
+  ilerleme çubuğu chunk callback'ini beklemeden doğrudan %100 (tüm bayt
+  tamamlandı) olarak bildiriliyor.
+
+### Bağımlılıklar
+- **`veyra-filesystem`:** `rustix` (features = ["fs"]) eklendi — `FICLONE`
+  ioctl'i ve `futimens`'i güvenli (unsafe'siz) şekilde çağırmak için.
+
 ## Faz 63 — Özelleştirilebilir Etiket İsimleri ve Profesyonel Tercihler Paneli
 
 Faz 62'nin 6 sabit renk etiketine kullanıcı tanımlı isim verme desteği, artı
