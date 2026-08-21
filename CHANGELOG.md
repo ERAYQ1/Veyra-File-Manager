@@ -1,5 +1,71 @@
 # Changelog
 
+## Faz 60 — Quick Look (Spacebar Canlı Önizleme Motoru)
+
+Herhangi bir dosyanın üzerindeyken `Space` tuşuna basıldığında açılan,
+bağımsız bir Quick Look penceresi eklendi: görsel, metin/kod, ses/video,
+arşiv içeriği ve genel bilgi kartı olmak üzere içerik türüne göre beş ayrı
+gösterim modu var; `Yukarı`/`Aşağı` pencereyi kapatmadan sıradaki/önceki
+dosyaya geçiyor.
+
+### Eklendi
+- **`dialogs/quick_look_dialog.rs`:** `adw::Dialog` + `adw::ToolbarView`
+  tabanlı Quick Look penceresi. Başlık çubuğunda dosya adı (`AdwWindowTitle`
+  başlığı) ve boyut/MIME (alt başlık) gösteriliyor, sağ üstte "Harici
+  Uygulamada Aç" butonu var. `Escape` veya tekrar `Space` (capture-phase
+  `GtkEventControllerKey`, çocuk widget'lardan önce yakalıyor) pencereyi
+  kapatıyor; `Yukarı`/`Aşağı` aynı `GtkMultiSelection` modeli içinde
+  konumu değiştirip içeriği yerinde yeniden çiziyor ve ana görünümün
+  seçimini de senkronize ediyor (`select_item`).
+  - Görsel (`image/*`): `preview.rs`'deki `decode_image` yeniden
+    kullanılarak tam çözünürlüklü `GtkPicture`.
+  - Metin/Kod (`text/*`, JSON/TOML/YAML/JS/…): `preview.rs`'deki
+    `read_capped` ile sabit 256 KB üst sınır, aşılırsa
+    `quick_look.truncated_warning` uyarısı.
+  - Ses/Video (`audio/*`, `video/*`): `gtk4::Video` + `gtk4::MediaFile` —
+    GTK'nın kendi medya arka ucu (GStreamer sistemde varsa onu kullanır),
+    **hiçbir yeni `gstreamer-rs` bağımlılığı eklenmedi**.
+  - Arşiv (`application/zip` ve benzerleri): yeni
+    `veyra_filesystem::list_preview` ile ilk 200 girdi (ad + boyut), diske
+    hiçbir şey çıkarmadan.
+  - Klasör/sembolik bağlantı/özel dosyalar: büyük ikon, tam yol, MIME,
+    izinler (`FilePermissions::symbolic_string`), değiştirilme tarihi.
+  - Tüm dosya okumaları `fs_async::run_blocking` üzerinden arka planda;
+    `preview.rs`'deki nesil sayacı deseni hızlı `Yukarı`/`Aşağı`
+    dizilerinde eski sonuçların ekranı geç güncellemesini engelliyor.
+- **`veyra-filesystem::list_preview`** (`archive/list_preview.rs`): ZIP/
+  TAR/TAR.GZ/TAR.XZ/TAR.ZST arşivlerinden diske çıkarmadan ilk N girdiyi
+  (ad, boyut, dizin mi) okuyan salt-okunur metadata taraması; 7z için
+  (ucuz metadata-only listeleme API'si olmadığından) `Err` döndürüp
+  Quick Look bunu genel bilgi kartına düşürüyor — kullanıcıya hata olarak
+  gösterilmiyor.
+- **`win.quick-look-selected`** eylemi (`window.rs`), `Space` kısayolu ve
+  sağ tık bağlam menüsünde "Önizle (Space)" / "Quick Look (Space)" girişi
+  (`menu.quick_look`).
+- **i18n:** `quick_look.open_with`, `quick_look.truncated_warning`,
+  `quick_look.archive_more`, `quick_look.permissions_unknown` ve
+  `menu.quick_look` anahtarları hem EN hem TR tablosuna eklendi (parite
+  testi geçiyor).
+
+### Değişti
+- `preview.rs`'deki `decode_image`, `read_capped`, `is_image_mime`,
+  `is_text_mime`, `is_archive_mime`, `friendly_gio_error`,
+  `modified_label` ve `DecodedImage` `pub(crate)` yapıldı, böylece Quick
+  Look aynı çözme/MIME-sınıflandırma mantığını tekrar yazmak yerine
+  sidebar önizlemesiyle paylaşıyor.
+
+### Doğrulama
+- `cargo fmt --all -- --check`: temiz.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 uyarı.
+- `cargo test --workspace`: **624 test, 0 başarısız** (yeni: `list_preview`
+  ZIP/TAR.GZ/limit/7z-fallback testleri, Quick Look metin sınırı testi).
+- `every_tr_key_exists_in_en` / `every_en_key_has_a_tr_counterpart`: geçti.
+- README ve `docs/testing.md` test rozeti 624'e senkronize edildi.
+- GUI adımları (Space ile açma/kapama, Yukarı/Aşağı gezinme, gerçek bir
+  GTK oturumunda video oynatma) bu ortamda görüntü sunucusu
+  bulunmadığından elle doğrulanamadı — yalnızca derleme/lint/birim testi
+  düzeyinde doğrulandı.
+
 ## Faz 59 — Sidebar Tercihler Butonu ve Denetim Bulgularının Kapatılması
 
 Faz 58 denetiminde işaretlenen LOW/INFO düzeyindeki güvenlik savunma

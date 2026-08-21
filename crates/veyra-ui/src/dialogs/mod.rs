@@ -14,6 +14,7 @@ pub(crate) mod file_associations_dialog;
 pub(crate) mod open_with_dialog;
 pub(crate) mod preferences_dialog;
 pub(crate) mod properties_dialog;
+pub(crate) mod quick_look_dialog;
 pub(crate) mod rename_dialog;
 pub(crate) mod shortcuts_help_dialog;
 pub(crate) mod storage_dashboard_dialog;

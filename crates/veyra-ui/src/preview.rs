@@ -309,20 +309,20 @@ fn show_regular(handles: &PreviewPanelHandles, generation: u64, item: FileItem) 
 /// (`glib::Bytes` explicitly so, the rest are plain `Copy` values), unlike
 /// `gdk_pixbuf::Pixbuf`/`gdk4::Texture` themselves, which are GTK-main-thread-
 /// bound GObjects and can never cross that channel directly.
-struct DecodedImage {
-    pixels: glib::Bytes,
-    colorspace: gtk4::gdk_pixbuf::Colorspace,
-    has_alpha: bool,
-    bits_per_sample: i32,
-    width: i32,
-    height: i32,
-    rowstride: i32,
+pub(crate) struct DecodedImage {
+    pub pixels: glib::Bytes,
+    pub colorspace: gtk4::gdk_pixbuf::Colorspace,
+    pub has_alpha: bool,
+    pub bits_per_sample: i32,
+    pub width: i32,
+    pub height: i32,
+    pub rowstride: i32,
 }
 
 /// Reads and decodes `path`'s image content off the GTK main thread.
 /// `gdk_pixbuf::Pixbuf` decoding (unlike `gdk4::Texture` construction) has no
 /// main-thread requirement, so it can run here alongside the file read.
-fn decode_image(path: &VeyraPath) -> Result<DecodedImage, glib::Error> {
+pub(crate) fn decode_image(path: &VeyraPath) -> Result<DecodedImage, glib::Error> {
     let (raw, _) = path
         .to_gio_file()
         .load_contents(gtk4::gio::Cancellable::NONE)?;
@@ -425,7 +425,7 @@ fn show_text(handles: &PreviewPanelHandles, generation: u64, item: FileItem) {
 }
 
 /// Reads up to `cap` bytes of `path`'s content off the GTK main thread.
-fn read_capped(path: &VeyraPath, cap: usize) -> Result<Vec<u8>, glib::Error> {
+pub(crate) fn read_capped(path: &VeyraPath, cap: usize) -> Result<Vec<u8>, glib::Error> {
     let stream = path.to_gio_file().read(gtk4::gio::Cancellable::NONE)?;
     let mut chunk = vec![0u8; 64 * 1024];
     let mut data = Vec::new();
@@ -551,7 +551,7 @@ fn is_current(handles: &PreviewPanelHandles, generation: u64) -> bool {
     handles.generation.get() == generation
 }
 
-fn modified_label(item: &FileItem) -> String {
+pub(crate) fn modified_label(item: &FileItem) -> String {
     item.metadata
         .modified
         .map(|dt| format!("Modified {}", dt.format("%Y-%m-%d %H:%M")))
@@ -576,11 +576,11 @@ fn kind_label(kind: &FileKind) -> &'static str {
     }
 }
 
-fn is_image_mime(mime: &str) -> bool {
+pub(crate) fn is_image_mime(mime: &str) -> bool {
     mime.starts_with("image/")
 }
 
-fn is_text_mime(mime: &str) -> bool {
+pub(crate) fn is_text_mime(mime: &str) -> bool {
     mime.starts_with("text/")
         || matches!(
             mime,
@@ -598,7 +598,7 @@ fn is_text_mime(mime: &str) -> bool {
         )
 }
 
-fn is_archive_mime(mime: &str) -> bool {
+pub(crate) fn is_archive_mime(mime: &str) -> bool {
     matches!(
         mime,
         "application/zip"
@@ -616,7 +616,7 @@ fn is_archive_mime(mime: &str) -> bool {
 
 /// User-facing message for a `glib::Error` from an image/text preview read
 /// (Faz 10 requirement C.3 — never surface a raw GLib error string).
-fn friendly_gio_error(err: &glib::Error) -> String {
+pub(crate) fn friendly_gio_error(err: &glib::Error) -> String {
     if err.matches(gtk4::gio::IOErrorEnum::PermissionDenied) {
         "Permission denied".to_string()
     } else if err.matches(gtk4::gio::IOErrorEnum::NotFound) {
@@ -626,7 +626,7 @@ fn friendly_gio_error(err: &glib::Error) -> String {
     }
 }
 
-fn friendly_fs_error(err: &FsError) -> String {
+pub(crate) fn friendly_fs_error(err: &FsError) -> String {
     match err {
         FsError::NotFound(_) => "File not found".to_string(),
         FsError::PermissionDenied(_) => "Permission denied".to_string(),

@@ -25,7 +25,10 @@ pub use advanced::{stat_advanced, AdvancedInfo};
 pub use analyzer::{
     analyze_directory, AnalysisResult, SameSizeCandidateGroup, UsageEntry, UsageNode,
 };
-pub use archive::{create_archive, extract_archive, ArchiveFormat, ArchiveOutcome, SkipReason};
+pub use archive::{
+    create_archive, extract_archive, list_preview, ArchiveFormat, ArchiveOutcome,
+    ArchivePreviewEntry, SkipReason,
+};
 pub use conflict::{suggest_name, Conflict, ConflictDecision};
 pub use dircount::{count_dir_recursive, DirCount};
 pub use duplicates::{find_duplicates, DuplicateGroup};

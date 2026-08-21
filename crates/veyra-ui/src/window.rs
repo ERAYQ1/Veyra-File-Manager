@@ -393,6 +393,7 @@ pub(crate) fn build_window(
         &undo_stack,
     );
     setup_properties_actions(app, &window, &panels, &focused, thumbnails.clone());
+    setup_quick_look_actions(app, &window, &panels, &focused);
     setup_preview_actions(app, &window, &preview, &header, refresh_preview.clone());
     setup_recent_actions(&window, &panels, privacy_mode);
     setup_trash_actions(app, &window, &panels, &focused, &undo_stack);
@@ -2223,6 +2224,40 @@ fn setup_properties_actions(
         });
     }
     window.add_action(&action_properties_current);
+}
+
+/// Registers the Faz 60 `win.quick-look-selected` action (`Space`): opens
+/// the Quick Look window for the focused panel's selected item. The
+/// dialog itself walks `Up`/`Down` through the same `GtkMultiSelection`
+/// this handler reads the starting position from, so it stays independent
+/// of the window's action system after it opens.
+fn setup_quick_look_actions(
+    app: &adw::Application,
+    window: &adw::ApplicationWindow,
+    panels: &Panels,
+    focused: &Rc<RefCell<PanelId>>,
+) {
+    let action = gio::SimpleAction::new("quick-look-selected", None);
+    {
+        let window = window.clone();
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let selection = tab.selections.active(&tab.view_stack).clone();
+            let bitset = selection.selection();
+            if bitset.is_empty() {
+                return;
+            }
+            let position = bitset.nth(0);
+            dialogs::quick_look_dialog::show(&window, selection, position);
+        });
+    }
+    window.add_action(&action);
+    app.set_accels_for_action("win.quick-look-selected", &["space"]);
 }
 
 /// Registers the Faz 10 `win.toggle-preview` action (`F9`): shows/hides the

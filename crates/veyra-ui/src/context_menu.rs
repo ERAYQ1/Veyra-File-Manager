@@ -180,6 +180,7 @@ fn build_item_menu(items: &[FileItem], is_split_active: bool, developer_mode: bo
     if count == 1 {
         let open_section = gio::Menu::new();
         open_section.append(Some(t("menu.open")), Some("win.open-selected"));
+        open_section.append(Some(t("menu.quick_look")), Some("win.quick-look-selected"));
         open_section.append_submenu(Some(t("menu.open_with")), &build_open_with_submenu(item));
         if is_dir {
             open_section.append(

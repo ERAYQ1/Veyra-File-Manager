@@ -214,6 +214,7 @@ const EN: &[(&str, &str)] = &[
     ("sort.section.filter_by", "Filter By"),
     // --- Context menu (context_menu.rs) ---
     ("menu.open", "Open"),
+    ("menu.quick_look", "Quick Look (Space)"),
     ("menu.open_with", "Open With"),
     ("menu.open_with_other", "Other Application…"),
     ("menu.open_in_new_tab", "Open in New Tab"),
@@ -656,6 +657,14 @@ const EN: &[(&str, &str)] = &[
     ("preview.kind.special", "Special File"),
     ("preview.loading", "Loading preview…"),
     ("preview.open_in_default_app", "Open in Default App"),
+    // --- Faz 60: Quick Look (dialogs/quick_look_dialog.rs) ---
+    ("quick_look.open_with", "Open in External App"),
+    (
+        "quick_look.truncated_warning",
+        "showing the first 256 KB only",
+    ),
+    ("quick_look.archive_more", "showing the first {count} entries"),
+    ("quick_look.permissions_unknown", "Permissions unknown"),
     // --- Preferences: Language row (dialogs/preferences_dialog.rs) ---
     ("prefs.dialog.title", "Preferences"),
     ("prefs.language.title", "Language"),
@@ -1050,6 +1059,7 @@ const TR: &[(&str, &str)] = &[
     ("sort.section.filter_by", "Süz"),
     // --- Context menu (context_menu.rs) ---
     ("menu.open", "Aç"),
+    ("menu.quick_look", "Önizle (Space)"),
     ("menu.open_with", "Birlikte Aç"),
     ("menu.open_with_other", "Başka Uygulama…"),
     ("menu.open_in_new_tab", "Yeni Sekmede Aç"),
@@ -1495,6 +1505,14 @@ const TR: &[(&str, &str)] = &[
     ("preview.kind.special", "Özel Dosya"),
     ("preview.loading", "Önizleme yükleniyor…"),
     ("preview.open_in_default_app", "Varsayılan Uygulamada Aç"),
+    // --- Faz 60: Quick Look (dialogs/quick_look_dialog.rs) ---
+    ("quick_look.open_with", "Harici Uygulamada Aç"),
+    (
+        "quick_look.truncated_warning",
+        "yalnızca ilk 256 KB gösteriliyor",
+    ),
+    ("quick_look.archive_more", "ilk {count} öğe gösteriliyor"),
+    ("quick_look.permissions_unknown", "İzinler bilinmiyor"),
     // --- Preferences: Language row (dialogs/preferences_dialog.rs) ---
     ("prefs.dialog.title", "Tercihler"),
     ("prefs.language.title", "Dil"),
