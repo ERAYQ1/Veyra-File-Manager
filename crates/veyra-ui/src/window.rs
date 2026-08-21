@@ -56,17 +56,26 @@ pub(crate) fn build_window(
     // function — see `Chrome::toast_overlay`'s doc comment.
     let toast_overlay = adw::ToastOverlay::new();
 
+    // Faz 62: app-wide tag map, shared by both panels the same way
+    // `toast_overlay` is — a tag is a property of the file, not of the
+    // panel/tab currently showing it, so it lives once here rather than per
+    // tab like `AppState::git_statuses`.
+    let tags = crate::tags::new_shared();
+    crate::tags::reload(&tags);
+
     let left = split_view::build_panel(
         PanelId::Left,
         privacy_mode.clone(),
         settings.clone(),
         toast_overlay.clone(),
+        tags.clone(),
     );
     let right = split_view::build_panel(
         PanelId::Right,
         privacy_mode.clone(),
         settings.clone(),
         toast_overlay.clone(),
+        tags.clone(),
     );
     right.frame.set_visible(false);
     let panels = Panels { left, right };
@@ -1957,6 +1966,84 @@ fn setup_context_menu_actions(
     }
     window.add_action(&action_add_bookmark);
 
+    // Faz 62: applies to every selected item (not just the first), so a
+    // multi-selection can be tagged/untagged in one click — unlike most of
+    // this function's single-target actions.
+    let action_set_tag =
+        gio::SimpleAction::new("set-tag-selected", Some(&String::static_variant_type()));
+    {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_set_tag.connect_activate(move |_, parameter| {
+            let Some(color) = parameter
+                .and_then(glib::Variant::str)
+                .and_then(veyra_filesystem::TagColor::from_slug)
+            else {
+                return;
+            };
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let paths: Vec<VeyraPath> = tab
+                .selections
+                .selected_items(&tab.view_stack)
+                .into_iter()
+                .map(|item| item.path)
+                .collect();
+            let tags = panel.chrome.tags.clone();
+            let panels_for_refresh = panels.clone();
+            fs_async::run_blocking(
+                move || {
+                    for path in &paths {
+                        if let Err(err) = veyra_filesystem::set_tag(path, color) {
+                            tracing::warn!(error = %err, "failed to set tag");
+                        }
+                    }
+                },
+                move |()| {
+                    crate::tags::reload(&tags);
+                    refresh_all_tabs(&panels_for_refresh);
+                },
+            );
+        });
+    }
+    window.add_action(&action_set_tag);
+
+    let action_remove_tag = gio::SimpleAction::new("remove-tag-selected", None);
+    {
+        let panels = panels.clone();
+        let focused = focused.clone();
+        action_remove_tag.connect_activate(move |_, _| {
+            let panel = panels.get(*focused.borrow()).clone();
+            let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
+                return;
+            };
+            let paths: Vec<VeyraPath> = tab
+                .selections
+                .selected_items(&tab.view_stack)
+                .into_iter()
+                .map(|item| item.path)
+                .collect();
+            let tags = panel.chrome.tags.clone();
+            let panels_for_refresh = panels.clone();
+            fs_async::run_blocking(
+                move || {
+                    for path in &paths {
+                        if let Err(err) = veyra_filesystem::remove_tag(path) {
+                            tracing::warn!(error = %err, "failed to remove tag");
+                        }
+                    }
+                },
+                move |()| {
+                    crate::tags::reload(&tags);
+                    refresh_all_tabs(&panels_for_refresh);
+                },
+            );
+        });
+    }
+    window.add_action(&action_remove_tag);
+
     let action_copy_path = gio::SimpleAction::new("copy-path-selected", None);
     {
         let window = window.clone();
@@ -3086,6 +3173,7 @@ fn open_tab(
             dnd_wiring.clone(),
             chrome.settings.clone(),
             git_statuses.clone(),
+            chrome.tags.clone(),
         );
         view_stack.add_named(&icon_widget, Some(ViewMode::Icon.stack_name()));
 
@@ -3105,6 +3193,7 @@ fn open_tab(
             dnd_wiring.clone(),
             chrome.settings.clone(),
             git_statuses.clone(),
+            chrome.tags.clone(),
         );
         view_stack.add_named(&compact_widget, Some(ViewMode::Compact.stack_name()));
 
@@ -3125,6 +3214,7 @@ fn open_tab(
             dnd_wiring,
             chrome.settings.clone(),
             git_statuses,
+            chrome.tags.clone(),
         );
         let details_selection = details.selection;
         view_stack.add_named(&details.widget, Some(ViewMode::Details.stack_name()));
@@ -4205,6 +4295,17 @@ fn load_directory(state: &SharedState, chrome: &Chrome, path: VeyraPath) {
         let entries = recent::snapshot_entries();
         fs_async::run_blocking(
             move || Ok(recent::list_recent_items(entries)),
+            move |result| on_directory_loaded(&state_for_done, &chrome_for_done, result),
+        );
+        return;
+    }
+
+    // `tag:///<color>` (Faz 62) is likewise a virtual location, not a real
+    // GVfs mount — its listing comes from every path the Faz 62 tags store
+    // has that color, `stat`'d the same off-thread way `recent:///` is.
+    if let Some(color) = crate::tags::tag_location_color(&path) {
+        fs_async::run_blocking(
+            move || Ok(crate::tags::list_tagged_items(color)),
             move |result| on_directory_loaded(&state_for_done, &chrome_for_done, result),
         );
         return;

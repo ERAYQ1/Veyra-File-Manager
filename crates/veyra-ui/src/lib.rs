@@ -40,6 +40,7 @@ mod state;
 mod statusbar;
 mod system_integration;
 mod tab_page;
+mod tags;
 mod terminal;
 mod thumbnails;
 mod trash;

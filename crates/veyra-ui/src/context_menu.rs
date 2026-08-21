@@ -211,6 +211,10 @@ fn build_item_menu(items: &[FileItem], is_split_active: bool, developer_mode: bo
         }
     }
 
+    let tags_section = gio::Menu::new();
+    tags_section.append_submenu(Some(t("tags.menu_title")), &build_tags_submenu());
+    menu.append_section(None, &tags_section);
+
     let clipboard_section = gio::Menu::new();
     clipboard_section.append(
         Some(&count_label("menu.copy", count)),
@@ -369,6 +373,33 @@ fn build_developer_submenu() -> gio::Menu {
         Some("win.developer-metadata-selected"),
     );
     submenu.append_section(None, &tools_section);
+
+    submenu
+}
+
+/// Builds the Faz 62 "Tags" submenu: one entry per standard color, each
+/// bound to `win.set-tag-selected` with the color's slug as its string
+/// target (same one-action-many-targets pattern as `open-with-app`'s
+/// desktop-id parameter), plus a "Remove Tag" entry — applies to every
+/// selected item, not just a single one, so a whole multi-selection can be
+/// tagged or untagged in one click.
+fn build_tags_submenu() -> gio::Menu {
+    let submenu = gio::Menu::new();
+
+    let colors_section = gio::Menu::new();
+    for color in veyra_filesystem::TagColor::ALL {
+        let menu_item = gio::MenuItem::new(Some(crate::tags::label(color)), None);
+        menu_item.set_action_and_target_value(
+            Some("win.set-tag-selected"),
+            Some(&color.slug().to_variant()),
+        );
+        colors_section.append_item(&menu_item);
+    }
+    submenu.append_section(None, &colors_section);
+
+    let clear_section = gio::Menu::new();
+    clear_section.append(Some(t("tags.clear")), Some("win.remove-tag-selected"));
+    submenu.append_section(None, &clear_section);
 
     submenu
 }

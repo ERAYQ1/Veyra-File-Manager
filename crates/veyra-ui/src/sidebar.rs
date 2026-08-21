@@ -46,6 +46,16 @@ pub(crate) fn build(
     }
     root.append(&storage_dashboard_row());
 
+    // Faz 62: Color Tags section — one row per standard color, each
+    // navigating to that color's `tag:///` virtual location (built by
+    // `crate::tags::sidebar_row`, same click-to-navigate contract as the
+    // Places `row` above). Static list, no live refresh needed: the six
+    // colors never change, only which paths carry them.
+    root.append(&section_heading(t("sidebar.tags")));
+    for color in veyra_filesystem::TagColor::ALL {
+        root.append(&crate::tags::sidebar_row(color, &navigate));
+    }
+
     let bookmarks_section = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     bookmarks_section.append(&section_heading(t("sidebar.bookmarks")));
     let bookmarks_box = gtk4::Box::new(gtk4::Orientation::Vertical, 2);

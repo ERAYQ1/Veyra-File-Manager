@@ -16,6 +16,7 @@ use veyra_filesystem::{FileItem, FileKind, GitFileStatus};
 use crate::config::{ClickPolicy, SharedSettings};
 use crate::dnd::{self, DndWiring};
 use crate::state::SharedGitStatuses;
+use crate::tags::SharedTags;
 use crate::thumbnails::ThumbnailService;
 
 /// The three directory presentation modes, all sharing one `SortConfig`-
@@ -109,6 +110,7 @@ pub(crate) fn build_grid_view(
     settings: SharedSettings,
     on_activate: Rc<dyn Fn(u32)>,
     git_statuses: SharedGitStatuses,
+    tags: SharedTags,
 ) -> gtk4::GridView {
     let factory = gtk4::SignalListItemFactory::new();
 
@@ -153,6 +155,13 @@ pub(crate) fn build_grid_view(
             badge.set_visible(false);
             item_box.append(&badge);
 
+            // Faz 62: color tag pill, hidden until `connect_bind` finds a
+            // tag for this row's file in `tags`.
+            let tag_pill = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+            tag_pill.add_css_class("veyra-tag-pill");
+            tag_pill.set_visible(false);
+            item_box.append(&tag_pill);
+
             list_item.set_child(Some(&item_box));
 
             attach_row_dnd(&item_box, list_item, &dnd_wiring, &selection);
@@ -163,6 +172,7 @@ pub(crate) fn build_grid_view(
         let thumbnails = thumbnails.clone();
         let icon_size = icon_size.clone();
         let git_statuses = git_statuses.clone();
+        let tags = tags.clone();
         factory.connect_bind(move |_, list_item| {
             let list_item = list_item
                 .downcast_ref::<gtk4::ListItem>()
@@ -207,6 +217,12 @@ pub(crate) fn build_grid_view(
             let status = git_status_for(&git_statuses, &file_item);
             if let Some(badge) = child.and_then(|w| w.downcast::<gtk4::Label>().ok()) {
                 apply_git_badge(&badge, status);
+                child = badge.next_sibling();
+            } else {
+                child = None;
+            }
+            if let Some(pill) = child.and_then(|w| w.downcast::<gtk4::Box>().ok()) {
+                apply_tag_pill(&pill, crate::tags::tag_for(&tags, &file_item));
             }
             item_box.update_property(&[gtk4::accessible::Property::Label(
                 &accessible_description_with_git(&file_item, status),
@@ -454,6 +470,27 @@ pub(crate) fn apply_git_badge(badge: &gtk4::Label, status: Option<GitFileStatus>
             badge.set_text("");
             badge.set_tooltip_text(None);
             badge.set_visible(false);
+        }
+    }
+}
+
+/// Applies `color` to a row's Faz 62 tag pill: shows a small
+/// `.veyra-tag-pill` dot tinted with the tag's color, or hides it entirely
+/// for an untagged (`None`) row — recycled rows always pass through here on
+/// bind, same clear-then-reapply contract as `apply_git_badge`.
+pub(crate) fn apply_tag_pill(pill: &gtk4::Box, color: Option<veyra_filesystem::TagColor>) {
+    for class in crate::tags::all_css_classes() {
+        pill.remove_css_class(&class);
+    }
+    match color {
+        Some(color) => {
+            pill.add_css_class(&crate::tags::css_class(color));
+            pill.set_tooltip_text(Some(crate::tags::label(color)));
+            pill.set_visible(true);
+        }
+        None => {
+            pill.set_tooltip_text(None);
+            pill.set_visible(false);
         }
     }
 }

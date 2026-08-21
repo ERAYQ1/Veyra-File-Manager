@@ -6,6 +6,7 @@ use gtk4::prelude::*;
 use crate::config::SharedSettings;
 use crate::dnd::DndWiring;
 use crate::state::SharedGitStatuses;
+use crate::tags::SharedTags;
 use crate::thumbnails::ThumbnailService;
 use crate::views::{build_grid_view, build_selection, item_at};
 
@@ -31,6 +32,7 @@ pub(crate) fn build_compact_view(
     dnd_wiring: DndWiring,
     settings: SharedSettings,
     git_statuses: SharedGitStatuses,
+    tags: SharedTags,
 ) -> (gtk4::Widget, gtk4::MultiSelection) {
     let selection = build_selection(model, filter, Some(sorter.clone()));
     let selection_for_activate = selection.clone();
@@ -50,6 +52,7 @@ pub(crate) fn build_compact_view(
         settings,
         on_activate,
         git_statuses,
+        tags,
     );
     // Narrow horizontal item boxes (icon + name) pack into many columns,
     // giving the dense "flowing columns" layout Compact View is meant for.

@@ -387,6 +387,16 @@ const EN: &[(&str, &str)] = &[
     ("sidebar.preferences", "Preferences"),
     ("sidebar.preferences_tooltip", "Preferences (Ctrl+,)"),
     ("trash.banner_summary", "Trash — {count_label}, {size} total"),
+    // --- Color Tags (Faz 62) ---
+    ("sidebar.tags", "Tags"),
+    ("tags.menu_title", "Tags"),
+    ("tags.red", "Red"),
+    ("tags.orange", "Orange"),
+    ("tags.yellow", "Yellow"),
+    ("tags.green", "Green"),
+    ("tags.blue", "Blue"),
+    ("tags.purple", "Purple"),
+    ("tags.clear", "Remove Tag"),
     ("recent.privacy_mode", "Privacy Mode"),
     (
         "recent.privacy_mode_tooltip",
@@ -1223,6 +1233,16 @@ const TR: &[(&str, &str)] = &[
     ("sidebar.preferences", "Tercihler"),
     ("sidebar.preferences_tooltip", "Tercihler (Ctrl+,)"),
     ("trash.banner_summary", "Çöp Kutusu — {count_label}, toplam {size}"),
+    // --- Renk Etiketleri (Faz 62) ---
+    ("sidebar.tags", "Etiketler"),
+    ("tags.menu_title", "Etiketler"),
+    ("tags.red", "Kırmızı"),
+    ("tags.orange", "Turuncu"),
+    ("tags.yellow", "Sarı"),
+    ("tags.green", "Yeşil"),
+    ("tags.blue", "Mavi"),
+    ("tags.purple", "Mor"),
+    ("tags.clear", "Etiketi Kaldır"),
     ("recent.privacy_mode", "Gizlilik Modu"),
     (
         "recent.privacy_mode_tooltip",

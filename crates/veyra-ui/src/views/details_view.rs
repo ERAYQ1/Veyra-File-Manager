@@ -12,6 +12,7 @@ use crate::config::SharedSettings;
 use crate::dnd::DndWiring;
 use crate::sorting::{SortConfig, SortKey, SortOrder};
 use crate::state::SharedGitStatuses;
+use crate::tags::SharedTags;
 use crate::thumbnails::ThumbnailService;
 use crate::views::{attach_click_policy, icon_name_for, item_at};
 
@@ -53,6 +54,7 @@ pub(crate) fn build_details_view(
     dnd_wiring: DndWiring,
     settings: SharedSettings,
     git_statuses: SharedGitStatuses,
+    tags: SharedTags,
 ) -> DetailsViewHandles {
     let DetailsSortWiring {
         sort_config,
@@ -72,6 +74,7 @@ pub(crate) fn build_details_view(
         dnd_wiring.clone(),
         selection.clone(),
         git_statuses,
+        tags,
     );
     column_view.append_column(&name_col);
     let size_col = text_column("Size", 100, size_label, |a, b| {
@@ -188,6 +191,7 @@ fn name_column(
     dnd_wiring: DndWiring,
     selection: gtk4::MultiSelection,
     git_statuses: SharedGitStatuses,
+    tags: SharedTags,
 ) -> gtk4::ColumnViewColumn {
     let factory = gtk4::SignalListItemFactory::new();
     let thumbnails_for_unbind = thumbnails.clone();
@@ -217,6 +221,13 @@ fn name_column(
         badge.add_css_class("veyra-git-badge");
         badge.set_visible(false);
         row.append(&badge);
+
+        // Faz 62: color tag pill, hidden until `connect_bind` finds a tag
+        // for this row's file in `tags`.
+        let tag_pill = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        tag_pill.add_css_class("veyra-tag-pill");
+        tag_pill.set_visible(false);
+        row.append(&tag_pill);
 
         list_item.set_child(Some(&row));
 
@@ -265,6 +276,12 @@ fn name_column(
         let status = crate::views::git_status_for(&git_statuses, &file_item);
         if let Some(badge) = child.and_then(|w| w.downcast::<gtk4::Label>().ok()) {
             crate::views::apply_git_badge(&badge, status);
+            child = badge.next_sibling();
+        } else {
+            child = None;
+        }
+        if let Some(pill) = child.and_then(|w| w.downcast::<gtk4::Box>().ok()) {
+            crate::views::apply_tag_pill(&pill, crate::tags::tag_for(&tags, &file_item));
         }
         row.update_property(&[gtk4::accessible::Property::Label(
             &crate::views::accessible_description_with_git(&file_item, status),

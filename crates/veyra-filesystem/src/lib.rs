@@ -20,6 +20,7 @@ mod path;
 mod permissions;
 mod progress;
 mod queue;
+mod tags;
 
 pub use advanced::{stat_advanced, AdvancedInfo};
 pub use analyzer::{
@@ -48,4 +49,7 @@ pub use permissions::FilePermissions;
 pub use progress::Progress;
 pub use queue::{
     run_operation, OperationControl, OperationKind, OperationOutcome, OperationRequest,
+};
+pub use tags::{
+    get_paths_by_tag, get_tag, list_all_tagged, remove_tag, set_tag, tags_path, TagColor,
 };

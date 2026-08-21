@@ -1,5 +1,47 @@
 # Changelog
 
+## Faz 62 — Akıllı Renk Etiketleri (Color Tags & Pill Badges)
+
+macOS Finder tarzı 6 renkli dosya/klasör etiketleri: sağ tık menüsünden
+atama, Icon/Compact/Details görünümlerinde zarif renkli rozetler, ve Kenar
+Çubuğu'ndan renge göre anında filtreleme.
+
+### Eklendi
+- **`veyra-filesystem::tags`:** `TagColor` (Red/Orange/Yellow/Green/Blue/
+  Purple, sabit hex paleti) ve `~/.config/veyra/tags.json` üzerinde URI →
+  renk eşlemesini tutan, `bookmarks.rs`/`config.rs` ile aynı atomik yazma
+  (`write_atomic_private`, `.tmp` + rename) desenini izleyen kalıcı depo.
+  `set_tag`/`remove_tag`/`get_tag`/`get_paths_by_tag`/`list_all_tagged`
+  fonksiyonları ve bozuk/eksik dosyayı sessizce boş depoya düşüren, hiç
+  panic atmayan okuma yolu; 12 birim testi.
+- **`veyra-ui::tags`:** UI tarafı ince katman — `recent:///`/`trash:///` ile
+  aynı desende sanal `tag:///<renk>` konumu (`window.rs::load_directory`
+  buraya, gerçek bir GVfs bağlaması değilmiş gibi, etiketli her yolu
+  `stat`leyerek listeleme dallanması ekliyor), her iki panel arasında
+  paylaşılan `SharedTags` haritası (bir etiket dizinin değil dosyanın
+  özelliği olduğundan `AppState::git_statuses`'un aksine dizin bazlı değil,
+  uygulama genelinde tek — her `win.set-tag-selected`/`win.remove-tag-
+  selected` sonrası yeniden yükleniyor), ve rozet/nokta CSS sınıfı + i18n
+  yardımcıları.
+- **Sağ tık menüsü (`context_menu.rs`):** "Etiketler" alt menüsü — 6 renk
+  seçeneği (`win.set-tag-selected`, `open-with-app`'teki gibi renk slug'ı
+  string hedef parametresi olarak) ve "Etiketi Kaldır" (`win.remove-tag-
+  selected`); ikisi de tüm seçili ögelere birden uygulanıyor, tek bir ögeye
+  değil.
+- **Görünüm rozetleri (`views/mod.rs`, `details_view.rs`):** Icon/Compact/
+  Details'ın her üçü de artık satırında bir `.veyra-tag-pill` — etiketli
+  dosyalarda rengiyle parlayan küçük bir daire, etiketsizlerde gizli;
+  `apply_tag_pill` geri dönüştürülen satırların önceki rengini temizleyip
+  yeniden uyguluyor, `apply_git_badge` ile aynı desen.
+- **Kenar Çubuğu (`sidebar.rs`):** "Etiketler" bölümü — 6 renk noktası,
+  her biri kendi `tag:///` sonuç listesine gidiyor.
+- **CSS (`split_view.rs`):** `.veyra-tag-pill`/`.veyra-tag-dot` temel
+  stilleri + her renk için `.veyra-tag-{red,orange,yellow,green,blue,
+  purple}` sınıfı.
+- **i18n:** `sidebar.tags`, `tags.menu_title`, `tags.{red,orange,yellow,
+  green,blue,purple}`, `tags.clear` — hem TR hem EN, parite testleriyle
+  doğrulandı.
+
 ## Faz 61 — Tek Panel Mavi Çerçeve ve Odak Halkası Düzeltmesi
 
 Tek panel modunda `Ctrl+A` veya boş klasöre tıklamada tüm orta ekranın

@@ -79,6 +79,12 @@ pub(crate) struct Chrome {
     /// completion, undo/redo, clipboard copy) surface a toast without a new
     /// parameter threaded through every intermediate function.
     pub toast_overlay: adw::ToastOverlay,
+    /// Faz 62: every tagged path's color, shared by both panels — a tag is
+    /// a property of the file, not of whichever directory it's currently
+    /// listed under, so (unlike the per-directory `SharedGitStatuses`) this
+    /// lives once at the app level and is reloaded (`crate::tags::reload`)
+    /// after every `win.set-tag-selected`/`win.remove-tag-selected`.
+    pub tags: crate::tags::SharedTags,
 }
 
 /// One independent panel: its own navigation chrome, its own `AdwTabView`
@@ -150,6 +156,7 @@ pub(crate) fn build_panel(
     privacy_mode: Rc<RefCell<bool>>,
     settings: SharedSettings,
     toast_overlay: adw::ToastOverlay,
+    tags: crate::tags::SharedTags,
 ) -> Panel {
     let back_button = nav_button("go-previous-symbolic", t("nav.back"), t("nav.back.tooltip"));
     let forward_button = nav_button(
@@ -286,6 +293,7 @@ pub(crate) fn build_panel(
         trash_banner,
         settings,
         toast_overlay,
+        tags,
     };
 
     Panel {
@@ -368,7 +376,20 @@ pub(crate) fn install_panel_css(display: &gtk4::gdk::Display) {
          .veyra-elevated-card { \
            border-radius: 12px; \
            border: 1px solid alpha(currentColor, 0.08); \
-           box-shadow: 0 1px 3px alpha(black, 0.12); }",
+           box-shadow: 0 1px 3px alpha(black, 0.12); }\n\
+         /* Faz 62: color tag pill (view rows) and dot (sidebar rows) — a\n\
+            small glowing circle tinted per `TagColor`, sized differently\n\
+            since a sidebar row has more room than a grid/column cell. */\n\
+         .veyra-tag-pill { min-width: 10px; min-height: 10px; border-radius: 999px; \
+           margin-left: 4px; box-shadow: 0 0 3px alpha(currentColor, 0.5); }\n\
+         .veyra-tag-dot { min-width: 12px; min-height: 12px; border-radius: 999px; \
+           margin-right: 2px; box-shadow: 0 0 3px alpha(currentColor, 0.5); }\n\
+         .veyra-tag-red { background-color: #e01b24; color: #e01b24; }\n\
+         .veyra-tag-orange { background-color: #ff7800; color: #ff7800; }\n\
+         .veyra-tag-yellow { background-color: #f6d32d; color: #f6d32d; }\n\
+         .veyra-tag-green { background-color: #26a269; color: #26a269; }\n\
+         .veyra-tag-blue { background-color: #3584e4; color: #3584e4; }\n\
+         .veyra-tag-purple { background-color: #9141ac; color: #9141ac; }",
     );
     gtk4::style_context_add_provider_for_display(
         display,
