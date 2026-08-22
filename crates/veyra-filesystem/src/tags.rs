@@ -166,6 +166,31 @@ fn clear_all_tags_at(path: &Path) -> io::Result<()> {
     save_to(path, &file)
 }
 
+/// Removes every tag assignment whose target no longer exists on disk
+/// (the file/folder was since deleted, moved, or renamed outside Veyra's
+/// own move/rename paths, which otherwise keep `tags.json` in sync) —
+/// Faz 65's "Kullanılmayan Etiketleri Temizle" (Clear Unused Tags) button.
+/// Returns how many stale entries were removed. A local-path URI resolves
+/// back to a plain filesystem check (`Path::exists`); a non-local URI
+/// (remote GVfs mount) is left alone — its target may simply be
+/// unreachable right now (Rule #16/#17: a path isn't stale just because
+/// it's momentarily unreachable).
+fn clear_unused_tags_at(path: &Path) -> io::Result<usize> {
+    let mut file = load_from(path);
+    let before = file.tags.len();
+    file.tags
+        .retain(|uri, _| match gio::File::for_uri(uri).path() {
+            Some(local) => local.exists(),
+            None => true,
+        });
+    let removed = before - file.tags.len();
+    if removed == 0 {
+        return Ok(0);
+    }
+    save_to(path, &file)?;
+    Ok(removed)
+}
+
 /// Sets `color`'s custom display name to `name`. A blank/whitespace-only
 /// `name` clears the override instead of storing an empty string, falling
 /// back to the default localized color name — same "blank clears the
@@ -229,6 +254,13 @@ pub fn list_all_tagged() -> Vec<(VeyraPath, TagColor)> {
 /// custom color names untouched.
 pub fn clear_all_tags() -> io::Result<()> {
     clear_all_tags_at(&tags_path())
+}
+
+/// Removes every tag assignment pointing at a since-deleted local path in
+/// the real tags file — the "Kullanılmayan Etiketleri Temizle" (Clear
+/// Unused Tags) Preferences button. Returns how many entries were removed.
+pub fn clear_unused_tags() -> io::Result<usize> {
+    clear_unused_tags_at(&tags_path())
 }
 
 /// Sets `color`'s custom display name in the real tags file (Faz 63). A
@@ -486,6 +518,34 @@ mod tests {
 
         assert!(clear_all_tags_at(&path).is_ok());
         assert!(list_all_tagged_at(&path).is_empty());
+    }
+
+    #[test]
+    fn clear_unused_tags_removes_only_entries_for_deleted_local_paths() {
+        let path = temp_tags_path("clear_unused_tags_removes_only_entries_for_deleted_local_paths");
+        std::fs::remove_file(&path).ok();
+
+        let existing = tempfile::NamedTempFile::new().unwrap();
+        let existing_path = VeyraPath::from_local(existing.path());
+        let missing_path = VeyraPath::from_local("/nonexistent/veyra-tags-test/gone.txt");
+        set_tag_at(&path, &existing_path, TagColor::Red).unwrap();
+        set_tag_at(&path, &missing_path, TagColor::Blue).unwrap();
+
+        let removed = clear_unused_tags_at(&path).unwrap();
+
+        assert_eq!(removed, 1);
+        assert_eq!(get_tag_at(&path, &existing_path), Some(TagColor::Red));
+        assert_eq!(get_tag_at(&path, &missing_path), None);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn clear_unused_tags_on_empty_store_is_a_no_op() {
+        let path = temp_tags_path("clear_unused_tags_on_empty_store_is_a_no_op");
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(clear_unused_tags_at(&path).unwrap(), 0);
     }
 
     #[test]

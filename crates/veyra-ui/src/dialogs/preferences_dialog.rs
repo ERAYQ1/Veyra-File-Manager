@@ -13,9 +13,10 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use crate::config::{
-    AccentColorPref, ClickPolicy, ColorSchemePref, DefaultViewMode, IconSizePref, LanguagePref,
-    SharedSettings, MAX_PREVIEW_SIZE_CHOICES_KB, STREAM_CHUNK_SIZE_CHOICES,
-    THUMBNAIL_CACHE_CAPACITY_CHOICES,
+    AccentColorPref, ClickPolicy, ColorSchemePref, CompressionLevelPref, ConflictDefaultAction,
+    DateFormatPref, DefaultViewMode, IconSizePref, LanguagePref, NewTabLocation, SharedSettings,
+    SizeUnitPref, TerminalPref, ARCHIVE_FORMAT_CHOICES, MAX_PREVIEW_SIZE_CHOICES_KB,
+    SEARCH_MAX_DEPTH_CHOICES, STREAM_CHUNK_SIZE_CHOICES, THUMBNAIL_CACHE_CAPACITY_CHOICES,
 };
 use crate::i18n::{t, t_fmt, t_plural};
 use crate::network;
@@ -47,14 +48,14 @@ pub(crate) fn show(
         .build();
 
     dialog.add(&appearance_page(&settings, &refresh_all_tabs));
-    dialog.add(&navigation_page(&settings));
+    dialog.add(&navigation_page(&settings, &refresh_all_tabs));
     dialog.add(&files_page(&settings));
     dialog.add(&search_page(&settings, &rebuild_search_index));
     dialog.add(&preview_page(&settings, &preview_widget));
     dialog.add(&performance_page(&settings, &thumbnails, &refresh_all_tabs));
     dialog.add(&tags_page(&tags, &refresh_all_tabs));
     dialog.add(&shortcuts_page(window));
-    dialog.add(&privacy_page(&settings, &thumbnails));
+    dialog.add(&privacy_page(&settings));
     dialog.add(&advanced_page(
         &dialog,
         &settings,
@@ -229,12 +230,76 @@ fn appearance_page(
         });
     }
     g.add(&language_row);
-
     page.add(&g);
+
+    let format_group = group(t("prefs.appearance.group.formatting"));
+
+    let current = settings.borrow().date_format;
+    let date_format_row = combo_row(
+        t("prefs.appearance.date_format.title"),
+        &[
+            t("prefs.appearance.date_format.relative"),
+            t("prefs.appearance.date_format.absolute"),
+        ],
+        match current {
+            DateFormatPref::Relative => 0,
+            DateFormatPref::Absolute => 1,
+        },
+    );
+    {
+        let settings = settings.clone();
+        let refresh_all_tabs = refresh_all_tabs.clone();
+        date_format_row.connect_selected_notify(move |row| {
+            let pref = if row.selected() == 1 {
+                DateFormatPref::Absolute
+            } else {
+                DateFormatPref::Relative
+            };
+            settings.borrow_mut().date_format = pref;
+            persist(&settings);
+            crate::config::set_date_format(pref);
+            refresh_all_tabs();
+        });
+    }
+    format_group.add(&date_format_row);
+
+    let current = settings.borrow().size_unit;
+    let size_unit_row = combo_row(
+        t("prefs.appearance.size_unit.title"),
+        &[
+            t("prefs.appearance.size_unit.binary"),
+            t("prefs.appearance.size_unit.decimal"),
+        ],
+        match current {
+            SizeUnitPref::Binary => 0,
+            SizeUnitPref::Decimal => 1,
+        },
+    );
+    {
+        let settings = settings.clone();
+        let refresh_all_tabs = refresh_all_tabs.clone();
+        size_unit_row.connect_selected_notify(move |row| {
+            let pref = if row.selected() == 1 {
+                SizeUnitPref::Decimal
+            } else {
+                SizeUnitPref::Binary
+            };
+            settings.borrow_mut().size_unit = pref;
+            persist(&settings);
+            crate::config::set_size_unit(pref);
+            refresh_all_tabs();
+        });
+    }
+    format_group.add(&size_unit_row);
+    page.add(&format_group);
+
     page
 }
 
-fn navigation_page(settings: &SharedSettings) -> adw::PreferencesPage {
+fn navigation_page(
+    settings: &SharedSettings,
+    refresh_all_tabs: &Rc<dyn Fn()>,
+) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
         .title(t("prefs.page.navigation"))
         .icon_name("go-next-symbolic")
@@ -280,9 +345,52 @@ fn navigation_page(settings: &SharedSettings) -> adw::PreferencesPage {
         });
     }
     g.add(&open_new_tab_row);
+
+    let current = settings.borrow().natural_sort;
+    let natural_sort_row = switch_row(
+        t("prefs.navigation.natural_sort.title"),
+        t("prefs.navigation.natural_sort.subtitle"),
+        current,
+    );
+    {
+        let settings = settings.clone();
+        let refresh_all_tabs = refresh_all_tabs.clone();
+        natural_sort_row.connect_active_notify(move |row| {
+            settings.borrow_mut().natural_sort = row.is_active();
+            persist(&settings);
+            refresh_all_tabs();
+        });
+    }
+    g.add(&natural_sort_row);
     page.add(&g);
 
     let tabs_group = group(t("prefs.navigation.group.tabs"));
+
+    let current = settings.borrow().new_tab_location;
+    let new_tab_location_row = combo_row(
+        t("prefs.navigation.new_tab_location.title"),
+        &[
+            t("prefs.navigation.new_tab_location.current_folder"),
+            t("prefs.navigation.new_tab_location.home"),
+        ],
+        match current {
+            NewTabLocation::CurrentFolder => 0,
+            NewTabLocation::Home => 1,
+        },
+    );
+    {
+        let settings = settings.clone();
+        new_tab_location_row.connect_selected_notify(move |row| {
+            settings.borrow_mut().new_tab_location = if row.selected() == 1 {
+                NewTabLocation::Home
+            } else {
+                NewTabLocation::CurrentFolder
+            };
+            persist(&settings);
+        });
+    }
+    tabs_group.add(&new_tab_location_row);
+
     let restore_row = switch_row(
         t("prefs.navigation.restore_tabs.title"),
         t("prefs.navigation.restore_tabs.subtitle"),
@@ -395,7 +503,100 @@ fn files_page(settings: &SharedSettings) -> adw::PreferencesPage {
         });
     }
     confirm_group.add(&confirm_delete_row);
+
+    let current = settings.borrow().default_conflict_action;
+    let conflict_row = combo_row(
+        t("prefs.files.conflict_action.title"),
+        &[
+            t("prefs.files.conflict_action.always_ask"),
+            t("prefs.files.conflict_action.auto_rename"),
+            t("prefs.files.conflict_action.overwrite"),
+            t("prefs.files.conflict_action.skip"),
+        ],
+        match current {
+            ConflictDefaultAction::AlwaysAsk => 0,
+            ConflictDefaultAction::AutoRename => 1,
+            ConflictDefaultAction::Overwrite => 2,
+            ConflictDefaultAction::Skip => 3,
+        },
+    );
+    {
+        let settings = settings.clone();
+        conflict_row.connect_selected_notify(move |row| {
+            settings.borrow_mut().default_conflict_action = match row.selected() {
+                1 => ConflictDefaultAction::AutoRename,
+                2 => ConflictDefaultAction::Overwrite,
+                3 => ConflictDefaultAction::Skip,
+                _ => ConflictDefaultAction::AlwaysAsk,
+            };
+            persist(&settings);
+        });
+    }
+    confirm_group.add(&conflict_row);
+
+    let bidi_row = switch_row(
+        t("prefs.files.warn_bidi.title"),
+        t("prefs.files.warn_bidi.subtitle"),
+        settings.borrow().warn_bidi_spoofing,
+    );
+    {
+        let settings = settings.clone();
+        bidi_row.connect_active_notify(move |row| {
+            settings.borrow_mut().warn_bidi_spoofing = row.is_active();
+            persist(&settings);
+        });
+    }
+    confirm_group.add(&bidi_row);
     page.add(&confirm_group);
+
+    let archive_group = group(t("prefs.files.group.archive"));
+
+    let current = settings.borrow().default_archive_format;
+    let archive_labels: Vec<&str> = ARCHIVE_FORMAT_CHOICES.iter().map(|f| f.label()).collect();
+    let archive_row = combo_row(
+        t("prefs.files.archive_format.title"),
+        &archive_labels,
+        ARCHIVE_FORMAT_CHOICES
+            .iter()
+            .position(|f| *f == current)
+            .unwrap_or(0),
+    );
+    {
+        let settings = settings.clone();
+        archive_row.connect_selected_notify(move |row| {
+            if let Some(format) = ARCHIVE_FORMAT_CHOICES.get(row.selected() as usize) {
+                settings.borrow_mut().default_archive_format = *format;
+                persist(&settings);
+            }
+        });
+    }
+    archive_group.add(&archive_row);
+
+    let current = settings.borrow().compression_level;
+    let compression_labels: Vec<&str> = CompressionLevelPref::ALL
+        .iter()
+        .map(|l| l.label())
+        .collect();
+    let compression_row = combo_row(
+        t("prefs.files.compression_level.title"),
+        &compression_labels,
+        CompressionLevelPref::ALL
+            .iter()
+            .position(|l| *l == current)
+            .unwrap_or(1),
+    );
+    {
+        let settings = settings.clone();
+        compression_row.connect_selected_notify(move |row| {
+            if let Some(level) = CompressionLevelPref::ALL.get(row.selected() as usize) {
+                settings.borrow_mut().compression_level = *level;
+                persist(&settings);
+                veyra_filesystem::set_compression_level(level.level());
+            }
+        });
+    }
+    archive_group.add(&compression_row);
+    page.add(&archive_group);
 
     page
 }
@@ -441,6 +642,49 @@ fn search_page(
         });
     }
     g.add(&max_results_row);
+
+    let current = settings.borrow().search_max_depth;
+    let depth_labels: Vec<String> = SEARCH_MAX_DEPTH_CHOICES
+        .iter()
+        .map(|n| n.to_string())
+        .collect();
+    let depth_labels_ref: Vec<&str> = depth_labels.iter().map(String::as_str).collect();
+    let depth_row = combo_row(
+        t("prefs.search.max_depth.title"),
+        &depth_labels_ref,
+        SEARCH_MAX_DEPTH_CHOICES
+            .iter()
+            .position(|n| *n == current)
+            .unwrap_or(2),
+    );
+    {
+        let settings = settings.clone();
+        let rebuild_search_index = rebuild_search_index.clone();
+        depth_row.connect_selected_notify(move |row| {
+            if let Some(n) = SEARCH_MAX_DEPTH_CHOICES.get(row.selected() as usize) {
+                settings.borrow_mut().search_max_depth = *n;
+                persist(&settings);
+                rebuild_search_index();
+            }
+        });
+    }
+    g.add(&depth_row);
+
+    let include_hidden_row = switch_row(
+        t("prefs.search.include_hidden.title"),
+        t("prefs.search.include_hidden.subtitle"),
+        settings.borrow().search_include_hidden,
+    );
+    {
+        let settings = settings.clone();
+        let rebuild_search_index = rebuild_search_index.clone();
+        include_hidden_row.connect_active_notify(move |row| {
+            settings.borrow_mut().search_include_hidden = row.is_active();
+            persist(&settings);
+            rebuild_search_index();
+        });
+    }
+    g.add(&include_hidden_row);
 
     let (rebuild_row, rebuild_button) = action_row_button(
         t("prefs.search.rebuild.title"),
@@ -520,8 +764,53 @@ fn preview_page(settings: &SharedSettings, preview_widget: &gtk4::Widget) -> adw
         });
     }
     g.add(&folder_count_row);
-
     page.add(&g);
+
+    let ql_group = group(t("prefs.preview.group.quick_look"));
+
+    let quick_look_row = switch_row(
+        t("prefs.preview.quick_look.title"),
+        t("prefs.preview.quick_look.subtitle"),
+        settings.borrow().enable_quick_look,
+    );
+    {
+        let settings = settings.clone();
+        quick_look_row.connect_active_notify(move |row| {
+            settings.borrow_mut().enable_quick_look = row.is_active();
+            persist(&settings);
+        });
+    }
+    ql_group.add(&quick_look_row);
+
+    let line_numbers_row = switch_row(
+        t("prefs.preview.quick_look_line_numbers.title"),
+        "",
+        settings.borrow().quick_look_line_numbers,
+    );
+    {
+        let settings = settings.clone();
+        line_numbers_row.connect_active_notify(move |row| {
+            settings.borrow_mut().quick_look_line_numbers = row.is_active();
+            persist(&settings);
+        });
+    }
+    ql_group.add(&line_numbers_row);
+
+    let autoplay_row = switch_row(
+        t("prefs.preview.media_autoplay.title"),
+        "",
+        settings.borrow().media_autoplay,
+    );
+    {
+        let settings = settings.clone();
+        autoplay_row.connect_active_notify(move |row| {
+            settings.borrow_mut().media_autoplay = row.is_active();
+            persist(&settings);
+        });
+    }
+    ql_group.add(&autoplay_row);
+    page.add(&ql_group);
+
     page
 }
 
@@ -602,8 +891,52 @@ fn performance_page(
         });
     }
     g.add(&cache_row);
-
     page.add(&g);
+
+    let reflink_group = group(t("prefs.performance.group.reflink"));
+    let reflink_row = switch_row(
+        t("prefs.performance.reflink.title"),
+        t("prefs.performance.reflink.subtitle"),
+        settings.borrow().enable_reflink,
+    );
+    {
+        let settings = settings.clone();
+        reflink_row.connect_active_notify(move |row| {
+            let enabled = row.is_active();
+            settings.borrow_mut().enable_reflink = enabled;
+            persist(&settings);
+            veyra_filesystem::set_reflink_enabled(enabled);
+        });
+    }
+    reflink_group.add(&reflink_row);
+    page.add(&reflink_group);
+
+    let disk_group = group(t("prefs.performance.group.disk_cache"));
+    let (clear_thumbnails_row, clear_thumbnails_button) = action_row_button(
+        t("prefs.performance.disk_cache.title"),
+        &t_fmt(
+            "prefs.performance.disk_cache.subtitle",
+            &[(
+                "size",
+                &veyra_filesystem::format_size(thumbnails.l2_cache_size_bytes()),
+            )],
+        ),
+        t("prefs.privacy.clear.button"),
+    );
+    {
+        let thumbnails = thumbnails.clone();
+        let clear_thumbnails_row = clear_thumbnails_row.clone();
+        clear_thumbnails_button.connect_clicked(move |_| {
+            thumbnails.clear_l2_cache();
+            clear_thumbnails_row.set_subtitle(&t_fmt(
+                "prefs.performance.disk_cache.subtitle",
+                &[("size", &veyra_filesystem::format_size(0))],
+            ));
+        });
+    }
+    disk_group.add(&clear_thumbnails_row);
+    page.add(&disk_group);
+
     page
 }
 
@@ -724,6 +1057,31 @@ fn tags_page(
         });
     }
     maintenance_group.add(&clear_all_row);
+
+    let (clear_unused_row, clear_unused_button) = action_row_button(
+        t("prefs.tags.clear_unused"),
+        t("prefs.tags.clear_unused_subtitle"),
+        t("prefs.tags.clear_unused_button"),
+    );
+    {
+        let tags = tags.clone();
+        let refresh_all_tabs = refresh_all_tabs.clone();
+        let clear_unused_row = clear_unused_row.clone();
+        clear_unused_button.connect_clicked(move |_| match veyra_filesystem::clear_unused_tags() {
+            Ok(removed) => {
+                clear_unused_row.set_subtitle(&t_fmt(
+                    "prefs.tags.clear_unused_result",
+                    &[("count", &removed.to_string())],
+                ));
+                crate::tags::reload(&tags);
+                refresh_all_tabs();
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to clear unused tags");
+            }
+        });
+    }
+    maintenance_group.add(&clear_unused_row);
     page.add(&maintenance_group);
 
     page
@@ -771,41 +1129,12 @@ fn shortcuts_page(window: &adw::ApplicationWindow) -> adw::PreferencesPage {
     page
 }
 
-fn privacy_page(
-    settings: &SharedSettings,
-    thumbnails: &Rc<ThumbnailService>,
-) -> adw::PreferencesPage {
+fn privacy_page(settings: &SharedSettings) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
         .title(t("prefs.page.privacy"))
         .icon_name("security-high-symbolic")
         .name("privacy")
         .build();
-
-    let thumbnail_group = group(t("prefs.privacy.group.thumbnail_cache"));
-    let (clear_thumbnails_row, clear_thumbnails_button) = action_row_button(
-        t("prefs.privacy.clear_thumbnails.title"),
-        &t_fmt(
-            "prefs.privacy.clear_thumbnails.subtitle",
-            &[(
-                "size",
-                &veyra_filesystem::format_size(thumbnails.l2_cache_size_bytes()),
-            )],
-        ),
-        t("prefs.privacy.clear.button"),
-    );
-    {
-        let thumbnails = thumbnails.clone();
-        let clear_thumbnails_row = clear_thumbnails_row.clone();
-        clear_thumbnails_button.connect_clicked(move |_| {
-            thumbnails.clear_l2_cache();
-            clear_thumbnails_row.set_subtitle(&t_fmt(
-                "prefs.privacy.clear_thumbnails.subtitle",
-                &[("size", &veyra_filesystem::format_size(0))],
-            ));
-        });
-    }
-    thumbnail_group.add(&clear_thumbnails_row);
-    page.add(&thumbnail_group);
 
     let history_group = group(t("prefs.privacy.group.history"));
     let (clear_files_row, clear_files_button) = action_row_button(
@@ -965,8 +1294,25 @@ fn advanced_page(
         });
     }
     developer_group.add(&developer_mode_row);
+
+    let git_badges_row = switch_row(
+        t("prefs.advanced.git_badges.title"),
+        t("prefs.advanced.git_badges.subtitle"),
+        settings.borrow().show_git_badges,
+    );
+    {
+        let settings = settings.clone();
+        let refresh_all_tabs = refresh_all_tabs.clone();
+        git_badges_row.connect_active_notify(move |row| {
+            settings.borrow_mut().show_git_badges = row.is_active();
+            persist(&settings);
+            refresh_all_tabs();
+        });
+    }
+    developer_group.add(&git_badges_row);
     page.add(&developer_group);
 
+    page.add(&terminal_group(settings));
     page.add(&system_integration_group());
 
     let g = group(t("prefs.advanced.group.reset"));
@@ -1009,10 +1355,18 @@ fn advanced_page(
                 persist(&settings);
                 adw::StyleManager::default().set_color_scheme(defaults.color_scheme.to_adw());
                 crate::config::apply_accent_color(defaults.accent_color);
+                crate::config::set_date_format(defaults.date_format);
+                crate::config::set_size_unit(defaults.size_unit);
                 thumbnails.resize_l1(defaults.thumbnail_cache_capacity);
                 preview_widget.set_visible(defaults.enable_preview_panel);
                 veyra_core::security::set_sanitize_log_paths(defaults.sanitize_log_paths);
                 veyra_core::crash_report::set_crash_reports_enabled(defaults.save_crash_reports);
+                crate::terminal::set_terminal_pref(
+                    defaults.terminal_pref,
+                    &defaults.custom_terminal_command,
+                );
+                veyra_filesystem::set_reflink_enabled(defaults.enable_reflink);
+                veyra_filesystem::set_compression_level(defaults.compression_level.level());
                 refresh_all_tabs();
                 // Simplest correct way to reflect every reset value across
                 // every page's widgets is to close and let the next
@@ -1025,6 +1379,63 @@ fn advanced_page(
     g.add(&reset_row);
     page.add(&g);
     page
+}
+
+/// Faz 65: the Advanced page's terminal emulator picker — `TerminalPref`
+/// pins one specific emulator ahead of `terminal::resolve_terminal`'s
+/// existing `xdg-terminal-exec`/`$TERMINAL`/GIO-default/known-list chain
+/// (Rule #25 stays intact: even `Custom` is a user-supplied override, never
+/// a hardcoded terminal). The custom-command entry only shows when
+/// `Custom` is selected.
+fn terminal_group(settings: &SharedSettings) -> adw::PreferencesGroup {
+    let g = group(t("prefs.advanced.group.terminal"));
+
+    let current = settings.borrow().terminal_pref;
+    let labels: Vec<&str> = TerminalPref::ALL.iter().map(|p| p.label()).collect();
+    let terminal_row = combo_row(
+        t("prefs.advanced.terminal.title"),
+        &labels,
+        TerminalPref::ALL
+            .iter()
+            .position(|p| *p == current)
+            .unwrap_or(0),
+    );
+
+    let custom_row = adw::EntryRow::builder()
+        .title(t("prefs.advanced.terminal.custom_command"))
+        .show_apply_button(true)
+        .build();
+    custom_row.set_text(&settings.borrow().custom_terminal_command);
+    custom_row.set_visible(current == TerminalPref::Custom);
+    {
+        let settings = settings.clone();
+        custom_row.connect_apply(move |row| {
+            let command = row.text().to_string();
+            settings.borrow_mut().custom_terminal_command = command.clone();
+            persist(&settings);
+            crate::terminal::set_terminal_pref(settings.borrow().terminal_pref, &command);
+        });
+    }
+
+    {
+        let settings = settings.clone();
+        let custom_row = custom_row.clone();
+        terminal_row.connect_selected_notify(move |row| {
+            if let Some(pref) = TerminalPref::ALL.get(row.selected() as usize) {
+                settings.borrow_mut().terminal_pref = *pref;
+                persist(&settings);
+                custom_row.set_visible(*pref == TerminalPref::Custom);
+                crate::terminal::set_terminal_pref(
+                    *pref,
+                    &settings.borrow().custom_terminal_command,
+                );
+            }
+        });
+    }
+
+    g.add(&terminal_row);
+    g.add(&custom_row);
+    g
 }
 
 /// Faz 44: the Advanced page's "Default File Manager" row — status subtitle

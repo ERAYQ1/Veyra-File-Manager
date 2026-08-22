@@ -99,6 +99,11 @@ pub(crate) struct SortConfig {
     pub key: SortKey,
     pub order: SortOrder,
     pub folders_first: bool,
+    /// Faz 65: whether `Dosya 2` sorts before `Dosya 10` (digit runs compared
+    /// numerically) or purely lexicographically (`Dosya 10` before `Dosya
+    /// 2`). Seeded from `VeyraSettings::natural_sort` for each new tab, same
+    /// pattern as `folders_first`.
+    pub natural_sort: bool,
 }
 
 impl Default for SortConfig {
@@ -107,6 +112,7 @@ impl Default for SortConfig {
             key: SortKey::Name,
             order: SortOrder::Ascending,
             folders_first: true,
+            natural_sort: true,
         }
     }
 }
@@ -121,41 +127,51 @@ pub(crate) fn compare_items(a: &FileItem, b: &FileItem, config: &SortConfig) -> 
             return b_dir.cmp(&a_dir);
         }
     }
-    let ordering = key_cmp(a, b, config.key);
+    let ordering = key_cmp(a, b, config.key, config.natural_sort);
     config.order.apply(ordering)
 }
 
-fn key_cmp(a: &FileItem, b: &FileItem, key: SortKey) -> StdOrdering {
+fn key_cmp(a: &FileItem, b: &FileItem, key: SortKey, natural_sort: bool) -> StdOrdering {
     match key {
-        SortKey::Name => natural_name_cmp(a.name(), b.name()),
+        SortKey::Name => name_cmp(a.name(), b.name(), natural_sort),
         SortKey::Size => a
             .metadata
             .size_bytes
             .cmp(&b.metadata.size_bytes)
-            .then_with(|| natural_name_cmp(a.name(), b.name())),
+            .then_with(|| name_cmp(a.name(), b.name(), natural_sort)),
         SortKey::Type => type_key(a)
             .cmp(&type_key(b))
-            .then_with(|| natural_name_cmp(a.name(), b.name())),
+            .then_with(|| name_cmp(a.name(), b.name(), natural_sort)),
         SortKey::Modified => a
             .metadata
             .modified
             .cmp(&b.metadata.modified)
-            .then_with(|| natural_name_cmp(a.name(), b.name())),
+            .then_with(|| name_cmp(a.name(), b.name(), natural_sort)),
         SortKey::Created => a
             .metadata
             .created
             .cmp(&b.metadata.created)
-            .then_with(|| natural_name_cmp(a.name(), b.name())),
+            .then_with(|| name_cmp(a.name(), b.name(), natural_sort)),
         SortKey::Accessed => a
             .metadata
             .accessed
             .cmp(&b.metadata.accessed)
-            .then_with(|| natural_name_cmp(a.name(), b.name())),
+            .then_with(|| name_cmp(a.name(), b.name(), natural_sort)),
         SortKey::Owner => a
             .metadata
             .owner
             .cmp(&b.metadata.owner)
-            .then_with(|| natural_name_cmp(a.name(), b.name())),
+            .then_with(|| name_cmp(a.name(), b.name(), natural_sort)),
+    }
+}
+
+/// Dispatches to natural (digit-aware) or plain case-insensitive comparison
+/// depending on the Faz 65 "Natural Sort" preference.
+fn name_cmp(a: &str, b: &str, natural_sort: bool) -> StdOrdering {
+    if natural_sort {
+        natural_name_cmp(a, b)
+    } else {
+        a.to_lowercase().cmp(&b.to_lowercase())
     }
 }
 
@@ -409,6 +425,7 @@ mod tests {
             key: SortKey::Name,
             order: SortOrder::Ascending,
             folders_first: false,
+            natural_sort: true,
         };
         let mut items = [
             file_with("file20", 0, None, "text/plain", false),
@@ -429,6 +446,7 @@ mod tests {
             key: SortKey::Name,
             order: SortOrder::Ascending,
             folders_first: true,
+            natural_sort: true,
         };
         let mut items = [
             file_with("file2", 0, None, "text/plain", false),
@@ -458,6 +476,7 @@ mod tests {
             key: SortKey::Name,
             order: SortOrder::Ascending,
             folders_first: false,
+            natural_sort: true,
         };
         let a = file_with("Banana", 0, None, "text/plain", false);
         let b = file_with("apple", 0, None, "text/plain", false);
@@ -472,6 +491,7 @@ mod tests {
             key: SortKey::Size,
             order: SortOrder::Descending,
             folders_first: true,
+            natural_sort: true,
         };
         let d = dir("zzz");
         let f = file_with("aaa", 999_999, None, "text/plain", false);
@@ -484,6 +504,7 @@ mod tests {
             key: SortKey::Name,
             order: SortOrder::Ascending,
             folders_first: false,
+            natural_sort: true,
         };
         let d = dir("zzz");
         let f = file_with("aaa", 0, None, "text/plain", false);
@@ -498,6 +519,7 @@ mod tests {
             key: SortKey::Size,
             order: SortOrder::Ascending,
             folders_first: false,
+            natural_sort: true,
         };
         let desc = SortConfig {
             order: SortOrder::Descending,
@@ -758,6 +780,27 @@ mod tests {
             QuickFilter::RecentlyModified,
             now
         ));
+    }
+
+    // --- Faz 65: natural_sort toggle ---
+
+    #[test]
+    fn natural_sort_disabled_sorts_purely_lexicographically() {
+        let config = SortConfig {
+            key: SortKey::Name,
+            order: SortOrder::Ascending,
+            folders_first: false,
+            natural_sort: false,
+        };
+        let mut items = [
+            file_with("file20", 0, None, "text/plain", false),
+            file_with("file1", 0, None, "text/plain", false),
+            file_with("file10", 0, None, "text/plain", false),
+            file_with("file2", 0, None, "text/plain", false),
+        ];
+        items.sort_by(|a, b| compare_items(a, b, &config));
+        let names: Vec<&str> = items.iter().map(|i| i.name()).collect();
+        assert_eq!(names, ["file1", "file10", "file2", "file20"]);
     }
 
     // --- SortOrder helpers ---

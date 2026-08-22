@@ -410,6 +410,12 @@ const EN: &[(&str, &str)] = &[
         "Clears every custom tag name",
     ),
     ("prefs.tags.reset_names_button", "Reset"),
+    ("prefs.tags.clear_unused", "Clear Unused Tags"),
+    ("prefs.tags.clear_unused_button", "Clear"),
+    (
+        "prefs.tags.clear_unused_subtitle",
+        "Remove stale tag entries for deleted or moved files",
+    ),
     ("prefs.tags.clear_all", "Clear All Tags"),
     (
         "prefs.tags.clear_all_subtitle",
@@ -744,6 +750,28 @@ const EN: &[(&str, &str)] = &[
         "prefs.appearance.icon_size.extra_large",
         "Extra Large (128px)",
     ),
+    (
+        "prefs.appearance.group.formatting",
+        "Date & Size Formatting",
+    ),
+    ("prefs.appearance.date_format.title", "Date Format"),
+    (
+        "prefs.appearance.date_format.relative",
+        "Relative (e.g. 5 minutes ago)",
+    ),
+    (
+        "prefs.appearance.date_format.absolute",
+        "Absolute (e.g. 2026-08-22 12:30)",
+    ),
+    ("prefs.appearance.size_unit.title", "Size Unit Standard"),
+    (
+        "prefs.appearance.size_unit.binary",
+        "Binary / IEC (1024 B = 1 KiB)",
+    ),
+    (
+        "prefs.appearance.size_unit.decimal",
+        "Decimal / SI (1000 B = 1 KB)",
+    ),
     // --- Preferences: Navigation ---
     ("prefs.navigation.group.opening_items", "Opening Items"),
     ("prefs.navigation.click_policy.title", "Click Policy"),
@@ -762,6 +790,26 @@ const EN: &[(&str, &str)] = &[
     (
         "prefs.navigation.open_new_tab.subtitle",
         "Middle-click and sidebar navigation already do this; applies here too on your next launch",
+    ),
+    (
+        "prefs.navigation.natural_sort.title",
+        "Natural / Numerical Sorting",
+    ),
+    (
+        "prefs.navigation.natural_sort.subtitle",
+        "Sort File 2 before File 10",
+    ),
+    (
+        "prefs.navigation.new_tab_location.title",
+        "New Tab Initial Location",
+    ),
+    (
+        "prefs.navigation.new_tab_location.current_folder",
+        "Current Folder",
+    ),
+    (
+        "prefs.navigation.new_tab_location.home",
+        "Home Directory",
     ),
     ("prefs.navigation.group.tabs", "Tabs"),
     (
@@ -801,6 +849,25 @@ const EN: &[(&str, &str)] = &[
         "prefs.files.confirm_delete.title",
         "Confirm Before Permanently Deleting",
     ),
+    ("prefs.files.group.archive", "Archiving & Compression"),
+    ("prefs.files.archive_format.title", "Default Archive Format"),
+    (
+        "prefs.files.compression_level.title",
+        "Default Compression Level",
+    ),
+    ("prefs.files.conflict_action.title", "File Conflict Action"),
+    ("prefs.files.conflict_action.always_ask", "Always ask"),
+    ("prefs.files.conflict_action.auto_rename", "Auto-rename"),
+    ("prefs.files.conflict_action.overwrite", "Overwrite"),
+    ("prefs.files.conflict_action.skip", "Skip"),
+    (
+        "prefs.files.warn_bidi.title",
+        "BiDi Unicode Spoofing Warning",
+    ),
+    (
+        "prefs.files.warn_bidi.subtitle",
+        "Warn when filenames contain directional override characters",
+    ),
     // --- Preferences: Search ---
     ("prefs.search.group.indexing", "Indexing"),
     ("prefs.search.enable.title", "Enable Fast Search Indexer"),
@@ -809,6 +876,18 @@ const EN: &[(&str, &str)] = &[
         "SQLite + FTS5 index backing name:/type:/size:/modified: searches",
     ),
     ("prefs.search.max_results.title", "Max Search Results"),
+    (
+        "prefs.search.max_depth.title",
+        "Maximum Directory Search Depth",
+    ),
+    (
+        "prefs.search.include_hidden.title",
+        "Include Hidden Files in Search",
+    ),
+    (
+        "prefs.search.include_hidden.subtitle",
+        "Index hidden dot-files and folders as well",
+    ),
     ("prefs.search.rebuild.title", "Rebuild Search Index"),
     (
         "prefs.search.rebuild.subtitle",
@@ -820,6 +899,20 @@ const EN: &[(&str, &str)] = &[
     ("prefs.preview.enable.title", "Enable Preview Panel"),
     ("prefs.preview.size_limit.title", "Preview Size Limit"),
     ("prefs.preview.folder_count.title", "Show Folder Item Count"),
+    ("prefs.preview.group.quick_look", "Quick Look (Space Preview)"),
+    ("prefs.preview.quick_look.title", "Live Preview on Space"),
+    (
+        "prefs.preview.quick_look.subtitle",
+        "Show file contents instantly when Space is pressed",
+    ),
+    (
+        "prefs.preview.quick_look_line_numbers.title",
+        "Code & Text Line Numbers",
+    ),
+    (
+        "prefs.preview.media_autoplay.title",
+        "Autoplay Audio & Video",
+    ),
     // --- Preferences: Performance ---
     (
         "prefs.performance.group.directory_loading",
@@ -839,6 +932,26 @@ const EN: &[(&str, &str)] = &[
     (
         "prefs.performance.cache_capacity.unit.other",
         "{n} thumbnails",
+    ),
+    (
+        "prefs.performance.group.reflink",
+        "Reflink Copying (Btrfs / XFS / ZFS)",
+    ),
+    (
+        "prefs.performance.reflink.title",
+        "Enable Reflink CoW Copying",
+    ),
+    (
+        "prefs.performance.reflink.subtitle",
+        "Zero-byte and instant cloning on supported filesystems",
+    ),
+    (
+        "prefs.performance.group.disk_cache",
+        "Disk Cache Management",
+    ),
+    (
+        "prefs.performance.disk_cache.title",
+        "Thumbnail Disk Cache",
     ),
     // --- Preferences: Shortcuts ---
     (
@@ -955,11 +1068,25 @@ const EN: &[(&str, &str)] = &[
         "Every Preferences page reverts to its default value. This cannot be undone.",
     ),
     ("prefs.advanced.reset_all.cancel", "Cancel"),
+    ("prefs.advanced.group.terminal", "Integrated Terminal"),
+    (
+        "prefs.advanced.terminal.title",
+        "Default Terminal Emulator",
+    ),
+    (
+        "prefs.advanced.terminal.custom_command",
+        "Custom Terminal Command",
+    ),
     ("prefs.advanced.group.developer", "Developer"),
     ("prefs.advanced.developer_mode.title", "Developer Mode"),
     (
         "prefs.advanced.developer_mode.subtitle",
         "Adds path/URI copying, checksums, editor launch, and a Git status badge",
+    ),
+    ("prefs.advanced.git_badges.title", "Git Status Badges"),
+    (
+        "prefs.advanced.git_badges.subtitle",
+        "Show Git status badges next to modified and untracked files",
     ),
     // --- Preferences: Advanced — System Integration (Faz 44) ---
     (
@@ -1284,6 +1411,12 @@ const TR: &[(&str, &str)] = &[
         "Tüm özel etiket isimlerini temizler",
     ),
     ("prefs.tags.reset_names_button", "Sıfırla"),
+    ("prefs.tags.clear_unused", "Kullanılmayan Etiketleri Temizle"),
+    ("prefs.tags.clear_unused_button", "Temizle"),
+    (
+        "prefs.tags.clear_unused_subtitle",
+        "Silinmiş veya taşınmış dosyalara ait eski etiket kayıtlarını kaldır",
+    ),
     ("prefs.tags.clear_all", "Tüm Etiketleri Temizle"),
     (
         "prefs.tags.clear_all_subtitle",
@@ -1624,6 +1757,28 @@ const TR: &[(&str, &str)] = &[
     ("prefs.appearance.icon_size.normal", "Orta (64px)"),
     ("prefs.appearance.icon_size.large", "Büyük (96px)"),
     ("prefs.appearance.icon_size.extra_large", "Çok Büyük (128px)"),
+    (
+        "prefs.appearance.group.formatting",
+        "Tarih ve Boyut Biçimlendirmesi",
+    ),
+    ("prefs.appearance.date_format.title", "Tarih Biçimi"),
+    (
+        "prefs.appearance.date_format.relative",
+        "Göreceli (Örn: 5 dakika önce)",
+    ),
+    (
+        "prefs.appearance.date_format.absolute",
+        "Mutlak (Örn: 22.08.2026 12:30)",
+    ),
+    ("prefs.appearance.size_unit.title", "Boyut Birimi Standardı"),
+    (
+        "prefs.appearance.size_unit.binary",
+        "İkili / IEC (1024 B = 1 KiB)",
+    ),
+    (
+        "prefs.appearance.size_unit.decimal",
+        "Ondalık / SI (1000 B = 1 KB)",
+    ),
     // --- Preferences: Navigation ---
     ("prefs.navigation.group.opening_items", "Ögeleri Açma"),
     ("prefs.navigation.click_policy.title", "Tıklama Davranışı"),
@@ -1633,6 +1788,26 @@ const TR: &[(&str, &str)] = &[
     (
         "prefs.navigation.open_new_tab.subtitle",
         "Orta tık ve kenar çubuğu gezinmesi bunu zaten yapıyor; burası da bir sonraki başlatmada geçerli olur",
+    ),
+    (
+        "prefs.navigation.natural_sort.title",
+        "Doğal / Sayısal Sıralama",
+    ),
+    (
+        "prefs.navigation.natural_sort.subtitle",
+        "Dosya 2'yi Dosya 10'dan önce sırala",
+    ),
+    (
+        "prefs.navigation.new_tab_location.title",
+        "Yeni Sekme Başlangıç Konumu",
+    ),
+    (
+        "prefs.navigation.new_tab_location.current_folder",
+        "Mevcut Klasör",
+    ),
+    (
+        "prefs.navigation.new_tab_location.home",
+        "Ev Dizini (Home)",
     ),
     ("prefs.navigation.group.tabs", "Sekmeler"),
     ("prefs.navigation.restore_tabs.title", "Başlangıçta Önceki Sekmeleri Geri Yükle"),
@@ -1657,6 +1832,28 @@ const TR: &[(&str, &str)] = &[
     ("prefs.files.group.confirmations", "Onaylar"),
     ("prefs.files.confirm_trash.title", "Çöpü Boşaltmadan Önce Onay İste"),
     ("prefs.files.confirm_delete.title", "Kalıcı Silmeden Önce Onay İste"),
+    ("prefs.files.group.archive", "Arşivleme ve Sıkıştırma"),
+    ("prefs.files.archive_format.title", "Varsayılan Arşiv Formatı"),
+    (
+        "prefs.files.compression_level.title",
+        "Varsayılan Sıkıştırma Seviyesi",
+    ),
+    ("prefs.files.conflict_action.title", "Dosya Çakışma Davranışı"),
+    ("prefs.files.conflict_action.always_ask", "Her zaman sor"),
+    (
+        "prefs.files.conflict_action.auto_rename",
+        "Otomatik yeniden adlandır",
+    ),
+    ("prefs.files.conflict_action.overwrite", "Üzerine yaz"),
+    ("prefs.files.conflict_action.skip", "Atla"),
+    (
+        "prefs.files.warn_bidi.title",
+        "BiDi Unicode Aldatmaca Uyarısı",
+    ),
+    (
+        "prefs.files.warn_bidi.subtitle",
+        "Yön kontrol karakterleri içeren dosya adlarında uyar",
+    ),
     // --- Preferences: Search ---
     ("prefs.search.group.indexing", "İndeksleme"),
     ("prefs.search.enable.title", "Hızlı Arama İndeksleyicisini Etkinleştir"),
@@ -1665,6 +1862,18 @@ const TR: &[(&str, &str)] = &[
         "name:/type:/size:/modified: aramalarını destekleyen SQLite + FTS5 indeksi",
     ),
     ("prefs.search.max_results.title", "En Fazla Arama Sonucu"),
+    (
+        "prefs.search.max_depth.title",
+        "Maksimum Dizin Tarama Derinliği",
+    ),
+    (
+        "prefs.search.include_hidden.title",
+        "Gizli Dosyaları Aramaya Dahil Et",
+    ),
+    (
+        "prefs.search.include_hidden.subtitle",
+        "Nokta ile başlayan gizli dosya ve klasörleri de indeksle",
+    ),
     ("prefs.search.rebuild.title", "Arama İndeksini Yeniden Oluştur"),
     ("prefs.search.rebuild.subtitle", "Ev dizininizi baştan yeniden tarar"),
     ("prefs.search.rebuild.button", "Yeniden Oluştur"),
@@ -1673,6 +1882,23 @@ const TR: &[(&str, &str)] = &[
     ("prefs.preview.enable.title", "Önizleme Panelini Etkinleştir"),
     ("prefs.preview.size_limit.title", "Önizleme Boyut Sınırı"),
     ("prefs.preview.folder_count.title", "Klasör Öge Sayısını Göster"),
+    (
+        "prefs.preview.group.quick_look",
+        "Quick Look (Space Önizleme)",
+    ),
+    ("prefs.preview.quick_look.title", "Space ile Canlı Önizleme"),
+    (
+        "prefs.preview.quick_look.subtitle",
+        "Boşluk tuşuna basıldığında dosya içeriğini anında göster",
+    ),
+    (
+        "prefs.preview.quick_look_line_numbers.title",
+        "Kod ve Metin Satır Numaraları",
+    ),
+    (
+        "prefs.preview.media_autoplay.title",
+        "Ses ve Videoları Otomatik Oynat",
+    ),
     // --- Preferences: Performance ---
     ("prefs.performance.group.directory_loading", "Dizin Yükleme"),
     ("prefs.performance.chunk_size.title", "Dizin Akış Öbek Boyutu"),
@@ -1681,6 +1907,26 @@ const TR: &[(&str, &str)] = &[
     ("prefs.performance.cache_capacity.title", "Küçük Resim Önbellek Kapasitesi"),
     ("prefs.performance.cache_capacity.unit.one", "{n} küçük resim"),
     ("prefs.performance.cache_capacity.unit.other", "{n} küçük resim"),
+    (
+        "prefs.performance.group.reflink",
+        "Reflink Kopyalama (Btrfs / XFS / ZFS)",
+    ),
+    (
+        "prefs.performance.reflink.title",
+        "Reflink CoW Kopyalamayı Etkinleştir",
+    ),
+    (
+        "prefs.performance.reflink.subtitle",
+        "Desteklenen dosya sistemlerinde 0 bayt ve anında klonlama",
+    ),
+    (
+        "prefs.performance.group.disk_cache",
+        "Disk Önbelleği Yönetimi",
+    ),
+    (
+        "prefs.performance.disk_cache.title",
+        "Küçük Resim (Thumbnail) Disk Önbelleği",
+    ),
     // --- Preferences: Shortcuts ---
     ("prefs.shortcuts.group.keyboard_shortcuts", "Klavye Kısayolları"),
     ("prefs.shortcuts.view_all.title", "Tüm Kısayolları Görüntüle"),
@@ -1763,11 +2009,25 @@ const TR: &[(&str, &str)] = &[
         "Her Ayarlar sayfası varsayılan değerine döner. Bu işlem geri alınamaz.",
     ),
     ("prefs.advanced.reset_all.cancel", "İptal"),
+    ("prefs.advanced.group.terminal", "Entegre Terminal"),
+    (
+        "prefs.advanced.terminal.title",
+        "Varsayılan Terminal Emülatörü",
+    ),
+    (
+        "prefs.advanced.terminal.custom_command",
+        "Özel Terminal Komutu",
+    ),
     ("prefs.advanced.group.developer", "Geliştirici"),
     ("prefs.advanced.developer_mode.title", "Geliştirici Modu"),
     (
         "prefs.advanced.developer_mode.subtitle",
         "Yol/URI kopyalama, sağlama toplamları, düzenleyici başlatma ve Git durum rozeti ekler",
+    ),
+    ("prefs.advanced.git_badges.title", "Git Durum Rozetleri"),
+    (
+        "prefs.advanced.git_badges.subtitle",
+        "Değiştirilen ve yeni eklenen dosyaların yanında Git durumunu göster",
     ),
     // --- Tercihler: Gelişmiş — Sistem Entegrasyonu (Faz 44) ---
     ("prefs.advanced.group.system_integration", "Sistem Entegrasyonu"),
@@ -1993,5 +2253,41 @@ mod tests {
     fn locale_code_round_trips_through_detection_matching() {
         assert_eq!(Locale::En.code(), "en");
         assert_eq!(Locale::Tr.code(), "tr");
+    }
+
+    /// Every `t("...")` call in `dialogs/preferences_dialog.rs` must resolve
+    /// to a real catalog key — a ham `prefs.*` string leaking onto screen
+    /// (the exact bug this test guards against) means whoever added a
+    /// preferences row forgot to also add its translation.
+    #[test]
+    fn every_t_call_in_preferences_dialog_has_a_catalog_entry() {
+        let source = include_str!("dialogs/preferences_dialog.rs");
+        let mut keys_checked = 0;
+        let mut search_from = 0;
+        while let Some(found) = source[search_from..].find("t(\"") {
+            let start = search_from + found;
+            // Only a bare `t(` call, not some other identifier ending in
+            // `t` (`.set_text(`, `format!(` and friends all contain `t(`).
+            let is_bare_call = start == 0
+                || !source.as_bytes()[start - 1].is_ascii_alphanumeric()
+                    && source.as_bytes()[start - 1] != b'_';
+            let after_open = &source[start + 3..];
+            let Some(end) = after_open.find('"') else {
+                break;
+            };
+            if is_bare_call {
+                let key = &after_open[..end];
+                assert!(
+                    EN.iter().any(|(candidate, _)| *candidate == key),
+                    "preferences_dialog.rs calls t({key:?}), which is missing from the EN catalog"
+                );
+                keys_checked += 1;
+            }
+            search_from = start + 3 + end + 1;
+        }
+        assert!(
+            keys_checked > 50,
+            "expected to find preferences_dialog.rs's many t(...) calls, found only {keys_checked} — has the scan broken?"
+        );
     }
 }

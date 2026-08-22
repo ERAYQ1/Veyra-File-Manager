@@ -19,9 +19,9 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita as adw;
 
-use veyra_filesystem::{format_size, FileItem, FileKind, FsError, VeyraPath};
+use veyra_filesystem::{FileItem, FileKind, FsError, VeyraPath};
 
-use crate::config::SharedSettings;
+use crate::config::{format_size, SharedSettings};
 use crate::fs_async;
 use crate::i18n::t;
 
@@ -554,7 +554,7 @@ fn is_current(handles: &PreviewPanelHandles, generation: u64) -> bool {
 pub(crate) fn modified_label(item: &FileItem) -> String {
     item.metadata
         .modified
-        .map(|dt| format!("Modified {}", dt.format("%Y-%m-%d %H:%M")))
+        .map(|dt| format!("Modified {}", crate::config::format_timestamp(dt)))
         .unwrap_or_else(|| "Modified: unknown".to_string())
 }
 

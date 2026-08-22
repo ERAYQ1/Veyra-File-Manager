@@ -17,6 +17,7 @@
 //! that exists but fails to actually launch a terminal doesn't strand the
 //! user — [`open_terminal`] falls through to the next candidate instead.
 
+use std::cell::RefCell;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -24,6 +25,58 @@ use std::process::Command;
 use gio::prelude::*;
 
 use veyra_filesystem::VeyraPath;
+
+use crate::config::TerminalPref;
+
+thread_local! {
+    /// Faz 65: the Preferences "Default Terminal Emulator" pick, checked
+    /// ahead of every tier below — still never a hardcoded terminal (Rule
+    /// #25 stays satisfied because this is itself a user preference, set
+    /// once at startup from `VeyraSettings` and again on every Preferences
+    /// change, same thread-local pattern as `i18n::CURRENT_LOCALE`/
+    /// `config::CURRENT_DATE_FORMAT`).
+    static TERMINAL_PREF: std::cell::Cell<TerminalPref> =
+        const { std::cell::Cell::new(TerminalPref::Auto) };
+    static CUSTOM_TERMINAL_COMMAND: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Sets the pinned terminal preference every subsequent `open_terminal`/
+/// `resolve_terminal` call uses. `command` is only consulted for
+/// `TerminalPref::Custom`.
+pub(crate) fn set_terminal_pref(pref: TerminalPref, command: &str) {
+    TERMINAL_PREF.with(|cell| cell.set(pref));
+    CUSTOM_TERMINAL_COMMAND.with(|cell| *cell.borrow_mut() = command.to_string());
+}
+
+/// The user's pinned terminal candidate, if `TERMINAL_PREF` names one that
+/// actually resolves: `Custom`'s free-form command (first whitespace token
+/// is the binary, same parsing `resolve_env_terminal` uses for `$TERMINAL`,
+/// with the rest passed through as its own arguments), or one of the fixed
+/// per-emulator binaries via `TerminalPref::executable`.
+fn resolve_preferred_terminal() -> Option<Candidate> {
+    let pref = TERMINAL_PREF.with(std::cell::Cell::get);
+    match pref {
+        TerminalPref::Auto => None,
+        TerminalPref::Custom => {
+            let command = CUSTOM_TERMINAL_COMMAND.with(|cell| cell.borrow().clone());
+            let mut tokens = command.split_whitespace();
+            let bin = tokens.next()?;
+            let program = find_in_path(bin)?;
+            let args = tokens.map(OsString::from).collect();
+            Some(Candidate {
+                program: program.into(),
+                args,
+            })
+        }
+        _ => {
+            let bin = pref.executable()?;
+            find_in_path(bin).map(|program| Candidate {
+                program: program.into(),
+                args: Vec::new(),
+            })
+        }
+    }
+}
 
 /// Common terminal emulator binaries checked on `$PATH` as the last-resort
 /// fallback tier, in the order they're tried.
@@ -123,6 +176,7 @@ fn target_dir(path: &VeyraPath) -> Result<PathBuf, TerminalError> {
 /// Gathers every resolvable terminal candidate, in priority order.
 fn candidates() -> Vec<Candidate> {
     let mut found = Vec::new();
+    found.extend(resolve_preferred_terminal());
     found.extend(resolve_xdg_terminal_exec());
     found.extend(resolve_env_terminal());
     found.extend(resolve_gio_default_terminal());

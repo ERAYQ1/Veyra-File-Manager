@@ -122,7 +122,7 @@ fn describe(path: &VeyraPath) -> String {
     }
 }
 
-fn sibling_exists(destination: &VeyraPath, candidate: &str) -> bool {
+pub(crate) fn sibling_exists(destination: &VeyraPath, candidate: &str) -> bool {
     match destination {
         VeyraPath::Local(path) => path
             .parent()

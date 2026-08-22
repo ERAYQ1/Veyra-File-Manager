@@ -381,7 +381,7 @@ fn size_label(item: &FileItem) -> String {
     if item.kind().is_directory() {
         String::new()
     } else {
-        item.metadata.size_human()
+        crate::config::format_size(item.metadata.size_bytes)
     }
 }
 
@@ -406,7 +406,7 @@ fn type_label(item: &FileItem) -> String {
 fn modified_label(item: &FileItem) -> String {
     item.metadata
         .modified
-        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .map(crate::config::format_timestamp)
         .unwrap_or_default()
 }
 

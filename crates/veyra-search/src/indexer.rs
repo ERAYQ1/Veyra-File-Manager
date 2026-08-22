@@ -16,25 +16,30 @@ use crate::index::{IndexedEntry, SearchIndex};
 const YIELD_EVERY: usize = 64;
 const YIELD_FOR: Duration = Duration::from_millis(5);
 
-/// Directories are rarely nested this deep; a hard cap protects against
-/// symlink cycles or pathological trees turning indexing into unbounded
-/// recursion.
+/// The depth `walk`'s own tests use when they don't care about the
+/// `max_depth` cutoff itself — deep enough that no test fixture tree
+/// bottoms out on it by accident.
+#[cfg(test)]
 const MAX_DEPTH: usize = 64;
 
-/// Spawns a background thread that recursively indexes `root` into
-/// `index`. Returns immediately; indexing continues in the background.
+/// Spawns a background thread that recursively indexes `root` into `index`,
+/// descending at most `max_depth` levels and skipping dotfiles/dot-
+/// directories unless `include_hidden` is set. Returns immediately;
+/// indexing continues in the background.
 pub fn spawn_background_index(
     index: Arc<SearchIndex>,
     root: PathBuf,
+    max_depth: usize,
+    include_hidden: bool,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         lower_priority();
-        walk(&index, &root, 0);
+        walk(&index, &root, 0, max_depth, include_hidden);
     })
 }
 
-fn walk(index: &SearchIndex, dir: &Path, depth: usize) {
-    if depth > MAX_DEPTH {
+fn walk(index: &SearchIndex, dir: &Path, depth: usize, max_depth: usize, include_hidden: bool) {
+    if depth > max_depth {
         return;
     }
     let Ok(read_dir) = std::fs::read_dir(dir) else {
@@ -48,6 +53,9 @@ fn walk(index: &SearchIndex, dir: &Path, depth: usize) {
             continue;
         };
         let name = dir_entry.file_name().to_string_lossy().into_owned();
+        if !include_hidden && name.starts_with('.') {
+            continue;
+        }
         let is_dir = metadata.is_dir();
         let mime_type = if is_dir {
             "inode/directory".to_string()
@@ -83,7 +91,7 @@ fn walk(index: &SearchIndex, dir: &Path, depth: usize) {
         }
 
         if is_dir {
-            walk(index, &path, depth + 1);
+            walk(index, &path, depth + 1, max_depth, include_hidden);
         }
     }
 }
@@ -135,7 +143,7 @@ mod tests {
         fs::write(nested.join("b.txt"), b"world").unwrap();
 
         let index = Arc::new(SearchIndex::open_in_memory().unwrap());
-        walk(&index, temp.path(), 0);
+        walk(&index, temp.path(), 0, MAX_DEPTH, false);
 
         let results = index
             .search(&crate::query::parse(""), chrono::Utc::now())
@@ -149,11 +157,59 @@ mod tests {
     #[test]
     fn missing_root_directory_is_a_silent_no_op() {
         let index = Arc::new(SearchIndex::open_in_memory().unwrap());
-        walk(&index, Path::new("/nonexistent/does/not/exist"), 0);
+        walk(
+            &index,
+            Path::new("/nonexistent/does/not/exist"),
+            0,
+            MAX_DEPTH,
+            false,
+        );
 
         let results = index
             .search(&crate::query::parse(""), chrono::Utc::now())
             .unwrap();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn hidden_entries_are_skipped_unless_include_hidden_is_set() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join(".secret"), b"hidden").unwrap();
+        fs::write(temp.path().join("visible.txt"), b"shown").unwrap();
+
+        let index = Arc::new(SearchIndex::open_in_memory().unwrap());
+        walk(&index, temp.path(), 0, MAX_DEPTH, false);
+        let results = index
+            .search(&crate::query::parse(""), chrono::Utc::now())
+            .unwrap();
+        let names: Vec<&str> = results.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"visible.txt"));
+        assert!(!names.contains(&".secret"));
+
+        let index = Arc::new(SearchIndex::open_in_memory().unwrap());
+        walk(&index, temp.path(), 0, MAX_DEPTH, true);
+        let results = index
+            .search(&crate::query::parse(""), chrono::Utc::now())
+            .unwrap();
+        let names: Vec<&str> = results.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&".secret"));
+    }
+
+    #[test]
+    fn max_depth_stops_recursion_at_the_configured_level() {
+        let temp = tempfile::tempdir().unwrap();
+        let level1 = temp.path().join("l1");
+        let level2 = level1.join("l2");
+        fs::create_dir_all(&level2).unwrap();
+        fs::write(level2.join("deep.txt"), b"deep").unwrap();
+
+        let index = Arc::new(SearchIndex::open_in_memory().unwrap());
+        walk(&index, temp.path(), 0, 1, false);
+        let results = index
+            .search(&crate::query::parse(""), chrono::Utc::now())
+            .unwrap();
+        let names: Vec<&str> = results.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"l1"));
+        assert!(!names.contains(&"deep.txt"));
     }
 }

@@ -13,6 +13,7 @@ use libadwaita::prelude::*;
 pub(crate) fn show(
     parent: &impl IsA<gtk4::Widget>,
     current_name: &str,
+    warn_bidi: bool,
     on_confirm: impl FnOnce(String) + 'static,
 ) {
     let dialog = adw::AlertDialog::builder().heading("Rename").build();
@@ -64,7 +65,12 @@ pub(crate) fn show(
         let warning_label = warning_label.clone();
         entry.connect_changed(move |entry| {
             let text = entry.text();
-            let has_bidi = veyra_core::security::has_bidi_override(&text);
+            // Faz 65: "Warn on BiDi Spoofing" preference — off skips the
+            // check entirely rather than just hiding the label, so a user
+            // who's deliberately turned this off (e.g. legitimate RTL
+            // filenames tripping the advisory heuristic) isn't also blocked
+            // from confirming.
+            let has_bidi = warn_bidi && veyra_core::security::has_bidi_override(&text);
             warning_label.set_visible(has_bidi);
             dialog.set_response_enabled("rename", !text.trim().is_empty() && !has_bidi);
         });

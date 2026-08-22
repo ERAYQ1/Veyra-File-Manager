@@ -14,6 +14,7 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::error::FsError;
 use crate::path::VeyraPath;
@@ -22,6 +23,28 @@ use crate::queue::OperationControl;
 
 use super::extract::{ArchiveOutcome, SkipReason};
 use super::format::ArchiveFormat;
+
+/// Faz 65: the Preferences "Compression Level" pick (Fast/Balanced/
+/// Maximum, mapped to a 0-9 scale), applied to every archive this module
+/// writes from here on. A process-wide atomic rather than a parameter
+/// threaded through `create_archive`'s dozen-plus call sites (production
+/// and test alike) — same rationale as `reflink::ENABLE_REFLINK`: it's a
+/// live-updatable user preference, not per-call archive data. Defaults to
+/// 6 (`CompressionLevelPref::Balanced`'s level), matching every backend's
+/// own previous hardcoded default.
+static COMPRESSION_LEVEL: AtomicU32 = AtomicU32::new(6);
+
+/// Sets the compression level every subsequent `create_archive` call uses
+/// for the Zip/Gzip/Xz backends (0-9 scale). Called once at startup from
+/// `VeyraSettings::compression_level` and again on every Preferences
+/// change.
+pub fn set_compression_level(level: u32) {
+    COMPRESSION_LEVEL.store(level.min(9), Ordering::Relaxed);
+}
+
+fn compression_level() -> u32 {
+    COMPRESSION_LEVEL.load(Ordering::Relaxed)
+}
 
 /// One file discovered while walking `sources`, with the archive-relative
 /// path it should be stored under.
@@ -174,7 +197,8 @@ fn write_archive(
         }
         ArchiveFormat::TarGz => {
             let file = fs::File::create(tmp_path).map_err(|e| local_io_err(tmp_path, e))?;
-            let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+            let encoder =
+                flate2::write::GzEncoder::new(file, flate2::Compression::new(compression_level()));
             let Some(encoder) = write_tar(encoder, plan, control, file_count, on_progress)? else {
                 return Ok(true);
             };
@@ -183,7 +207,7 @@ fn write_archive(
         }
         ArchiveFormat::TarXz => {
             let file = fs::File::create(tmp_path).map_err(|e| local_io_err(tmp_path, e))?;
-            let encoder = xz2::write::XzEncoder::new(file, 6);
+            let encoder = xz2::write::XzEncoder::new(file, compression_level());
             let Some(encoder) = write_tar(encoder, plan, control, file_count, on_progress)? else {
                 return Ok(true);
             };
@@ -278,7 +302,8 @@ fn write_zip(
     let file = fs::File::create(tmp_path).map_err(|e| local_io_err(tmp_path, e))?;
     let mut writer = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+        .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(compression_level() as i64));
 
     for dir in &plan.dirs {
         if control.wait_if_paused() {

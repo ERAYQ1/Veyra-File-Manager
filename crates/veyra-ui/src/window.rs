@@ -109,17 +109,32 @@ pub(crate) fn build_window(
 
     let search_index = Arc::new(open_search_index(cache_dir));
     if settings.borrow().enable_fts_index {
-        veyra_search::spawn_background_index(search_index.clone(), glib::home_dir());
+        let initial = settings.borrow();
+        veyra_search::spawn_background_index(
+            search_index.clone(),
+            glib::home_dir(),
+            initial.search_max_depth,
+            initial.search_include_hidden,
+        );
     }
     // Faz 34: the Preferences dialog's "Rebuild Search Index" button (and
     // re-enabling "Enable Fast Search Indexer" after it was off) both just
     // need to kick off another one-shot walk — `spawn_background_index`
     // already re-indexes any path it revisits (`INSERT OR REPLACE`), so
-    // running it again is always safe, not just on first launch.
+    // running it again is always safe, not just on first launch. Reads
+    // `search_max_depth`/`search_include_hidden` fresh on every call so a
+    // Preferences change to either takes effect on the next rebuild.
     let rebuild_search_index: Rc<dyn Fn()> = {
         let search_index = search_index.clone();
+        let settings = settings.clone();
         Rc::new(move || {
-            veyra_search::spawn_background_index(search_index.clone(), glib::home_dir());
+            let settings = settings.borrow();
+            veyra_search::spawn_background_index(
+                search_index.clone(),
+                glib::home_dir(),
+                settings.search_max_depth,
+                settings.search_include_hidden,
+            );
         })
     };
 
@@ -366,6 +381,7 @@ pub(crate) fn build_window(
         refresh_preview.clone(),
         thumbnails.clone(),
         dnd_execute.clone(),
+        settings.clone(),
     );
     setup_split_view_actions(
         app,
@@ -389,7 +405,7 @@ pub(crate) fn build_window(
         &clipboard,
         &undo_stack,
     );
-    setup_archive_actions(&window, &panels, &focused, &progress);
+    setup_archive_actions(&window, &panels, &focused, &progress, settings.clone());
     setup_context_menu_actions(
         app,
         &window,
@@ -1102,6 +1118,7 @@ fn setup_tab_actions(
     refresh_preview: Rc<dyn Fn()>,
     thumbnails: Rc<crate::thumbnails::ThumbnailService>,
     dnd_execute: dnd::DropExecutor,
+    settings: crate::config::SharedSettings,
 ) {
     let action_new_tab = gio::SimpleAction::new("new-tab", None);
     {
@@ -1110,11 +1127,17 @@ fn setup_tab_actions(
         let refresh_preview = refresh_preview.clone();
         let thumbnails = thumbnails.clone();
         let dnd_execute = dnd_execute.clone();
+        let settings = settings.clone();
         action_new_tab.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
-            let start_dir = active_tab(&panel.tab_view, &panel.registry)
-                .map(|tab| tab.state.borrow().current_dir.clone())
-                .unwrap_or_else(|| VeyraPath::from_local(glib::home_dir()));
+            let start_dir = match settings.borrow().new_tab_location {
+                crate::config::NewTabLocation::Home => VeyraPath::from_local(glib::home_dir()),
+                crate::config::NewTabLocation::CurrentFolder => {
+                    active_tab(&panel.tab_view, &panel.registry)
+                        .map(|tab| tab.state.borrow().current_dir.clone())
+                        .unwrap_or_else(|| VeyraPath::from_local(glib::home_dir()))
+                }
+            };
             open_tab(
                 &panel.tab_view,
                 &panel.registry,
@@ -1528,6 +1551,7 @@ fn setup_archive_actions(
     panels: &Panels,
     focused: &Rc<RefCell<PanelId>>,
     progress: &ProgressToastHandles,
+    settings: crate::config::SharedSettings,
 ) {
     let action_compress = gio::SimpleAction::new("compress-selected", None);
     {
@@ -1535,6 +1559,7 @@ fn setup_archive_actions(
         let panels = panels.clone();
         let focused = focused.clone();
         let progress = progress.clone();
+        let settings = settings.clone();
         action_compress.connect_activate(move |_, _| {
             let panel = panels.get(*focused.borrow()).clone();
             let Some(tab) = active_tab(&panel.tab_view, &panel.registry) else {
@@ -1553,10 +1578,11 @@ fn setup_archive_actions(
             let progress = progress.clone();
             let sources: Vec<VeyraPath> = items.into_iter().map(|item| item.path).collect();
             let window_for_confirm = window.clone();
+            let default_format = settings.borrow().default_archive_format;
             dialogs::compress_dialog::show(
                 &window,
                 &default_stem,
-                veyra_filesystem::ArchiveFormat::Zip,
+                default_format,
                 move |name, format| {
                     let output_path = child_path(&current_dir, &name);
                     let (control, receiver) =
@@ -1911,7 +1937,8 @@ fn setup_context_menu_actions(
             let chrome = panel.chrome.clone();
             let previous_name = current_name.clone();
             let undo_stack = undo_stack.clone();
-            dialogs::rename_dialog::show(&window, &current_name, move |new_name| {
+            let warn_bidi = chrome.settings.borrow().warn_bidi_spoofing;
+            dialogs::rename_dialog::show(&window, &current_name, warn_bidi, move |new_name| {
                 if new_name.is_empty() || new_name == previous_name {
                     return;
                 }
@@ -2343,8 +2370,16 @@ fn setup_quick_look_actions(
             if bitset.is_empty() {
                 return;
             }
+            if !panel.chrome.settings.borrow().enable_quick_look {
+                return;
+            }
             let position = bitset.nth(0);
-            dialogs::quick_look_dialog::show(&window, selection, position);
+            dialogs::quick_look_dialog::show(
+                &window,
+                selection,
+                position,
+                panel.chrome.settings.clone(),
+            );
         });
     }
     window.add_action(&action);
@@ -3086,6 +3121,7 @@ fn open_tab(
     );
     let sort_config = Rc::new(RefCell::new(crate::sorting::SortConfig {
         folders_first: initial_settings.folders_first,
+        natural_sort: initial_settings.natural_sort,
         ..crate::sorting::SortConfig::default()
     }));
     let initial_view_mode = initial_settings.default_view_mode.to_view_mode();
@@ -3426,6 +3462,14 @@ fn run_bulk_operation(
         return;
     }
 
+    // Faz 65: `refresh_targets` always carries at least one `Chrome`, whose
+    // `settings` is the same app-wide shared store every panel holds — no
+    // need to thread a separate parameter through this function's nine call
+    // sites just to read `default_conflict_action`.
+    let default_conflict_action = refresh_targets
+        .first()
+        .map(|(_, chrome)| chrome.settings.borrow().default_conflict_action);
+
     let request = OperationRequest {
         kind,
         sources,
@@ -3444,6 +3488,33 @@ fn run_bulk_operation(
                     widgets::progress_toast::update(&progress, op_id, &p)
                 }
                 OperationEvent::Conflict(conflict, answer_tx) => {
+                    // Faz 65: the Preferences "Default Conflict Action"
+                    // pick answers automatically without ever showing the
+                    // dialog, when set to anything but `AlwaysAsk` (today's
+                    // behavior, and still the default).
+                    let auto_decision = match default_conflict_action {
+                        Some(crate::config::ConflictDefaultAction::AutoRename) => {
+                            let source_name = conflict.source.file_name().unwrap_or_default();
+                            let name = veyra_filesystem::suggest_name(&source_name, |candidate| {
+                                dialogs::conflict_dialog::sibling_exists(
+                                    &conflict.destination,
+                                    candidate,
+                                )
+                            });
+                            Some(veyra_filesystem::ConflictDecision::Rename(name))
+                        }
+                        Some(crate::config::ConflictDefaultAction::Overwrite) => {
+                            Some(veyra_filesystem::ConflictDecision::ReplaceAll)
+                        }
+                        Some(crate::config::ConflictDefaultAction::Skip) => {
+                            Some(veyra_filesystem::ConflictDecision::SkipAll)
+                        }
+                        Some(crate::config::ConflictDefaultAction::AlwaysAsk) | None => None,
+                    };
+                    if let Some(decision) = auto_decision {
+                        let _ = answer_tx.send_blocking(decision);
+                        continue;
+                    }
                     dialogs::conflict_dialog::show(&window, &conflict, move |decision| {
                         let _ = answer_tx.send_blocking(decision);
                     });
@@ -4087,6 +4158,7 @@ fn navigate_to(tab: &TabPage, chrome: &Chrome, path: VeyraPath, push_history: bo
             key: crate::sorting::SortKey::Accessed,
             order: crate::sorting::SortOrder::Descending,
             folders_first: false,
+            ..crate::sorting::SortConfig::default()
         };
         tab.resort();
     }
@@ -4215,6 +4287,10 @@ fn update_git_file_statuses(state: &SharedState, path: &VeyraPath) {
 /// a fast back-to-back navigation must never paint a stale repo's badge
 /// over the newly opened directory).
 fn update_git_badge(state: &SharedState, chrome: &Chrome, path: &VeyraPath) {
+    if !chrome.settings.borrow().show_git_badges {
+        chrome.git_badge.set_visible(false);
+        return;
+    }
     let Some(local) = path.as_local_path().map(Path::to_path_buf) else {
         chrome.git_badge.set_visible(false);
         return;

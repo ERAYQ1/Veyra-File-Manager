@@ -1066,7 +1066,10 @@ fn bookmark_row(
         action_rename.connect_activate(move |_, _| {
             let uri = uri.clone();
             let on_changed = on_changed.clone();
-            dialogs::rename_dialog::show(&window, &current_label, move |new_label| {
+            // A bookmark's display label isn't a filename or extension, so
+            // the BiDi-spoofing guard (which exists to stop a disguised file
+            // extension) doesn't apply here.
+            dialogs::rename_dialog::show(&window, &current_label, false, move |new_label| {
                 if let Err(err) = bookmarks::rename(&uri, &new_label) {
                     tracing::warn!(error = %err, "failed to rename bookmark");
                 }

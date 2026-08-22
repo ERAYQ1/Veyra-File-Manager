@@ -17,22 +17,43 @@ use std::fs::File;
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rustix::fs::{futimens, ioctl_ficlone, Timespec, Timestamps};
 use rustix::io::Errno;
 
 use crate::path::VeyraPath;
 
+/// Faz 65: the Preferences "Btrfs/XFS/ZFS Reflink" toggle's live state.
+/// A plain process-wide atomic rather than a thread-local: `queue.rs`'s
+/// copy loop runs on a background `std::thread` spawned by `veyra-ui`'s
+/// `operations::spawn`, a different OS thread than the GTK main thread the
+/// Preferences dialog's switch handler runs on, so a thread-local set there
+/// would never be visible here.
+static ENABLE_REFLINK: AtomicBool = AtomicBool::new(true);
+
+/// Sets whether `try_reflink_clone` attempts anything at all — called once
+/// at startup from `VeyraSettings::enable_reflink` and again on every
+/// Preferences change. `false` makes every call return `false` immediately,
+/// so `queue.rs` always falls back to the byte-copy path.
+pub fn set_reflink_enabled(enabled: bool) {
+    ENABLE_REFLINK.store(enabled, Ordering::Relaxed);
+}
+
 /// Attempts to clone `source` into `dest` via `FICLONE`. Returns `true` if
 /// the clone succeeded (dest now holds a full, independent-looking copy of
 /// source's contents, permissions, and timestamps — the caller should treat
 /// this file as fully written and skip its normal copy path for it).
-/// Returns `false` for anything else — unsupported filesystem/device pair,
-/// a remote location, or a genuine I/O error probing either file — in which
-/// case the caller must fall back to a normal copy; the destination is left
-/// exactly as it was before this call (any empty stub this function itself
-/// created on a failed attempt is cleaned up before returning).
+/// Returns `false` for anything else — the Faz 65 toggle being off,
+/// unsupported filesystem/device pair, a remote location, or a genuine I/O
+/// error probing either file — in which case the caller must fall back to a
+/// normal copy; the destination is left exactly as it was before this call
+/// (any empty stub this function itself created on a failed attempt is
+/// cleaned up before returning).
 pub fn try_reflink_clone(source: &VeyraPath, dest: &VeyraPath) -> bool {
+    if !ENABLE_REFLINK.load(Ordering::Relaxed) {
+        return false;
+    }
     let (Some(src_path), Some(dest_path)) = (source.as_local_path(), dest.as_local_path()) else {
         // Reflink is a local-block-filesystem-only optimization; GVfs/remote
         // locations always take the byte-copy path.

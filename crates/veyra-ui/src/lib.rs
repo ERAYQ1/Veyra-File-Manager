@@ -243,6 +243,11 @@ fn build_window(
             i18n::set_locale(loaded.language.resolve());
             libadwaita::StyleManager::default().set_color_scheme(loaded.color_scheme.to_adw());
             config::apply_accent_color(loaded.accent_color);
+            config::set_date_format(loaded.date_format);
+            config::set_size_unit(loaded.size_unit);
+            terminal::set_terminal_pref(loaded.terminal_pref, &loaded.custom_terminal_command);
+            veyra_filesystem::set_reflink_enabled(loaded.enable_reflink);
+            veyra_filesystem::set_compression_level(loaded.compression_level.level());
             let shared: config::SharedSettings = Rc::new(RefCell::new(loaded));
             *slot = Some(shared.clone());
             shared

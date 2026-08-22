@@ -22,8 +22,9 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
-use veyra_filesystem::{format_size, ArchivePreviewEntry, FileItem, FileKind};
+use veyra_filesystem::{ArchivePreviewEntry, FileItem, FileKind};
 
+use crate::config::format_size;
 use crate::fs_async;
 use crate::i18n::{t, t_fmt};
 use crate::preview::{
@@ -39,6 +40,7 @@ const TEXT_PREVIEW_CAP_BYTES: usize = 256 * 1024;
 const ARCHIVE_PREVIEW_LIMIT: usize = 200;
 
 struct QuickLookHandles {
+    settings: crate::config::SharedSettings,
     dialog: adw::Dialog,
     title: adw::WindowTitle,
     stack: gtk4::Stack,
@@ -72,6 +74,7 @@ pub(crate) fn show(
     window: &adw::ApplicationWindow,
     selection: gtk4::MultiSelection,
     position: u32,
+    settings: crate::config::SharedSettings,
 ) {
     let Some(item) = views::item_at(&selection, position) else {
         return;
@@ -97,6 +100,7 @@ pub(crate) fn show(
     dialog.set_child(Some(&toolbar_view));
 
     let handles = Rc::new(QuickLookHandles {
+        settings,
         dialog: dialog.clone(),
         title,
         stack: built.stack,
@@ -303,7 +307,12 @@ fn show_text(
                 Ok(bytes) => {
                     let text = String::from_utf8_lossy(&bytes);
                     let truncated = item.metadata.size_bytes as usize > bytes.len();
-                    handles_done.text_view.buffer().set_text(&text);
+                    let displayed = if handles_done.settings.borrow().quick_look_line_numbers {
+                        with_line_numbers(&text)
+                    } else {
+                        text.to_string()
+                    };
+                    handles_done.text_view.buffer().set_text(&displayed);
                     let mut meta = format!(
                         "{} lines · {} characters",
                         text.lines().count(),
@@ -324,6 +333,20 @@ fn show_text(
     );
 }
 
+/// Faz 65: prefixes each line with a right-aligned line number and a `│`
+/// gutter separator — plain `GtkTextView` has no built-in gutter widget
+/// (that's `GtkSourceView`, a dependency this crate deliberately doesn't
+/// take just for Quick Look), so the numbers are rendered directly into
+/// the monospace buffer text instead.
+fn with_line_numbers(text: &str) -> String {
+    let width = text.lines().count().max(1).to_string().len();
+    text.lines()
+        .enumerate()
+        .map(|(i, line)| format!("{:>width$} │ {line}", i + 1, width = width))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// GTK's own `GtkMediaFile`/`GtkVideo` (backed by GStreamer at the system
 /// level when available) — no `gstreamer-rs` binding needed, so this adds
 /// zero new crate dependencies.
@@ -331,6 +354,9 @@ fn show_media(handles: &Rc<QuickLookHandles>, item: &FileItem) {
     let media = gtk4::MediaFile::for_file(&item.path.to_gio_file());
     media.set_loop(false);
     handles.media_video.set_media_stream(Some(&media));
+    if handles.settings.borrow().media_autoplay {
+        media.play();
+    }
     handles.media_meta.set_label(&format!(
         "{} · {}",
         format_size(item.metadata.size_bytes),

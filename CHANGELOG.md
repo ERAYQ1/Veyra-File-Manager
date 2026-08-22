@@ -1,5 +1,41 @@
 # Changelog
 
+## Faz 65 — Ultra-Gelişmiş Tercihler & Sistem Yapılandırma Merkezi
+
+Tercihler penceresi (`AdwPreferencesDialog`) 10 tam donanımlı sayfaya
+genişletildi: Görünüm, Gezinti, Dosya İşlemleri & Arşiv, Arama & İndeksleme,
+Önizleme & Quick Look, Performans & Önbellek, Etiketler, Klavye Kısayolları,
+Gizlilik & Güvenlik, Gelişmiş & Terminal.
+
+### Eklendi
+- **Görünüm:** Tarih formatı (Göreceli/Mutlak, `config::format_timestamp`) ve
+  boyut birimi standardı (İkili IEC / Ondalık SI, `config::format_size`).
+- **Gezinti:** Tıklama davranışı (tek/çift tık), doğal sayısal sıralama
+  (`sorting::natural_cmp`), yeni sekme konumu, başlangıçta sekmeleri geri
+  yükleme.
+- **Dosya İşlemleri & Arşiv:** Varsayılan arşiv formatı (zip/tar.gz/tar.xz/
+  7z) ve sıkıştırma seviyesi (Hızlı/Dengeli/Maksimum), kalıcı silme onayı,
+  BiDi Unicode aldatmaca uyarısı.
+- **Arama & İndeksleme:** FTS5 motoru aç/kapa, maksimum arama derinliği,
+  gizli dosyaları dahil etme, "İndeksi Baştan Oluştur" butonu.
+- **Önizleme:** Quick Look satır numaraları, maksimum metin önizleme boyutu,
+  medya otomatik başlatma, F9 yan panel önizleme.
+- **Performans & Önbellek:** Dizin akış parça boyutu, L1 thumbnail
+  kapasitesi, canlı L2 disk önbellek doluluk sayacı ve temizleme butonu,
+  reflink CoW kopyalama aç/kapa (Faz 64 entegrasyonu).
+- **Gizlilik & Güvenlik:** Sıfır telemetri rozeti, log yolu/token maskeleme,
+  son kullanılan dosya geçmişini ve yerel çökme raporlarını temizleme.
+- **Gelişmiş & Terminal:** Varsayılan terminal emülatörü seçimi (Otomatik,
+  GNOME Terminal, Alacritty, Kitty, Ghostty, WezTerm, Özel Komut), canlı Git
+  durum rozetleri aç/kapa, onay diyaloglu fabrika ayarlarına sıfırlama.
+
+### Düzeltildi
+- **`veyra-filesystem::tags::clear_unused_tags`:** Kayıtlı URI'leri yerel
+  yola çözerken `VeyraPath::from_uri` her zaman `Uri` varyantı ürettiğinden
+  hiçbir girdi asla yerel kabul edilmiyor, dolayısıyla silinmiş dosyaların
+  etiketleri hiçbir zaman temizlenmiyordu; artık `gio::File::for_uri(..)
+  .path()` ile doğrudan yerel yola çözülüyor.
+
 ## Faz 64 — Btrfs / XFS / ZFS Reflink Anında Kopyalama (Zero-Time Copy)
 
 Aynı dosya sisteminde kopyalanan dosyalar için CoW (Copy-on-Write) destekli

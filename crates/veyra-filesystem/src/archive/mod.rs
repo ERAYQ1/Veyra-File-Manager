@@ -12,7 +12,7 @@ mod format;
 mod list_preview;
 mod security;
 
-pub use compress::create_archive;
+pub use compress::{create_archive, set_compression_level};
 pub use extract::{extract_archive, ArchiveOutcome, SkipReason};
 pub use format::ArchiveFormat;
 pub use list_preview::{list_preview, ArchivePreviewEntry};

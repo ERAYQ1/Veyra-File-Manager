@@ -21,6 +21,7 @@ mod permissions;
 mod progress;
 mod queue;
 mod reflink;
+pub use reflink::set_reflink_enabled;
 mod tags;
 
 pub use advanced::{stat_advanced, AdvancedInfo};
@@ -28,8 +29,8 @@ pub use analyzer::{
     analyze_directory, AnalysisResult, SameSizeCandidateGroup, UsageEntry, UsageNode,
 };
 pub use archive::{
-    create_archive, extract_archive, list_preview, ArchiveFormat, ArchiveOutcome,
-    ArchivePreviewEntry, SkipReason,
+    create_archive, extract_archive, list_preview, set_compression_level, ArchiveFormat,
+    ArchiveOutcome, ArchivePreviewEntry, SkipReason,
 };
 pub use conflict::{suggest_name, Conflict, ConflictDecision};
 pub use dircount::{count_dir_recursive, DirCount};
@@ -52,6 +53,7 @@ pub use queue::{
     run_operation, OperationControl, OperationKind, OperationOutcome, OperationRequest,
 };
 pub use tags::{
-    clear_all_tags, get_custom_tag_name, get_paths_by_tag, get_tag, list_all_tagged, remove_tag,
-    reset_custom_tag_names, set_custom_tag_name, set_tag, tags_path, TagColor,
+    clear_all_tags, clear_unused_tags, get_custom_tag_name, get_paths_by_tag, get_tag,
+    list_all_tagged, remove_tag, reset_custom_tag_names, set_custom_tag_name, set_tag, tags_path,
+    TagColor,
 };
